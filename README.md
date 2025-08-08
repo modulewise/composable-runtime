@@ -1,7 +1,7 @@
 # Modulewise Composable Runtime
 
 A Composable Runtime for Wasm Components currently used by the
-[Modulewise Toolbelt]("https://github.com/modulewise/toolbelt").
+[Modulewise Toolbelt](https://github.com/modulewise/toolbelt).
 
 ## License
 
