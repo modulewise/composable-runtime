@@ -448,12 +448,19 @@ impl Parser {
                             }
                         }
 
-                        json!({
+                        let mut schema = json!({
                             "type": "object",
                             "properties": properties,
                             "required": required,
                             "additionalProperties": false
-                        })
+                        });
+
+                        // Add title if type has a name
+                        if let Some(type_name) = &type_def.name {
+                            schema["title"] = json!(type_name);
+                        }
+
+                        schema
                     }
                     wit_parser::TypeDefKind::Variant(variant) => {
                         let cases: Vec<serde_json::Value> = variant.cases.iter().map(|case| {
@@ -493,7 +500,7 @@ impl Parser {
                     }
                     wit_parser::TypeDefKind::Option(option_type) => {
                         json!({
-                            "anyOf": [
+                            "oneOf": [
                                 Self::wit_type_to_json_schema(*option_type, resolve),
                                 {"type": "null"}
                             ]
