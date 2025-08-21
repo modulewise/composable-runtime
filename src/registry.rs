@@ -1,9 +1,10 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::composer::Composer;
+use crate::graph::{ComponentGraph, Node};
 use crate::loader::{ComponentDefinition, RuntimeFeatureDefinition};
 use crate::wit::{ComponentMetadata, Parser};
 
@@ -34,13 +35,12 @@ pub struct RuntimeFeatureRegistry {
 #[derive(Debug, Clone)]
 pub struct ComponentRegistry {
     pub components: HashMap<String, ComponentSpec>,
-    enabling_components: HashMap<String, EnablingComponent>,
+    pub enabling_components: HashMap<String, EnablingComponent>,
 }
 
 #[derive(Debug, Clone)]
-struct EnablingComponent {
+pub struct EnablingComponent {
     pub component: ComponentSpec,
-    #[allow(dead_code)]
     pub exposed: bool,
     pub enables: String,
 }
@@ -88,15 +88,18 @@ impl RuntimeFeatureRegistry {
 }
 
 impl ComponentRegistry {
-    pub fn new(components: HashMap<String, ComponentSpec>) -> Self {
+    fn new(
+        components: HashMap<String, ComponentSpec>,
+        enabling_components: HashMap<String, EnablingComponent>,
+    ) -> Self {
         Self {
             components,
-            enabling_components: HashMap::new(),
+            enabling_components,
         }
     }
 
     pub fn empty() -> Self {
-        Self::new(HashMap::new())
+        Self::new(HashMap::new(), HashMap::new())
     }
 
     pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
@@ -165,160 +168,74 @@ impl Default for ComponentRegistry {
 
 /// Build registries from definitions
 pub async fn build_registries(
-    runtime_feature_definitions: Vec<RuntimeFeatureDefinition>,
-    component_definitions: Vec<ComponentDefinition>,
+    component_graph: &ComponentGraph,
 ) -> Result<(RuntimeFeatureRegistry, ComponentRegistry)> {
+    let mut runtime_feature_definitions = Vec::new();
+    for node in component_graph.nodes() {
+        if let Node::RuntimeFeature(def) = &node.weight {
+            runtime_feature_definitions.push(def.clone());
+        }
+    }
+
     let runtime_feature_registry =
         create_runtime_feature_registry(runtime_feature_definitions).await?;
-    let component_registry =
-        create_component_registry(component_definitions, &runtime_feature_registry).await?;
-    Ok((runtime_feature_registry, component_registry))
-}
 
-struct ComponentRegistryBuilder {
-    components: HashMap<String, ComponentSpec>,
-    enabling_components: HashMap<String, EnablingComponent>,
-    runtime_features: HashMap<String, RuntimeFeature>,
-    pending: VecDeque<ComponentDefinition>,
-}
+    let sorted_indices = component_graph.get_build_order();
 
-impl ComponentRegistryBuilder {
-    fn new() -> Self {
-        Self {
-            components: HashMap::new(),
-            enabling_components: HashMap::new(),
-            runtime_features: HashMap::new(),
-            pending: VecDeque::new(),
-        }
-    }
+    let mut exposed_components = HashMap::new();
+    let mut built_components = HashMap::new();
+    let mut enabling_components = HashMap::new();
 
-    fn add_pending_component_definition(&mut self, definition: ComponentDefinition) {
-        self.pending.push_back(definition);
-    }
+    for node_index in sorted_indices {
+        if let Node::Component(definition) = &component_graph[node_index] {
+            let temp_component_registry = ComponentRegistry {
+                components: built_components.clone(),
+                enabling_components: enabling_components.clone(),
+            };
 
-    async fn try_next(&mut self) -> Result<Option<bool>> {
-        if self.pending.is_empty() {
-            return Ok(None);
-        }
-        let definition = self.pending.pop_front().unwrap();
-
-        for dependency_name in &definition.expects {
-            if !self.runtime_features.contains_key(dependency_name)
-                && !self.enabling_components.contains_key(dependency_name)
+            match process_component(
+                node_index,
+                component_graph,
+                &temp_component_registry,
+                &runtime_feature_registry,
+            )
+            .await
             {
-                // Dependency missing - will retry
-                self.pending.push_back(definition);
-                return Ok(Some(false));
-            }
-        }
-
-        // Create temporary registries for dependency resolution
-        let temp_runtime_registry = RuntimeFeatureRegistry::new(self.runtime_features.clone());
-        let temp_component_registry = ComponentRegistry {
-            components: self.components.clone(),
-            enabling_components: self.enabling_components.clone(),
-        };
-
-        match process_component(
-            &definition,
-            &temp_runtime_registry,
-            &temp_component_registry,
-        )
-        .await
-        {
-            Ok(component_spec) => {
-                // Store only exposed components in final registry
-                if definition.exposed {
-                    self.components
-                        .insert(definition.name.clone(), component_spec.clone());
-                }
-
-                // Create enabling wrapper if this component can enable others
-                if definition.enables != "none" {
-                    let enabling_component = EnablingComponent {
-                        component: component_spec.clone(),
-                        exposed: definition.exposed,
-                        enables: definition.enables.clone(),
-                    };
-                    self.enabling_components
-                        .insert(definition.name.clone(), enabling_component);
-                }
-
-                Ok(Some(true)) // Successfully processed
-            }
-            Err(e) => {
-                if definition.exposed {
-                    // Skip exposed components on any error
-                    eprintln!(
-                        "Warning: Skipping exposed component '{}': {}",
-                        definition.name, e
-                    );
-                    Ok(Some(true)) // Continue processing (no component added to registry)
-                } else {
-                    // Fail for non-exposed components
-                    Err(anyhow::anyhow!(
-                        "Failed to resolve component '{}': {}",
-                        definition.name,
-                        e
-                    ))
-                }
-            }
-        }
-    }
-
-    async fn build_registry(mut self) -> Result<ComponentRegistry> {
-        let mut attempts = 0;
-        let max_attempts = self.pending.len() * self.pending.len(); // Prevent infinite loops
-
-        let mut consecutive_retries = 0;
-        while !self.pending.is_empty() && attempts < max_attempts {
-            match self.try_next().await? {
-                Some(true) => {
-                    // Component processed successfully (or exposed component skipped)
-                    consecutive_retries = 0;
-                }
-                Some(false) => {
-                    // Component retried due to missing dependencies
-                    consecutive_retries += 1;
-                    if consecutive_retries >= self.pending.len() {
-                        let (exposed_failures, unexposed_failures): (Vec<_>, Vec<_>) =
-                            self.pending.iter().partition(|def| def.exposed);
-
-                        // Skip exposed components with warnings
-                        for definition in &exposed_failures {
-                            eprintln!(
-                                "Warning: Skipping exposed component '{}' due to missing dependencies",
-                                definition.name
-                            );
-                        }
-
-                        // Fail if any non-exposed components cannot be resolved
-                        if !unexposed_failures.is_empty() {
-                            let failed_names: Vec<String> = unexposed_failures
-                                .iter()
-                                .map(|definition| format!("'{}'", definition.name))
-                                .collect();
-
-                            return Err(anyhow::anyhow!(
-                                "Cannot resolve component dependencies: {}",
-                                failed_names.join(", ")
-                            ));
-                        }
-
-                        // All remaining failures were exposed components - continue
-                        break;
+                Ok(component_spec) => {
+                    built_components.insert(definition.name.clone(), component_spec.clone());
+                    if definition.exposed {
+                        exposed_components.insert(definition.name.clone(), component_spec.clone());
+                    }
+                    if definition.enables != "none" {
+                        let enabling = EnablingComponent {
+                            component: component_spec,
+                            exposed: definition.exposed,
+                            enables: definition.enables.clone(),
+                        };
+                        enabling_components.insert(definition.name.clone(), enabling);
                     }
                 }
-                None => {
-                    // Queue is empty
-                    break;
+                Err(e) => {
+                    if definition.exposed {
+                        eprintln!(
+                            "Warning: Skipping exposed component '{}': {}",
+                            definition.name, e
+                        );
+                    } else {
+                        return Err(e);
+                    }
                 }
             }
-            attempts += 1;
         }
-
-        Ok(ComponentRegistry::new(self.components))
     }
+
+    Ok((
+        runtime_feature_registry,
+        ComponentRegistry {
+            components: exposed_components,
+            enabling_components,
+        },
+    ))
 }
 
 async fn create_runtime_feature_registry(
@@ -337,23 +254,6 @@ async fn create_runtime_feature_registry(
     }
 
     Ok(RuntimeFeatureRegistry::new(runtime_features))
-}
-
-async fn create_component_registry(
-    component_definitions: Vec<ComponentDefinition>,
-    runtime_feature_registry: &RuntimeFeatureRegistry,
-) -> Result<ComponentRegistry> {
-    let mut builder = ComponentRegistryBuilder::new();
-
-    // Add runtime features for dependency resolution
-    builder.runtime_features = runtime_feature_registry.runtime_features.clone();
-
-    // Add all component definitions to pending queue
-    for def in component_definitions {
-        builder.add_pending_component_definition(def);
-    }
-
-    builder.build_registry().await
 }
 
 fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
@@ -404,10 +304,19 @@ fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
 }
 
 async fn process_component(
-    definition: &ComponentDefinition,
-    runtime_feature_registry: &RuntimeFeatureRegistry,
+    node_index: petgraph::graph::NodeIndex,
+    component_graph: &ComponentGraph,
     component_registry: &ComponentRegistry,
+    runtime_feature_registry: &RuntimeFeatureRegistry,
 ) -> Result<ComponentSpec> {
+    let definition = if let Node::Component(def) = &component_graph[node_index] {
+        def
+    } else {
+        return Err(anyhow::anyhow!(
+            "Internal error: process_component called on a non-component node"
+        ));
+    };
+
     let mut bytes = read_bytes(&definition.uri).await?;
 
     let (metadata, mut imports, exports, functions) = Parser::parse(&bytes, definition.exposed)
@@ -444,52 +353,52 @@ async fn process_component(
         );
     }
 
-    let mut remaining_expects = Vec::new();
     let mut all_runtime_features = HashSet::new();
 
-    for dependency_name in &definition.expects {
-        if let Some(component_spec) = component_registry.get_enabled_component_dependency(
-            definition,
-            &metadata,
-            dependency_name,
-        ) {
-            bytes = Composer::compose_components(&bytes, &component_spec.bytes).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to compose component '{}' with dependency '{}': {}",
-                    definition.name,
-                    dependency_name,
-                    e
-                )
-            })?;
+    let dependencies = component_graph.get_dependencies(node_index);
+    for dependency_node_index in dependencies {
+        let dependency_node = &component_graph[dependency_node_index];
+        match dependency_node {
+            Node::Component(dependency_def) => {
+                if let Some(component_spec) = component_registry.get_enabled_component_dependency(
+                    definition,
+                    &metadata,
+                    &dependency_def.name,
+                ) {
+                    bytes = Composer::compose_components(&bytes, &component_spec.bytes)?;
+                    println!(
+                        "Composed component '{}' with dependency '{}'",
+                        definition.name, dependency_def.name
+                    );
 
-            println!(
-                "Composed component '{}' with dependency '{}'",
-                definition.name, dependency_name
-            );
-
-            // Track satisfied imports from this dependency
-            for export in &component_spec.exports {
-                imports.retain(|import| import != export);
+                    for export in &component_spec.exports {
+                        imports.retain(|import| import != export);
+                    }
+                    all_runtime_features.extend(component_spec.runtime_features.iter().cloned());
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Component '{}' requested dependency '{}', but access is not enabled",
+                        definition.name,
+                        dependency_def.name
+                    ));
+                }
             }
-
-            // Merge runtime expects from composed dependency component
-            all_runtime_features.extend(component_spec.runtime_features.iter().cloned());
-        } else if let Some(_runtime_feature) =
-            runtime_feature_registry.get_enabled_runtime_feature(definition, dependency_name)
-        {
-            // Runtime feature dependency - keep for later context/linker setup
-            remaining_expects.push(dependency_name.clone());
-        } else {
-            return Err(anyhow::anyhow!(
-                "Component '{}' requested unavailable dependency '{}'",
-                definition.name,
-                dependency_name
-            ));
+            Node::RuntimeFeature(feature_def) => {
+                if runtime_feature_registry
+                    .get_enabled_runtime_feature(definition, &feature_def.name)
+                    .is_some()
+                {
+                    all_runtime_features.insert(feature_def.name.clone());
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Component '{}' requested runtime feature '{}', but access is not enabled",
+                        definition.name,
+                        feature_def.name
+                    ));
+                }
+            }
         }
     }
-
-    // Merge direct runtime expects with composed ones
-    all_runtime_features.extend(remaining_expects);
 
     let runtime_interfaces: std::collections::HashSet<String> = all_runtime_features
         .iter()

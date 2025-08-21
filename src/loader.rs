@@ -4,19 +4,25 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Serialize)]
+use crate::graph::ComponentGraph;
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DefinitionBase {
     pub uri: String,
     #[serde(default = "default_enables")]
     pub enables: String, // "none"|"package"|"namespace"|"unexposed"|"exposed"|"any"
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ComponentDefinitionBase {
     #[serde(flatten)]
     base: DefinitionBase,
     #[serde(default)]
     pub expects: Vec<String>, // Named components this expects to be available
+    #[serde(default)]
+    pub intercepts: Vec<String>, // Components this intercepts
+    #[serde(default)]
+    pub precedence: i32, // Lower values have higher precedence
     #[serde(default)]
     pub exposed: bool,
     pub config: Option<HashMap<String, serde_json::Value>>,
@@ -29,11 +35,11 @@ impl std::ops::Deref for ComponentDefinitionBase {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct RuntimeFeatureDefinition {
     pub name: String,
     #[serde(flatten)]
-    base: DefinitionBase,
+    pub base: DefinitionBase,
 }
 
 impl std::ops::Deref for RuntimeFeatureDefinition {
@@ -43,7 +49,17 @@ impl std::ops::Deref for RuntimeFeatureDefinition {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+impl std::fmt::Debug for RuntimeFeatureDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeFeatureDefinition")
+            .field("name", &self.name)
+            .field("uri", &self.uri)
+            .field("enables", &self.enables)
+            .finish()
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
 pub struct ComponentDefinition {
     pub name: String,
     #[serde(flatten)]
@@ -57,14 +73,37 @@ impl std::ops::Deref for ComponentDefinition {
     }
 }
 
+impl std::fmt::Debug for ComponentDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComponentDefinition")
+            .field("name", &self.name)
+            .field("uri", &self.uri)
+            .field("enables", &self.enables)
+            .field("expects", &self.expects)
+            .field("intercepts", &self.intercepts)
+            .field("precedence", &self.precedence)
+            .field("exposed", &self.exposed)
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 impl AsRef<DefinitionBase> for ComponentDefinition {
     fn as_ref(&self) -> &DefinitionBase {
         &self.base.base
     }
 }
 
-/// Load component definitions from configuration files
+/// Load component definitions from configuration files and build the dependency graph
 pub fn load_definitions(
+    definition_files: &[PathBuf], // .toml and .wasm files
+) -> Result<ComponentGraph> {
+    let (runtime_feature_definitions, component_definitions) =
+        parse_definition_files(definition_files)?;
+    ComponentGraph::build(&component_definitions, &runtime_feature_definitions)
+}
+
+fn parse_definition_files(
     definition_files: &[PathBuf], // .toml and .wasm files
 ) -> Result<(Vec<RuntimeFeatureDefinition>, Vec<ComponentDefinition>)> {
     let mut toml_files = Vec::new();
@@ -281,6 +320,8 @@ fn create_implicit_component_definitions(
                     enables: default_enables(),
                 },
                 expects: Vec::new(),
+                intercepts: Vec::new(),
+                precedence: 0,
                 exposed: true,
                 config: None,
             },

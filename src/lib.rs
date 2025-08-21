@@ -8,8 +8,9 @@ pub use registry::{ComponentRegistry, ComponentSpec, RuntimeFeatureRegistry, bui
 pub use runtime::Invoker;
 pub use wit::Function;
 
-mod composer;
-mod loader;
-mod registry;
-mod runtime;
-mod wit;
+pub mod composer;
+pub mod graph;
+pub mod loader;
+pub mod registry;
+pub mod runtime;
+pub mod wit;

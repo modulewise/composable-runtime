@@ -16,28 +16,27 @@ impl Composer {
         Self::compose_components(component_bytes, &config_component_bytes)
     }
 
-    /// Compose two components: plug_bytes gets plugged into socket_bytes
+    /// Compose a socket component with a plug component
     pub fn compose_components(socket_bytes: &[u8], plug_bytes: &[u8]) -> Result<Vec<u8>> {
         let mut graph = CompositionGraph::new();
 
-        let socket_package = Package::from_bytes("socket", None, socket_bytes, graph.types_mut())?;
-        let plug_package = Package::from_bytes("plug", None, plug_bytes, graph.types_mut())?;
+        let socket_pkg =
+            Package::from_bytes("socket", None, socket_bytes.to_vec(), graph.types_mut())?;
+        let plug_pkg = Package::from_bytes("plug", None, plug_bytes.to_vec(), graph.types_mut())?;
 
-        let socket_package_id = graph.register_package(socket_package)?;
-        let plug_package_id = graph.register_package(plug_package)?;
+        let socket_id = graph.register_package(socket_pkg)?;
+        let plug_id = graph.register_package(plug_pkg)?;
 
-        wac_graph::plug(&mut graph, vec![plug_package_id], socket_package_id)?;
+        wac_graph::plug(&mut graph, vec![plug_id], socket_id)?;
 
         let encode_options = EncodeOptions {
             define_components: true,
             ..Default::default()
         };
 
-        let composed_bytes = graph
+        graph
             .encode(encode_options)
-            .map_err(|e| anyhow::anyhow!("Failed to encode composition: {}", e))?;
-
-        Ok(composed_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to encode composition: {}", e))
     }
 }
 
