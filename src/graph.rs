@@ -134,17 +134,22 @@ impl ComponentGraph {
             let mut interceptors: Vec<_> = component_definitions
                 .iter()
                 .filter(|def| def.intercepts.contains(provider_name))
-                .filter(|def| is_interceptor_enabled(def, consumer_def))
+                .filter(|def| {
+                    let enabled = is_interceptor_enabled(def, consumer_def);
+                    if !enabled && def.name != consumer_def.name {
+                        println!(
+                            "Interceptor '{}' skipped for consumer '{}' (enables='{}', consumer exposed={})",
+                            def.name, consumer_def.name, def.enables, consumer_def.exposed
+                        );
+                    }
+                    enabled
+                })
                 .collect();
 
             if !interceptors.is_empty() {
-                // Check if the consumer of this edge is one of the interceptors.
-                // If so, this is the interceptor's own dependency, so we shouldn't redirect it.
-                let consumer_name = match &graph[target_node_index] {
-                    Node::Component(def) => &def.name,
-                    Node::RuntimeFeature(def) => &def.name,
-                };
-                if interceptors.iter().any(|i| &i.name == consumer_name) {
+                // Don't redirect dependencies for consumers that are interceptors.
+                // Interceptor routing is configured when processing non-interceptor consumers.
+                if interceptors.iter().any(|i| &i.name == &consumer_def.name) {
                     continue;
                 }
 
@@ -158,6 +163,7 @@ impl ComponentGraph {
                     }
                 }
 
+                // Original edge will be replaced by interceptor routing.
                 edges_to_remove.push(edge_ref.id());
 
                 let mut current_provider_index = source_node_index;

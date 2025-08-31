@@ -171,15 +171,18 @@ async fn test_multiple_interceptors() {
     let handler_index = graph.get_node_index("handler").unwrap();
     let dependencies: Vec<_> = graph.get_dependencies(handler_index).collect();
 
-    assert_eq!(dependencies.len(), 1, "Handler should have one dependency");
+    assert_eq!(
+        dependencies.len(),
+        1,
+        "The handler should have one dependency"
+    );
 
-    let provider_index = dependencies[0];
-    let provider_node = &graph[provider_index];
-    let provider_name = if let composable_runtime::graph::Node::Component(def) = provider_node {
-        &def.name
-    } else {
-        panic!("Dependency provider was not a component");
-    };
+    let provider_name =
+        if let composable_runtime::graph::Node::Component(def) = &graph[dependencies[0]] {
+            &def.name
+        } else {
+            unreachable!()
+        };
 
     // Assert the lower precedence (higher number) interceptor is on the "outside"
     assert_eq!(
@@ -187,6 +190,40 @@ async fn test_multiple_interceptors() {
         "Handler should be connected to 'outer-interceptor', but was connected to '{}'",
         provider_name
     );
+
+    // Assert outer-interceptor is connected to inner-interceptor
+    let outer_interceptor_index = graph.get_node_index("outer-interceptor").unwrap();
+    let outer_dependencies: Vec<_> = graph.get_dependencies(outer_interceptor_index).collect();
+    assert_eq!(
+        outer_dependencies.len(),
+        1,
+        "The outer-interceptor should have one dependency"
+    );
+
+    let outer_provider_name =
+        if let composable_runtime::graph::Node::Component(def) = &graph[outer_dependencies[0]] {
+            &def.name
+        } else {
+            unreachable!()
+        };
+    assert_eq!(outer_provider_name, "inner-interceptor");
+
+    // Assert inner-interceptor is connected to client
+    let inner_interceptor_index = graph.get_node_index("inner-interceptor").unwrap();
+    let inner_dependencies: Vec<_> = graph.get_dependencies(inner_interceptor_index).collect();
+    assert_eq!(
+        inner_dependencies.len(),
+        1,
+        "The inner-interceptor should have one dependency"
+    );
+
+    let inner_provider_name =
+        if let composable_runtime::graph::Node::Component(def) = &graph[inner_dependencies[0]] {
+            &def.name
+        } else {
+            unreachable!()
+        };
+    assert_eq!(inner_provider_name, "client");
 
     let (_runtime_feature_registry, component_registry) =
         common::build_registries_and_assert_ok(&graph).await;

@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
         println!("--------------------------------------------");
     } else {
         println!("Building registries...");
-        let (_runtime_feature_registry, component_registry) = build_registries(&graph).await?;
+        let (runtime_feature_registry, component_registry) = build_registries(&graph).await?;
         println!(
             "Successfully built registry with {} exposed components.",
             component_registry.get_components().count()
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
                         line,
                         &exposed_functions,
                         &invoker,
-                        &_runtime_feature_registry,
+                        &runtime_feature_registry,
                     )
                     .await
                     .is_err()
@@ -197,7 +197,7 @@ async fn handle_command(
                             function
                                 .result()
                                 .map(|s| s.to_string())
-                                .unwrap_or_else(|| "void".to_string())
+                                .unwrap_or_else(|| "null".to_string())
                         );
                     } else {
                         println!("Error: Target '{}' not found.", target);

@@ -26,7 +26,7 @@ async fn config_value() {
     );
     let toml_file = common::create_toml_test_file(&toml_content);
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
-    let (_runtime_features, component_registry) =
+    let (_runtime_feature_registry, component_registry) =
         common::build_registries_and_assert_ok(&graph).await;
 
     assert_eq!(component_registry.get_components().count(), 1);
