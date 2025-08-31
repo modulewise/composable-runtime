@@ -149,7 +149,7 @@ impl ComponentGraph {
             if !interceptors.is_empty() {
                 // Don't redirect dependencies for consumers that are interceptors.
                 // Interceptor routing is configured when processing non-interceptor consumers.
-                if interceptors.iter().any(|i| &i.name == &consumer_def.name) {
+                if interceptors.iter().any(|i| i.name == consumer_def.name) {
                     continue;
                 }
 

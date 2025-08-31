@@ -115,10 +115,10 @@ async fn handle_command(
     invoker: &Invoker,
     runtime_feature_registry: &RuntimeFeatureRegistry,
 ) -> Result<(), ()> {
-    let parts: Vec<&str> = line.trim().split_whitespace().collect();
+    let parts = parse_quoted_args(&line);
 
     if let Some(command_str) = parts.first() {
-        let command = match *command_str {
+        let command = match command_str.as_str() {
             "list" => Some(Commands::List),
             "describe" => parts.get(1).map_or_else(
                 || {
@@ -208,10 +208,21 @@ async fn handle_command(
                         let params = function.params();
                         let mut final_args: Vec<serde_json::Value> = Vec::new();
 
+                        if args.len() > params.len() {
+                            println!(
+                                "Error: Too many arguments. Expected at most {}, got {}",
+                                params.len(),
+                                args.len()
+                            );
+                            return Ok(());
+                        }
+
                         for (i, arg_str) in args.iter().enumerate() {
+                            let trimmed = arg_str.trim();
+
                             // First, parse as any valid JSON value, falling back to a string.
-                            let mut json_val = serde_json::from_str(arg_str)
-                                .unwrap_or_else(|_| serde_json::Value::String(arg_str.clone()));
+                            let mut json_val = serde_json::from_str(trimmed)
+                                .unwrap_or_else(|_| serde_json::Value::String(trimmed.to_string()));
 
                             // Proactively convert numbers to strings if the parameter's schema expects a string.
                             if let Some(param) = params.get(i) {
@@ -224,6 +235,18 @@ async fn handle_command(
                                 }
                             }
                             final_args.push(json_val);
+                        }
+
+                        // Handle missing parameters: pad with nulls for optional, error for required
+                        for i in args.len()..params.len() {
+                            if let Some(param) = params.get(i) {
+                                if param.is_optional {
+                                    final_args.push(serde_json::Value::Null);
+                                } else {
+                                    println!("Error: Missing required parameter: {}", param.name);
+                                    return Ok(());
+                                }
+                            }
                         }
 
                         println!("Invoking {}...", target);
@@ -250,4 +273,36 @@ async fn handle_command(
         }
     }
     Ok(())
+}
+
+fn parse_quoted_args(line: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote_char: Option<char> = None;
+
+    for ch in line.trim().chars() {
+        match (ch, quote_char) {
+            ('"', None) | ('\'', None) => {
+                // Starting a quoted string
+                quote_char = Some(ch);
+            }
+            (ch, Some(open_char)) if ch == open_char => {
+                // Closing a quoted string
+                quote_char = None;
+            }
+            (' ', None) => {
+                if !current.is_empty() {
+                    parts.push(current);
+                    current = String::new();
+                }
+            }
+            (ch, _) => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
 }
