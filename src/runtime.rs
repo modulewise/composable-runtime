@@ -3,11 +3,9 @@ use wasmtime::{
     Cache, Config, Engine, Store,
     component::{Component, Linker, Type, Val},
 };
-use wasmtime_wasi::{
-    ResourceTable,
-    p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView},
-};
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
+use wasmtime_wasi_io::IoView;
 
 use crate::registry::RuntimeFeatureRegistry;
 use crate::wit::Function;
@@ -25,8 +23,11 @@ impl IoView for ComponentState {
 }
 
 impl WasiView for ComponentState {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi_ctx
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi_ctx,
+            table: &mut self.resource_table,
+        }
     }
 }
 
@@ -35,6 +36,10 @@ impl WasiHttpView for ComponentState {
         self.wasi_http_ctx
             .as_mut()
             .expect("Component requires 'http' feature, so HTTP context should be available")
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.resource_table
     }
 }
 
@@ -522,6 +527,27 @@ fn val_to_json(val: &Val) -> serde_json::Value {
             unreachable!(
                 "Resource types should be caught by validation: {:?}",
                 resource_any
+            )
+        }
+
+        Val::Future(future_any) => {
+            unreachable!(
+                "Future types should be caught by validation: {:?}",
+                future_any
+            )
+        }
+
+        Val::Stream(stream_any) => {
+            unreachable!(
+                "Stream types should be caught by validation: {:?}",
+                stream_any
+            )
+        }
+
+        Val::ErrorContext(error_context_any) => {
+            unreachable!(
+                "ErrorContext types should be caught by validation: {:?}",
+                error_context_any
             )
         }
     }

@@ -1,23 +1,40 @@
 [package]
 name = "composable-runtime"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Modulewise Composable Runtime"
 
 [dependencies]
 anyhow = "1"
-oci-client = "0.14.0"
+clap = { version = "4.5", features = ["derive"] }
+oci-client = "0.15"
+petgraph = "0.8"
+rustyline = "17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-static-config = "0.1.0"
+static-config = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 toml = "0.9"
-wac-graph = "0.7.0"
-wac-types = "0.7.0"
-wasm-pkg-client = "0.11.0"
-wasmtime = "35"
-wasmtime-wasi = "35"
-wasmtime-wasi-config = "35"
-wasmtime-wasi-http = "35"
-wasmtime-wasi-io = "35"
-wit-component = "0.236"
-wit-parser = "0.236"
+wac-graph = "0.8"
+wac-types = "0.8"
+wasm-pkg-client = "0.12"
+wasmtime = "36"
+wasmtime-wasi = "36"
+wasmtime-wasi-config = "36"
+wasmtime-wasi-http = "36"
+wasmtime-wasi-io = "36"
+wit-component = "0.238"
+wit-parser = "0.238"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wat = "1.236.0"
+
+[features]
+cli = ["dep:tokio"]
+
+[[bin]]
+name = "composable-runtime"
+path = "src/main.rs"
+required-features = ["cli"]
