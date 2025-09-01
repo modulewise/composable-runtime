@@ -132,6 +132,90 @@ async fn test_interceptor_with_enables_scope_mismatch() {
 }
 
 #[tokio::test]
+async fn test_selective_interception_for_exposed_and_unexposed() {
+    let client_wasm = common::client_wasm();
+    let interceptor_wasm = common::interceptor_wasm();
+    let handler_wasm = common::handler_wasm();
+
+    let toml_content = format!(
+        r#"
+        [client]
+        uri = "{}"
+        enables = "unexposed"
+
+        [intercepted-client]
+        uri = "{}"
+        intercepts = ["client"]
+        enables = "exposed"
+
+        [exposed-handler]
+        uri = "{}"
+        expects = ["client"]
+        exposed = true
+
+        [unexposed-handler]
+        uri = "{}"
+        expects = ["client"]
+        exposed = false
+        "#,
+        client_wasm.display(),
+        interceptor_wasm.display(),
+        handler_wasm.display(),
+        handler_wasm.display()
+    );
+
+    let toml_file = common::create_toml_test_file(&toml_content);
+    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
+
+    // Verify exposed-handler gets the interceptor
+    let exposed_index = graph.get_node_index("exposed-handler").unwrap();
+    let exposed_dependencies: Vec<_> = graph.get_dependencies(exposed_index).collect();
+    assert_eq!(
+        exposed_dependencies.len(),
+        1,
+        "exposed-handler should have one dependency"
+    );
+
+    let exposed_provider_name =
+        if let composable_runtime::graph::Node::Component(def) = &graph[exposed_dependencies[0]] {
+            &def.name
+        } else {
+            panic!("exposed-handler dependency provider was not a component");
+        };
+    assert_eq!(
+        exposed_provider_name, "intercepted-client",
+        "exposed-handler should be connected to interceptor, but was connected to '{}'",
+        exposed_provider_name
+    );
+
+    // Verify unexposed-handler gets the direct client
+    let unexposed_index = graph.get_node_index("unexposed-handler").unwrap();
+    let unexposed_dependencies: Vec<_> = graph.get_dependencies(unexposed_index).collect();
+    assert_eq!(
+        unexposed_dependencies.len(),
+        1,
+        "unexposed-handler should have one dependency"
+    );
+
+    let unexposed_provider_name = if let composable_runtime::graph::Node::Component(def) =
+        &graph[unexposed_dependencies[0]]
+    {
+        &def.name
+    } else {
+        panic!("unexposed-handler dependency provider was not a component");
+    };
+    assert_eq!(
+        unexposed_provider_name, "client",
+        "unexposed-handler should be connected directly to client, but was connected to '{}'",
+        unexposed_provider_name
+    );
+
+    let (_runtime_feature_registry, component_registry) =
+        common::build_registries_and_assert_ok(&graph).await;
+    assert_eq!(component_registry.get_components().count(), 1); // Only exposed-handler is exposed
+}
+
+#[tokio::test]
 async fn test_multiple_interceptors() {
     let client_wasm = common::client_wasm();
     let interceptor_wasm = common::interceptor_wasm();
