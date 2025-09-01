@@ -1,23 +1,23 @@
 [package]
 name = "composable-runtime"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Modulewise Composable Runtime"
 
 [dependencies]
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
-oci-client = "0.14.0"
+oci-client = "0.14"
 petgraph = "0.8"
-rustyline = "17.0.0"
+rustyline = "17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-static-config = "0.1.0"
+static-config = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 toml = "0.9"
-wac-graph = "0.7.0"
-wac-types = "0.7.0"
-wasm-pkg-client = "0.11.0"
+wac-graph = "0.7"
+wac-types = "0.7"
+wasm-pkg-client = "0.11"
 wasmtime = "35"
 wasmtime-wasi = "35"
 wasmtime-wasi-config = "35"
