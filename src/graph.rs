@@ -201,6 +201,14 @@ impl ComponentGraph {
         Ok(Self { graph, node_map })
     }
 
+    /// Write the graph to a DOT file
+    pub fn write_dot_file<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
+        let dot_content = self.dot();
+        std::fs::write(path, dot_content)
+            .map_err(|e| anyhow::anyhow!("Failed to write DOT file: {}", e))?;
+        Ok(())
+    }
+
     pub fn nodes(&self) -> impl Iterator<Item = &petgraph::graph::Node<Node>> {
         self.graph.raw_nodes().iter()
     }
@@ -216,6 +224,62 @@ impl ComponentGraph {
     pub fn get_dependencies(&self, index: NodeIndex) -> petgraph::graph::Neighbors<Edge> {
         self.graph
             .neighbors_directed(index, petgraph::Direction::Incoming)
+    }
+
+    fn dot(&self) -> String {
+        let mut output = String::from("digraph ComponentGraph {\n");
+        output.push_str("  rankdir=BT;\n");
+        output.push_str("  node [fontname=\"Arial\", fontsize=10];\n");
+        output.push_str("  edge [fontname=\"Arial\", fontsize=9];\n");
+
+        for node_index in self.graph.node_indices() {
+            let node = &self.graph[node_index];
+            let node_attrs = match node {
+                Node::Component(def) => {
+                    let shape = if def.exposed { "doubleoctagon" } else { "box" };
+                    let color = if def.exposed {
+                        "lightgreen"
+                    } else if def.intercepts.is_empty() {
+                        "lightblue"
+                    } else {
+                        "yellow"
+                    };
+                    let label = if def.intercepts.is_empty() {
+                        def.name.to_string()
+                    } else {
+                        format!("{}\\n(intercepts: {})", def.name, def.intercepts.join(", "))
+                    };
+                    format!(
+                        "[label=\"{label}\", shape={shape}, fillcolor={color}, style=\"rounded,filled\"]"
+                    )
+                }
+                Node::RuntimeFeature(def) => {
+                    format!(
+                        "[label=\"{}\", shape=ellipse, fillcolor=orange, style=\"rounded,filled\"]",
+                        def.name
+                    )
+                }
+            };
+            output.push_str(&format!("  {} {};\n", node_index.index(), node_attrs));
+        }
+
+        for edge_ref in self.graph.edge_references() {
+            let edge_attrs = match edge_ref.weight() {
+                Edge::Dependency => "[color=blue, style=solid]".to_string(),
+                Edge::Interceptor(precedence) => {
+                    format!("[color=red, style=dashed, label=\"precedence: {precedence}\"]")
+                }
+            };
+            output.push_str(&format!(
+                "  {} -> {} {};\n",
+                edge_ref.source().index(),
+                edge_ref.target().index(),
+                edge_attrs
+            ));
+        }
+
+        output.push_str("}\n");
+        output
     }
 }
 

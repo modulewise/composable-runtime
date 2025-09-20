@@ -17,6 +17,10 @@ struct Cli {
     #[arg(long)]
     dry_run: bool,
 
+    /// Export component graph to DOT file (graph.dot)
+    #[arg(long)]
+    export: bool,
+
     /// Component definition files (.toml) and standalone .wasm files
     #[arg(required = true)]
     definitions: Vec<PathBuf>,
@@ -52,6 +56,10 @@ async fn main() -> Result<()> {
         println!("--- Component Dependency Graph (Dry Run) ---");
         println!("{:#?}", graph);
         println!("--------------------------------------------");
+    } else if cli.export {
+        let filename = "graph.dot";
+        graph.write_dot_file(filename)?;
+        println!("Graph exported to {}", filename);
     } else {
         println!("Building registries...");
         let (runtime_feature_registry, component_registry) = build_registries(&graph).await?;
