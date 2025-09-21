@@ -1,7 +1,8 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use composable_runtime::{
-    ComponentSpec, Function, Invoker, RuntimeFeatureRegistry, build_registries, load_definitions,
+    ComponentSpec, Function, Invoker, RuntimeFeatureRegistry, build_registries,
+    graph::ComponentGraph, load_definitions,
 };
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
@@ -13,17 +14,28 @@ use std::path::PathBuf;
 #[command(name = "composable-runtime")]
 #[command(about = "A runtime for Wasm Components")]
 struct Cli {
-    /// Perform a dry run, printing the dependency graph without building the registry
-    #[arg(long)]
-    dry_run: bool,
-
-    /// Export component graph to DOT file (graph.dot)
-    #[arg(long)]
-    export: bool,
+    #[command(flatten)]
+    mode: ModeArgs,
 
     /// Component definition files (.toml) and standalone .wasm files
     #[arg(required = true)]
     definitions: Vec<PathBuf>,
+}
+
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct ModeArgs {
+    /// Perform a dry run, printing the dependency graph without building the registry
+    #[arg(long, short)]
+    dry_run: bool,
+
+    /// Export component graph to DOT file (graph.dot)
+    #[arg(long, short)]
+    export: bool,
+
+    /// Start interactive session for invoking component functions
+    #[arg(long, short)]
+    interactive: bool,
 }
 
 #[derive(Subcommand)]
@@ -52,64 +64,70 @@ async fn main() -> Result<()> {
     println!("Loading definitions from: {:?}...", cli.definitions);
     let graph = load_definitions(&cli.definitions)?;
 
-    if cli.dry_run {
+    if cli.mode.dry_run {
         println!("--- Component Dependency Graph (Dry Run) ---");
         println!("{:#?}", graph);
         println!("--------------------------------------------");
-    } else if cli.export {
+    } else if cli.mode.export {
         let filename = "graph.dot";
         graph.write_dot_file(filename)?;
         println!("Graph exported to {}", filename);
-    } else {
-        println!("Building registries...");
-        let (runtime_feature_registry, component_registry) = build_registries(&graph).await?;
-        println!(
-            "Successfully built registry with {} exposed components.",
-            component_registry.get_components().count()
-        );
+    } else if cli.mode.interactive {
+        run_interactive_session(&graph).await?;
+    }
 
-        let invoker = Invoker::new()?;
-        let mut exposed_functions: HashMap<String, (&Function, &ComponentSpec)> = HashMap::new();
-        for spec in component_registry.get_components() {
-            if let Some(functions) = &spec.functions {
-                for function in functions.values() {
-                    let target = format!("{}.{}", spec.name, function.function_name());
-                    exposed_functions.insert(target, (function, spec));
-                }
+    Ok(())
+}
+
+async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
+    println!("Building registries...");
+    let (runtime_feature_registry, component_registry) = build_registries(graph).await?;
+    println!(
+        "Successfully built registry with {} exposed components.",
+        component_registry.get_components().count()
+    );
+
+    let invoker = Invoker::new()?;
+    let mut exposed_functions: HashMap<String, (&Function, &ComponentSpec)> = HashMap::new();
+    for spec in component_registry.get_components() {
+        if let Some(functions) = &spec.functions {
+            for function in functions.values() {
+                let target = format!("{}.{}", spec.name, function.function_name());
+                exposed_functions.insert(target, (function, spec));
             }
         }
+    }
 
-        println!("Starting interactive session. Type 'help' for commands.");
-        let mut rl = Editor::<(), DefaultHistory>::new()?;
-        loop {
-            let readline = rl.readline("> ");
-            match readline {
-                Ok(line) => {
-                    let _ = rl.add_history_entry(line.as_str());
-                    if handle_command(
-                        line,
-                        &exposed_functions,
-                        &invoker,
-                        &runtime_feature_registry,
-                    )
-                    .await
-                    .is_err()
-                    {
-                        break;
-                    }
-                }
-                Err(ReadlineError::Interrupted) => {
-                    println!("CTRL-C");
+    println!("Starting interactive session. Type 'help' for commands.");
+    let mut rl = Editor::<(), DefaultHistory>::new()?;
+    loop {
+        let readline = rl.readline("> ");
+        match readline {
+            Ok(line) => {
+                let _ = rl.add_history_entry(line.as_str());
+                if handle_command(
+                    line,
+                    &exposed_functions,
+                    &invoker,
+                    &runtime_feature_registry,
+                )
+                .await
+                .is_err()
+                {
                     break;
                 }
-                Err(ReadlineError::Eof) => {
-                    println!("CTRL-D");
-                    break;
-                }
-                Err(err) => {
-                    println!("Error: {:?}", err);
-                    break;
-                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
             }
         }
     }
