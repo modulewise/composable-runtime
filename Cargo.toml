@@ -18,18 +18,18 @@ toml = "0.9"
 wac-graph = "0.8"
 wac-types = "0.8"
 wasm-pkg-client = "0.12"
-wasmtime = "36"
-wasmtime-wasi = "36"
-wasmtime-wasi-config = "36"
-wasmtime-wasi-http = "36"
-wasmtime-wasi-io = "36"
-wit-component = "0.238"
-wit-parser = "0.238"
+wasmtime = "37"
+wasmtime-wasi = "37"
+wasmtime-wasi-config = "37"
+wasmtime-wasi-http = "37"
+wasmtime-wasi-io = "37"
+wit-component = "0.239"
+wit-parser = "0.239"
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-wat = "1.236.0"
+wat = "1.239.0"
 
 [features]
 default = ["cli"]

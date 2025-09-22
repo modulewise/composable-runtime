@@ -259,48 +259,95 @@ async fn create_runtime_feature_registry(
 fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
     match uri {
         "wasmtime:http" => vec![
-            "wasi:http/outgoing-handler@0.2.3".to_string(),
-            "wasi:http/types@0.2.3".to_string(),
+            "wasi:http/outgoing-handler@0.2.6".to_string(),
+            "wasi:http/types@0.2.6".to_string(),
         ],
         "wasmtime:io" => vec![
-            "wasi:io/error@0.2.3".to_string(),
-            "wasi:io/poll@0.2.3".to_string(),
-            "wasi:io/streams@0.2.3".to_string(),
+            "wasi:io/error@0.2.6".to_string(),
+            "wasi:io/poll@0.2.6".to_string(),
+            "wasi:io/streams@0.2.6".to_string(),
         ],
         "wasmtime:inherit-network" => vec![
-            "wasi:sockets/tcp@0.2.3".to_string(),
-            "wasi:sockets/udp@0.2.3".to_string(),
-            "wasi:sockets/network@0.2.3".to_string(),
-            "wasi:sockets/instance-network@0.2.3".to_string(),
+            "wasi:sockets/tcp@0.2.6".to_string(),
+            "wasi:sockets/udp@0.2.6".to_string(),
+            "wasi:sockets/network@0.2.6".to_string(),
+            "wasi:sockets/instance-network@0.2.6".to_string(),
         ],
-        "wasmtime:allow-ip-name-lookup" => vec!["wasi:sockets/ip-name-lookup@0.2.3".to_string()],
+        "wasmtime:allow-ip-name-lookup" => vec!["wasi:sockets/ip-name-lookup@0.2.6".to_string()],
         "wasmtime:wasip2" => vec![
-            "wasi:cli/environment@0.2.3".to_string(),
-            "wasi:cli/exit@0.2.3".to_string(),
-            "wasi:cli/stderr@0.2.3".to_string(),
-            "wasi:cli/stdin@0.2.3".to_string(),
-            "wasi:cli/stdout@0.2.3".to_string(),
-            "wasi:clocks/monotonic-clock@0.2.3".to_string(),
-            "wasi:clocks/wall-clock@0.2.3".to_string(),
-            "wasi:filesystem/preopens@0.2.3".to_string(),
-            "wasi:filesystem/types@0.2.3".to_string(),
-            "wasi:io/error@0.2.3".to_string(),
-            "wasi:io/poll@0.2.3".to_string(),
-            "wasi:io/streams@0.2.3".to_string(),
-            "wasi:random/random@0.2.3".to_string(),
-            "wasi:sockets/tcp@0.2.3".to_string(),
-            "wasi:sockets/udp@0.2.3".to_string(),
-            "wasi:sockets/network@0.2.3".to_string(),
-            "wasi:sockets/instance-network@0.2.3".to_string(),
-            "wasi:sockets/ip-name-lookup@0.2.3".to_string(),
-            "wasi:sockets/tcp-create-socket@0.2.3".to_string(),
-            "wasi:sockets/udp-create-socket@0.2.3".to_string(),
+            "wasi:cli/environment@0.2.6".to_string(),
+            "wasi:cli/exit@0.2.6".to_string(),
+            "wasi:cli/stderr@0.2.6".to_string(),
+            "wasi:cli/stdin@0.2.6".to_string(),
+            "wasi:cli/stdout@0.2.6".to_string(),
+            "wasi:cli/terminal-input@0.2.6".to_string(),
+            "wasi:cli/terminal-output@0.2.6".to_string(),
+            "wasi:cli/terminal-stdin@0.2.6".to_string(),
+            "wasi:cli/terminal-stdout@0.2.6".to_string(),
+            "wasi:cli/terminal-stderr@0.2.6".to_string(),
+            "wasi:clocks/monotonic-clock@0.2.6".to_string(),
+            "wasi:clocks/wall-clock@0.2.6".to_string(),
+            "wasi:filesystem/preopens@0.2.6".to_string(),
+            "wasi:filesystem/types@0.2.6".to_string(),
+            "wasi:io/error@0.2.6".to_string(),
+            "wasi:io/poll@0.2.6".to_string(),
+            "wasi:io/streams@0.2.6".to_string(),
+            "wasi:random/random@0.2.6".to_string(),
+            "wasi:sockets/tcp@0.2.6".to_string(),
+            "wasi:sockets/udp@0.2.6".to_string(),
+            "wasi:sockets/network@0.2.6".to_string(),
+            "wasi:sockets/instance-network@0.2.6".to_string(),
+            "wasi:sockets/ip-name-lookup@0.2.6".to_string(),
+            "wasi:sockets/tcp-create-socket@0.2.6".to_string(),
+            "wasi:sockets/udp-create-socket@0.2.6".to_string(),
         ],
         _ => {
             println!("Unknown runtime feature URI: {uri}");
             vec![]
         }
     }
+}
+
+fn is_import_satisfied(import: &str, runtime_interfaces: &HashSet<String>) -> bool {
+    // First try exact match for performance
+    if runtime_interfaces.contains(import) {
+        return true;
+    }
+
+    if let Some((interface_name, requested_version)) = import.rsplit_once('@') {
+        if let Some(requested_semver) = parse_semver(requested_version) {
+            for available in runtime_interfaces {
+                if let Some((available_name, available_version)) = available.rsplit_once('@') {
+                    if interface_name == available_name {
+                        if let Some(available_semver) = parse_semver(available_version) {
+                            // same major, same minor, patch >= requested
+                            if available_semver.0 == requested_semver.0
+                                && available_semver.1 == requested_semver.1
+                                && available_semver.2 >= requested_semver.2
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn parse_semver(version: &str) -> Option<(u32, u32, u32)> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() == 3 {
+        if let (Ok(major), Ok(minor), Ok(patch)) = (
+            parts[0].parse::<u32>(),
+            parts[1].parse::<u32>(),
+            parts[2].parse::<u32>(),
+        ) {
+            return Some((major, minor, patch));
+        }
+    }
+    None
 }
 
 async fn process_component(
@@ -409,7 +456,7 @@ async fn process_component(
     // Check for imports not satisfied by runtime features
     let unsatisfied: Vec<_> = imports
         .iter()
-        .filter(|import| !runtime_interfaces.contains(*import))
+        .filter(|import| !is_import_satisfied(*import, &runtime_interfaces))
         .cloned()
         .collect();
 
