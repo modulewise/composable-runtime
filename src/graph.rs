@@ -1,9 +1,102 @@
-use crate::loader::{ComponentDefinition, RuntimeFeatureDefinition};
 use anyhow::Result;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
+
+// Type definitions for component and runtime feature definitions
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DefinitionBase {
+    pub uri: String,
+    #[serde(default = "default_enables")]
+    pub enables: String, // "none"|"package"|"namespace"|"unexposed"|"exposed"|"any"
+}
+
+pub fn default_enables() -> String {
+    "none".to_string()
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ComponentDefinitionBase {
+    #[serde(flatten)]
+    pub base: DefinitionBase,
+    #[serde(default)]
+    pub expects: Vec<String>, // Named components this expects to be available
+    #[serde(default)]
+    pub intercepts: Vec<String>, // Components this intercepts
+    #[serde(default)]
+    pub precedence: i32, // Lower values have higher precedence
+    #[serde(default)]
+    pub exposed: bool,
+    pub config: Option<HashMap<String, serde_json::Value>>,
+}
+
+impl std::ops::Deref for ComponentDefinitionBase {
+    type Target = DefinitionBase;
+    fn deref(&self) -> &Self::Target {
+        &self.base
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct RuntimeFeatureDefinition {
+    pub name: String,
+    #[serde(flatten)]
+    pub base: DefinitionBase,
+}
+
+impl std::ops::Deref for RuntimeFeatureDefinition {
+    type Target = DefinitionBase;
+    fn deref(&self) -> &Self::Target {
+        &self.base
+    }
+}
+
+impl std::fmt::Debug for RuntimeFeatureDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeFeatureDefinition")
+            .field("name", &self.name)
+            .field("uri", &self.uri)
+            .field("enables", &self.enables)
+            .finish()
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct ComponentDefinition {
+    pub name: String,
+    #[serde(flatten)]
+    pub base: ComponentDefinitionBase,
+}
+
+impl std::ops::Deref for ComponentDefinition {
+    type Target = ComponentDefinitionBase;
+    fn deref(&self) -> &Self::Target {
+        &self.base
+    }
+}
+
+impl std::fmt::Debug for ComponentDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComponentDefinition")
+            .field("name", &self.name)
+            .field("uri", &self.uri)
+            .field("enables", &self.enables)
+            .field("expects", &self.expects)
+            .field("intercepts", &self.intercepts)
+            .field("precedence", &self.precedence)
+            .field("exposed", &self.exposed)
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
+impl AsRef<DefinitionBase> for ComponentDefinition {
+    fn as_ref(&self) -> &DefinitionBase {
+        &self.base.base
+    }
+}
 
 pub struct ComponentGraph {
     graph: DiGraph<Node, Edge>,

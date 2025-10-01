@@ -1,13 +1,9 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use composable_runtime::{
-    ComponentSpec, Function, Invoker, RuntimeFeatureRegistry, build_registries,
-    graph::ComponentGraph, load_definitions,
-};
+use composable_runtime::{ComponentGraph, Runtime, load_definitions};
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -80,23 +76,13 @@ async fn main() -> Result<()> {
 }
 
 async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
-    println!("Building registries...");
-    let (runtime_feature_registry, component_registry) = build_registries(graph).await?;
+    println!("Building runtime...");
+    let runtime = Runtime::from_graph(&graph).await?;
+    let components = runtime.list_components();
     println!(
-        "Successfully built registry with {} exposed components.",
-        component_registry.get_components().count()
+        "Successfully built runtime with {} exposed components.",
+        components.len()
     );
-
-    let invoker = Invoker::new()?;
-    let mut exposed_functions: HashMap<String, (&Function, &ComponentSpec)> = HashMap::new();
-    for spec in component_registry.get_components() {
-        if let Some(functions) = &spec.functions {
-            for function in functions.values() {
-                let target = format!("{}.{}", spec.name, function.function_name());
-                exposed_functions.insert(target, (function, spec));
-            }
-        }
-    }
 
     println!("Starting interactive session. Type 'help' for commands.");
     let mut rl = Editor::<(), DefaultHistory>::new()?;
@@ -105,15 +91,7 @@ async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
         match readline {
             Ok(line) => {
                 let _ = rl.add_history_entry(line.as_str());
-                if handle_command(
-                    line,
-                    &exposed_functions,
-                    &invoker,
-                    &runtime_feature_registry,
-                )
-                .await
-                .is_err()
-                {
+                if handle_command(line, &runtime).await.is_err() {
                     break;
                 }
             }
@@ -126,7 +104,7 @@ async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
                 break;
             }
             Err(err) => {
-                println!("Error: {:?}", err);
+                eprintln!("Error: {:?}", err);
                 break;
             }
         }
@@ -135,12 +113,7 @@ async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
     Ok(())
 }
 
-async fn handle_command(
-    line: String,
-    exposed_functions: &HashMap<String, (&Function, &ComponentSpec)>,
-    invoker: &Invoker,
-    runtime_feature_registry: &RuntimeFeatureRegistry,
-) -> Result<(), ()> {
+async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
     let parts = parse_quoted_args(&line);
 
     if let Some(command_str) = parts.first() {
@@ -148,7 +121,7 @@ async fn handle_command(
             "list" => Some(Commands::List),
             "describe" => parts.get(1).map_or_else(
                 || {
-                    println!("Usage: describe <target>");
+                    eprintln!("Usage: describe <target>");
                     None
                 },
                 |target| {
@@ -159,7 +132,7 @@ async fn handle_command(
             ),
             "invoke" => parts.get(1).map_or_else(
                 || {
-                    println!("Usage: invoke <target> [args...]");
+                    eprintln!("Usage: invoke <target> [args...]");
                     None
                 },
                 |target| {
@@ -187,7 +160,7 @@ async fn handle_command(
             }
             "exit" | "quit" => return Err(()),
             _ => {
-                println!("Unknown command. Type 'help' for a list of commands.");
+                eprintln!("Unknown command. Type 'help' for a list of commands.");
                 None
             }
         };
@@ -195,104 +168,133 @@ async fn handle_command(
         if let Some(command) = command {
             match command {
                 Commands::List => {
-                    let mut targets: Vec<_> = exposed_functions.keys().collect();
+                    let mut targets = Vec::new();
+                    for component in runtime.list_components() {
+                        for func_name in component.functions.keys() {
+                            targets.push(format!("{}.{}", component.name, func_name));
+                        }
+                    }
                     targets.sort();
                     for target in targets {
                         println!("- {}", target);
                     }
                 }
                 Commands::Describe { target } => {
-                    if let Some((function, _spec)) = exposed_functions.get(&target) {
-                        println!("Target: {}", target);
-                        if !function.docs().is_empty() {
-                            println!("Docs: {}", function.docs());
-                        }
-                        println!("Params:");
-                        if function.params().is_empty() {
-                            println!("  (none)");
-                        } else {
-                            for param in function.params() {
+                    if let Some((component_name, func_name)) = target.split_once('.') {
+                        if let Some(component) = runtime.get_component(component_name) {
+                            if let Some(function) = component.functions.get(func_name) {
+                                println!("Target: {}", target);
+                                if !function.docs().is_empty() {
+                                    println!("Docs: {}", function.docs());
+                                }
+                                println!("Params:");
+                                if function.params().is_empty() {
+                                    println!("  (none)");
+                                } else {
+                                    for param in function.params() {
+                                        println!(
+                                            "- {}: {} (optional: {})",
+                                            param.name, param.json_schema, param.is_optional
+                                        );
+                                    }
+                                }
                                 println!(
-                                    "- {}: {} (optional: {})",
-                                    param.name, param.json_schema, param.is_optional
+                                    "Result: {}",
+                                    function
+                                        .result()
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| "null".to_string())
+                                );
+                            } else {
+                                eprintln!(
+                                    "Error: Function '{}' not found in component '{}'.",
+                                    func_name, component_name
                                 );
                             }
+                        } else {
+                            eprintln!("Error: Component '{}' not found.", component_name);
                         }
-                        println!(
-                            "Result: {}",
-                            function
-                                .result()
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| "null".to_string())
-                        );
                     } else {
-                        println!("Error: Target '{}' not found.", target);
+                        eprintln!("Error: Invalid target format. Use 'component.function'.");
                     }
                 }
                 Commands::Invoke { target, args } => {
-                    if let Some((function, spec)) = exposed_functions.get(&target) {
-                        let params = function.params();
-                        let mut final_args: Vec<serde_json::Value> = Vec::new();
+                    if let Some((component_name, func_name)) = target.split_once('.') {
+                        if let Some(component) = runtime.get_component(component_name) {
+                            if let Some(function) = component.functions.get(func_name) {
+                                let params = function.params();
+                                let mut final_args: Vec<serde_json::Value> = Vec::new();
 
-                        if args.len() > params.len() {
-                            println!(
-                                "Error: Too many arguments. Expected at most {}, got {}",
-                                params.len(),
-                                args.len()
-                            );
-                            return Ok(());
-                        }
-
-                        for (i, arg_str) in args.iter().enumerate() {
-                            let trimmed = arg_str.trim();
-
-                            // First, parse as any valid JSON value, falling back to a string.
-                            let mut json_val = serde_json::from_str(trimmed)
-                                .unwrap_or_else(|_| serde_json::Value::String(trimmed.to_string()));
-
-                            // Proactively convert numbers to strings if the parameter's schema expects a string.
-                            if let Some(param) = params.get(i) {
-                                if let Some("string") =
-                                    param.json_schema.get("type").and_then(|v| v.as_str())
-                                {
-                                    if let serde_json::Value::Number(n) = &json_val {
-                                        json_val = serde_json::Value::String(n.to_string());
-                                    }
-                                }
-                            }
-                            final_args.push(json_val);
-                        }
-
-                        // Handle missing parameters: pad with nulls for optional, error for required
-                        for i in args.len()..params.len() {
-                            if let Some(param) = params.get(i) {
-                                if param.is_optional {
-                                    final_args.push(serde_json::Value::Null);
-                                } else {
-                                    println!("Error: Missing required parameter: {}", param.name);
+                                if args.len() > params.len() {
+                                    eprintln!(
+                                        "Error: Too many arguments. Expected at most {}, got {}",
+                                        params.len(),
+                                        args.len()
+                                    );
                                     return Ok(());
                                 }
-                            }
-                        }
 
-                        println!("Invoking {}...", target);
-                        match invoker
-                            .invoke(
-                                &spec.bytes,
-                                &spec.runtime_features,
-                                runtime_feature_registry,
-                                (*function).clone(),
-                                final_args,
-                            )
-                            .await
-                        {
-                            Ok(result) => {
-                                println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                                for (i, arg_str) in args.iter().enumerate() {
+                                    let trimmed = arg_str.trim();
+
+                                    // First, parse as any valid JSON value, falling back to a string.
+                                    let mut json_val = serde_json::from_str(trimmed)
+                                        .unwrap_or_else(|_| {
+                                            serde_json::Value::String(trimmed.to_string())
+                                        });
+
+                                    // Proactively convert numbers to strings if the parameter's schema expects a string.
+                                    if let Some(param) = params.get(i) {
+                                        if let Some("string") =
+                                            param.json_schema.get("type").and_then(|v| v.as_str())
+                                        {
+                                            if let serde_json::Value::Number(n) = &json_val {
+                                                json_val = serde_json::Value::String(n.to_string());
+                                            }
+                                        }
+                                    }
+                                    final_args.push(json_val);
+                                }
+
+                                // Handle missing parameters: pad with nulls for optional, error for required
+                                for i in args.len()..params.len() {
+                                    if let Some(param) = params.get(i) {
+                                        if param.is_optional {
+                                            final_args.push(serde_json::Value::Null);
+                                        } else {
+                                            eprintln!(
+                                                "Error: Missing required parameter: {}",
+                                                param.name
+                                            );
+                                            return Ok(());
+                                        }
+                                    }
+                                }
+
+                                println!("Invoking {}...", target);
+                                match runtime
+                                    .invoke(component_name, function.function_name(), final_args)
+                                    .await
+                                {
+                                    Ok(result) => {
+                                        println!(
+                                            "{}",
+                                            serde_json::to_string_pretty(&result).unwrap()
+                                        );
+                                    }
+                                    Err(e) => eprintln!("Error: {}", e),
+                                }
+                            } else {
+                                eprintln!(
+                                    "Error: Function '{}' not found in component '{}'.",
+                                    func_name, component_name
+                                );
                             }
-                            Err(e) => println!("Error: {}", e),
+                        } else {
+                            eprintln!("Error: Component '{}' not found.", component_name);
                         }
                     } else {
-                        println!("Error: Target '{}' not found.", target);
+                        eprintln!("Error: Invalid target format. Use 'component.function'.");
                     }
                 }
             }

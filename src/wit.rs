@@ -82,7 +82,7 @@ impl fmt::Display for Interface {
     }
 }
 
-/// A WebAssembly function specification with parsed WIT metadata
+/// A function specification
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function {
     interface: Interface,
@@ -142,6 +142,7 @@ impl fmt::Display for Function {
     }
 }
 
+/// A function parameter specification
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionParam {
     pub name: String,

@@ -1,14 +1,100 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use wasmtime::{
     Cache, Config, Engine, Store,
-    component::{Component, Linker, Type, Val},
+    component::{Component as WasmComponent, Linker, Type, Val},
 };
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
-use crate::registry::RuntimeFeatureRegistry;
+use crate::graph::ComponentGraph;
+use crate::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
 use crate::wit::Function;
+
+/// Wasm Component whose functions can be invoked
+#[derive(Debug, Clone)]
+pub struct Component {
+    pub name: String,
+    pub functions: HashMap<String, Function>,
+}
+
+/// Composable Runtime for invoking Wasm Components
+#[derive(Clone)]
+pub struct Runtime {
+    invoker: Invoker,
+    runtime_feature_registry: RuntimeFeatureRegistry,
+    component_registry: ComponentRegistry,
+}
+
+impl Runtime {
+    /// Create a Runtime from a ComponentGraph
+    pub async fn from_graph(graph: &ComponentGraph) -> Result<Self> {
+        let (runtime_feature_registry, component_registry) = build_registries(graph).await?;
+        let invoker = Invoker::new()?;
+        Ok(Self {
+            invoker,
+            runtime_feature_registry,
+            component_registry,
+        })
+    }
+
+    /// List all exposed components
+    pub fn list_components(&self) -> Vec<Component> {
+        self.component_registry
+            .get_components()
+            .map(|spec| Component {
+                name: spec.name.clone(),
+                functions: spec.functions.clone().unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    /// Get a specific component by name
+    pub fn get_component(&self, name: &str) -> Option<Component> {
+        self.component_registry
+            .get_component(name)
+            .map(|spec| Component {
+                name: spec.name.clone(),
+                functions: spec.functions.clone().unwrap_or_default(),
+            })
+    }
+
+    /// Invoke a component function
+    pub async fn invoke(
+        &self,
+        component_name: &str,
+        function_name: &str,
+        args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let spec = self
+            .component_registry
+            .get_component(component_name)
+            .ok_or_else(|| anyhow::anyhow!("Component '{}' not found", component_name))?;
+
+        let function = spec
+            .functions
+            .as_ref()
+            .and_then(|funcs| funcs.get(function_name))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Function '{}' not found in component '{}'",
+                    function_name,
+                    component_name
+                )
+            })?;
+
+        self.invoker
+            .invoke(
+                &spec.bytes,
+                &spec.runtime_features,
+                &self.runtime_feature_registry,
+                function.clone(),
+                args,
+            )
+            .await
+    }
+}
 
 pub struct ComponentState {
     pub wasi_ctx: WasiCtx,
@@ -44,7 +130,7 @@ impl WasiHttpView for ComponentState {
 }
 
 #[derive(Clone)]
-pub struct Invoker {
+struct Invoker {
     engine: Engine,
 }
 
@@ -157,7 +243,7 @@ impl Invoker {
             resource_table: ResourceTable::new(),
         };
         let mut store = Store::new(&self.engine, state);
-        let component = Component::from_binary(&self.engine, &component_bytes)?;
+        let component = WasmComponent::from_binary(&self.engine, &component_bytes)?;
         let instance = linker.instantiate_async(&mut store, &component).await?;
 
         let interface_export = instance

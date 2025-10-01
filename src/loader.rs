@@ -1,100 +1,15 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::graph::ComponentGraph;
+use crate::graph::{
+    ComponentDefinition, ComponentDefinitionBase, ComponentGraph, DefinitionBase,
+    RuntimeFeatureDefinition, default_enables,
+};
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct DefinitionBase {
-    pub uri: String,
-    #[serde(default = "default_enables")]
-    pub enables: String, // "none"|"package"|"namespace"|"unexposed"|"exposed"|"any"
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ComponentDefinitionBase {
-    #[serde(flatten)]
-    base: DefinitionBase,
-    #[serde(default)]
-    pub expects: Vec<String>, // Named components this expects to be available
-    #[serde(default)]
-    pub intercepts: Vec<String>, // Components this intercepts
-    #[serde(default)]
-    pub precedence: i32, // Lower values have higher precedence
-    #[serde(default)]
-    pub exposed: bool,
-    pub config: Option<HashMap<String, serde_json::Value>>,
-}
-
-impl std::ops::Deref for ComponentDefinitionBase {
-    type Target = DefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct RuntimeFeatureDefinition {
-    pub name: String,
-    #[serde(flatten)]
-    pub base: DefinitionBase,
-}
-
-impl std::ops::Deref for RuntimeFeatureDefinition {
-    type Target = DefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-impl std::fmt::Debug for RuntimeFeatureDefinition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RuntimeFeatureDefinition")
-            .field("name", &self.name)
-            .field("uri", &self.uri)
-            .field("enables", &self.enables)
-            .finish()
-    }
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct ComponentDefinition {
-    pub name: String,
-    #[serde(flatten)]
-    base: ComponentDefinitionBase,
-}
-
-impl std::ops::Deref for ComponentDefinition {
-    type Target = ComponentDefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-impl std::fmt::Debug for ComponentDefinition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ComponentDefinition")
-            .field("name", &self.name)
-            .field("uri", &self.uri)
-            .field("enables", &self.enables)
-            .field("expects", &self.expects)
-            .field("intercepts", &self.intercepts)
-            .field("precedence", &self.precedence)
-            .field("exposed", &self.exposed)
-            .field("config", &self.config)
-            .finish()
-    }
-}
-
-impl AsRef<DefinitionBase> for ComponentDefinition {
-    fn as_ref(&self) -> &DefinitionBase {
-        &self.base.base
-    }
-}
-
-/// Load component definitions from configuration files and build the dependency graph
+/// Load component definitions and runtime feature definitions from configuration files
+/// and build a component graph
 pub fn load_definitions(
     definition_files: &[PathBuf], // .toml and .wasm files
 ) -> Result<ComponentGraph> {
@@ -186,10 +101,6 @@ fn build_definitions(
     }
 
     Ok((runtime_feature_definitions, component_definitions))
-}
-
-fn default_enables() -> String {
-    "none".to_string()
 }
 
 fn validate_runtime_feature_enables_scope(enables: &str, name: &str) -> Result<()> {

@@ -4,8 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::composer::Composer;
-use crate::graph::{ComponentGraph, Node};
-use crate::loader::{ComponentDefinition, RuntimeFeatureDefinition};
+use crate::graph::{ComponentDefinition, ComponentGraph, Node, RuntimeFeatureDefinition};
 use crate::wit::{ComponentMetadata, Parser};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +103,10 @@ impl ComponentRegistry {
 
     pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
         self.components.values()
+    }
+
+    pub fn get_component(&self, name: &str) -> Option<&ComponentSpec> {
+        self.components.get(name)
     }
 
     pub fn get_enabled_component_dependency(

@@ -3,14 +3,18 @@
 //! A runtime for Wasm Components that supports
 //! composition, config, and capability management.
 
-pub use loader::{ComponentDefinition, RuntimeFeatureDefinition, load_definitions};
-pub use registry::{ComponentRegistry, ComponentSpec, RuntimeFeatureRegistry, build_registries};
-pub use runtime::Invoker;
-pub use wit::Function;
+pub use graph::ComponentGraph;
+pub use loader::load_definitions;
+pub use runtime::{Component, Runtime};
+pub use wit::{Function, FunctionParam};
 
-pub mod composer;
+// exposed for testing, hidden from docs
+#[doc(hidden)]
 pub mod graph;
-pub mod loader;
+#[doc(hidden)]
 pub mod registry;
-pub mod runtime;
-pub mod wit;
+
+mod composer;
+mod loader;
+mod runtime;
+mod wit;

@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use composable_runtime::graph::{ComponentGraph, Node};
-use composable_runtime::loader::{ComponentDefinition, RuntimeFeatureDefinition, load_definitions};
+use composable_runtime::graph::{ComponentDefinition, Node, RuntimeFeatureDefinition};
 use composable_runtime::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
+use composable_runtime::{ComponentGraph, load_definitions};
 use std::io::Write;
 use std::ops::Deref;
 use std::path::Path;
