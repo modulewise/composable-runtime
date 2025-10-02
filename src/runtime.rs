@@ -1,14 +1,98 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use wasmtime::{
     Cache, Config, Engine, Store,
-    component::{Component, Linker, Type, Val},
+    component::{Component as WasmComponent, Linker, Type, Val},
 };
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
-use crate::registry::RuntimeFeatureRegistry;
+use crate::graph::ComponentGraph;
+use crate::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
 use crate::wit::Function;
+
+/// Wasm Component whose functions can be invoked
+#[derive(Debug, Clone)]
+pub struct Component {
+    pub name: String,
+    pub functions: HashMap<String, Function>,
+}
+
+/// Composable Runtime for invoking Wasm Components
+#[derive(Clone)]
+pub struct Runtime {
+    invoker: Invoker,
+    runtime_feature_registry: RuntimeFeatureRegistry,
+    component_registry: ComponentRegistry,
+}
+
+impl Runtime {
+    /// Create a Runtime from a ComponentGraph
+    pub async fn from_graph(graph: &ComponentGraph) -> Result<Self> {
+        let (runtime_feature_registry, component_registry) = build_registries(graph).await?;
+        let invoker = Invoker::new()?;
+        Ok(Self {
+            invoker,
+            runtime_feature_registry,
+            component_registry,
+        })
+    }
+
+    /// List all exposed components
+    pub fn list_components(&self) -> Vec<Component> {
+        self.component_registry
+            .get_components()
+            .map(|spec| Component {
+                name: spec.name.clone(),
+                functions: spec.functions.clone().unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    /// Get a specific component by name
+    pub fn get_component(&self, name: &str) -> Option<Component> {
+        self.component_registry
+            .get_component(name)
+            .map(|spec| Component {
+                name: spec.name.clone(),
+                functions: spec.functions.clone().unwrap_or_default(),
+            })
+    }
+
+    /// Invoke a component function
+    pub async fn invoke(
+        &self,
+        component_name: &str,
+        function_name: &str,
+        args: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let spec = self
+            .component_registry
+            .get_component(component_name)
+            .ok_or_else(|| anyhow::anyhow!("Component '{component_name}' not found"))?;
+
+        let function = spec
+            .functions
+            .as_ref()
+            .and_then(|funcs| funcs.get(function_name))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Function '{function_name}' not found in component '{component_name}'"
+                )
+            })?;
+
+        self.invoker
+            .invoke(
+                &spec.bytes,
+                &spec.runtime_features,
+                &self.runtime_feature_registry,
+                function.clone(),
+                args,
+            )
+            .await
+    }
+}
 
 pub struct ComponentState {
     pub wasi_ctx: WasiCtx,
@@ -44,7 +128,7 @@ impl WasiHttpView for ComponentState {
 }
 
 #[derive(Clone)]
-pub struct Invoker {
+struct Invoker {
     engine: Engine,
 }
 
@@ -157,25 +241,23 @@ impl Invoker {
             resource_table: ResourceTable::new(),
         };
         let mut store = Store::new(&self.engine, state);
-        let component = Component::from_binary(&self.engine, &component_bytes)?;
+        let component = WasmComponent::from_binary(&self.engine, &component_bytes)?;
         let instance = linker.instantiate_async(&mut store, &component).await?;
 
         let interface_export = instance
             .get_export(&mut store, None, interface_str)
-            .ok_or_else(|| anyhow::anyhow!("Interface '{}' not found", interface_str))?;
+            .ok_or_else(|| anyhow::anyhow!("Interface '{interface_str}' not found"))?;
         let parent_export_idx = Some(&interface_export.1);
         let func_export = instance
             .get_export(&mut store, parent_export_idx, function_name)
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Function '{}' not found in interface '{}'",
-                    function_name,
-                    interface_str
+                    "Function '{function_name}' not found in interface '{interface_str}'"
                 )
             })?;
         let func = instance
             .get_func(&mut store, func_export.1)
-            .ok_or_else(|| anyhow::anyhow!("Function handle invalid for '{}'", function_name))?;
+            .ok_or_else(|| anyhow::anyhow!("Function handle invalid for '{function_name}'"))?;
 
         let mut arg_vals: Vec<Val> = vec![];
         let params = func.params(&store).clone();
@@ -189,7 +271,7 @@ impl Invoker {
         for (index, json_arg) in args.iter().enumerate() {
             let param_type = &params[index].1;
             let val = json_to_val(json_arg, param_type)
-                .map_err(|e| anyhow::anyhow!("Error converting parameter {}: {}", index, e))?;
+                .map_err(|e| anyhow::anyhow!("Error converting parameter {index}: {e}"))?;
             arg_vals.push(val);
         }
 
@@ -206,7 +288,7 @@ impl Invoker {
                 match value {
                     Val::Result(Err(Some(error_val))) => {
                         let error_json = val_to_json(error_val);
-                        Err(anyhow::anyhow!("Component returned error: {}", error_json))
+                        Err(anyhow::anyhow!("Component returned error: {error_json}"))
                     }
                     Val::Result(Err(None)) => Err(anyhow::anyhow!("Component returned error")),
                     _ => Ok(val_to_json(value)),
@@ -278,7 +360,7 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
             if chars.len() == 1 {
                 Ok(Val::Char(chars[0]))
             } else {
-                Err(anyhow::anyhow!("Expected single character, got: {}", s))
+                Err(anyhow::anyhow!("Expected single character, got: {s}"))
             }
         }
 
@@ -286,68 +368,68 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
         (serde_json::Value::Number(n), wasmtime::component::Type::U8) => {
             let val = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for u8: {}", n))?
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for u8: {n}"))?
                 as u8;
             Ok(Val::U8(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::U16) => {
             let val = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for u16: {}", n))?
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for u16: {n}"))?
                 as u16;
             Ok(Val::U16(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::U32) => {
             let val = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for u32: {}", n))?
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for u32: {n}"))?
                 as u32;
             Ok(Val::U32(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::U64) => {
             let val = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for u64: {}", n))?;
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for u64: {n}"))?;
             Ok(Val::U64(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::S8) => {
             let val = n
                 .as_i64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for s8: {}", n))?
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for s8: {n}"))?
                 as i8;
             Ok(Val::S8(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::S16) => {
             let val = n
                 .as_i64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for s16: {}", n))?
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for s16: {n}"))?
                 as i16;
             Ok(Val::S16(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::S32) => {
             let val = n
                 .as_i64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for s32: {}", n))?
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for s32: {n}"))?
                 as i32;
             Ok(Val::S32(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::S64) => {
             let val = n
                 .as_i64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for s64: {}", n))?;
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for s64: {n}"))?;
             Ok(Val::S64(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::Float32) => {
             let val = n
                 .as_f64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for f32: {}", n))?
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for f32: {n}"))?
                 as f32;
             Ok(Val::Float32(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::Float64) => {
             let val = n
                 .as_f64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for f64: {}", n))?;
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for f64: {n}"))?;
             Ok(Val::Float64(val))
         }
 
@@ -357,7 +439,7 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
             let mut items = Vec::new();
             for (index, item) in arr.iter().enumerate() {
                 items.push(json_to_val(item, &element_type).map_err(|e| {
-                    anyhow::anyhow!("Error converting list item at index {}: {}", index, e)
+                    anyhow::anyhow!("Error converting list item at index {index}: {e}")
                 })?);
             }
             Ok(Val::List(items))
@@ -376,7 +458,7 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
             let mut items = Vec::new();
             for (index, (item, item_type)) in arr.iter().zip(tuple_types.iter()).enumerate() {
                 items.push(json_to_val(item, item_type).map_err(|e| {
-                    anyhow::anyhow!("Error converting tuple item at index {}: {}", index, e)
+                    anyhow::anyhow!("Error converting tuple item at index {index}: {e}")
                 })?);
             }
             Ok(Val::Tuple(items))
@@ -400,8 +482,7 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
                         }
                         _ => {
                             return Err(anyhow::anyhow!(
-                                "Missing required field '{}' in record",
-                                field_name
+                                "Missing required field '{field_name}' in record"
                             ));
                         }
                     }
@@ -411,7 +492,7 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
             // Check for extra fields that aren't in the WIT record
             for (key, _) in obj {
                 if !record_type.fields().any(|field| field.name == key) {
-                    return Err(anyhow::anyhow!("Unexpected field '{}' in record", key));
+                    return Err(anyhow::anyhow!("Unexpected field '{key}' in record"));
                 }
             }
 
@@ -430,9 +511,7 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
 
         // Type mismatches
         _ => Err(anyhow::anyhow!(
-            "Type mismatch: cannot convert JSON {:?} to WIT type {:?}",
-            json_value,
-            val_type
+            "Type mismatch: cannot convert JSON {json_value:?} to WIT type {val_type:?}"
         )),
     }
 }

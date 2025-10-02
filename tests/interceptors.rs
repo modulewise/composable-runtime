@@ -68,7 +68,7 @@ async fn test_simple_interceptor() {
     let function = functions.get("handle").unwrap();
     assert_eq!(
         function.params(),
-        Vec::<composable_runtime::wit::FunctionParam>::new()
+        Vec::<composable_runtime::FunctionParam>::new()
     );
     assert_eq!(function.result(), None);
     assert_eq!(

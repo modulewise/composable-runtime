@@ -36,7 +36,7 @@ async fn test_direct_wasm_file() {
     let function = functions.get("query").unwrap();
     assert_eq!(
         function.params(),
-        Vec::<composable_runtime::wit::FunctionParam>::new()
+        Vec::<composable_runtime::FunctionParam>::new()
     );
     assert_eq!(function.result(), None);
     assert_eq!(

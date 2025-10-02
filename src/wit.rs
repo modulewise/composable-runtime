@@ -45,8 +45,7 @@ impl Interface {
         }
 
         Err(anyhow::anyhow!(
-            "Invalid WIT interface format: expected namespace:package/interface[@version], got: {}",
-            s
+            "Invalid WIT interface format: expected namespace:package/interface[@version], got: {s}"
         ))
     }
 
@@ -82,7 +81,7 @@ impl fmt::Display for Interface {
     }
 }
 
-/// A WebAssembly function specification with parsed WIT metadata
+/// A function specification
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function {
     interface: Interface,
@@ -142,6 +141,7 @@ impl fmt::Display for Function {
     }
 }
 
+/// A function parameter specification
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionParam {
     pub name: String,
@@ -245,8 +245,7 @@ impl Parser {
                 Ok(full_interface_name)
             } else {
                 Err(anyhow::anyhow!(
-                    "Interface '{}' missing required package metadata",
-                    interface_name
+                    "Interface '{interface_name}' missing required package metadata"
                 ))
             }
         } else {

@@ -36,7 +36,7 @@ impl Composer {
 
         graph
             .encode(encode_options)
-            .map_err(|e| anyhow::anyhow!("Failed to encode composition: {}", e))
+            .map_err(|e| anyhow::anyhow!("Failed to encode composition: {e}"))
     }
 }
 
@@ -48,7 +48,7 @@ fn create_config_component(config: &HashMap<String, serde_json::Value>) -> Resul
         config_properties.push((key.clone(), string_value));
     }
     static_config::create_component(config_properties)
-        .map_err(|e| anyhow::anyhow!("Failed to create config component: {}", e))
+        .map_err(|e| anyhow::anyhow!("Failed to create config component: {e}"))
 }
 
 fn convert_json_value_to_string(value: &serde_json::Value) -> Result<String> {

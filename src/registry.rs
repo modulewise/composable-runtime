@@ -4,8 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::composer::Composer;
-use crate::graph::{ComponentGraph, Node};
-use crate::loader::{ComponentDefinition, RuntimeFeatureDefinition};
+use crate::graph::{ComponentDefinition, ComponentGraph, Node, RuntimeFeatureDefinition};
 use crate::wit::{ComponentMetadata, Parser};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +103,10 @@ impl ComponentRegistry {
 
     pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
         self.components.values()
+    }
+
+    pub fn get_component(&self, name: &str) -> Option<&ComponentSpec> {
+        self.components.get(name)
     }
 
     pub fn get_enabled_component_dependency(
@@ -367,7 +370,7 @@ async fn process_component(
     let mut bytes = read_bytes(&definition.uri).await?;
 
     let (metadata, mut imports, exports, functions) = Parser::parse(&bytes, definition.exposed)
-        .map_err(|e| anyhow::anyhow!("Failed to parse component: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse component: {e}"))?;
 
     let imports_config = imports
         .iter()
@@ -456,7 +459,7 @@ async fn process_component(
     // Check for imports not satisfied by runtime features
     let unsatisfied: Vec<_> = imports
         .iter()
-        .filter(|import| !is_import_satisfied(*import, &runtime_interfaces))
+        .filter(|import| !is_import_satisfied(import, &runtime_interfaces))
         .cloned()
         .collect();
 
@@ -493,7 +496,7 @@ async fn read_bytes(uri: &str) -> Result<Vec<u8>> {
         if let Some(layer) = image_data.layers.first() {
             Ok(layer.data.clone())
         } else {
-            Err(anyhow::anyhow!("No layers found in OCI image: {}", oci_ref))
+            Err(anyhow::anyhow!("No layers found in OCI image: {oci_ref}"))
         }
     } else {
         // Handle both file:// and plain paths
