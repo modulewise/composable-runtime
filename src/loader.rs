@@ -107,13 +107,10 @@ fn validate_runtime_feature_enables_scope(enables: &str, name: &str) -> Result<(
     match enables {
         "none" | "unexposed" | "exposed" | "any" => Ok(()),
         "package" | "namespace" => Err(anyhow::anyhow!(
-            "RuntimeFeature '{}' cannot use enables='{}' - only components support package/namespace scoping",
-            name,
-            enables
+            "RuntimeFeature '{name}' cannot use enables='{enables}' - only components support package/namespace scoping"
         )),
         _ => Err(anyhow::anyhow!(
-            "Invalid enables scope: '{}'. Must be one of: none, unexposed, exposed, any",
-            enables
+            "Invalid enables scope: '{enables}'. Must be one of: none, unexposed, exposed, any"
         )),
     }
 }
@@ -122,8 +119,7 @@ fn validate_component_enables_scope(enables: &str) -> Result<()> {
     match enables {
         "none" | "package" | "namespace" | "unexposed" | "exposed" | "any" => Ok(()),
         _ => Err(anyhow::anyhow!(
-            "Invalid enables scope: '{}'. Must be one of: none, package, namespace, unexposed, exposed, any",
-            enables
+            "Invalid enables scope: '{enables}'. Must be one of: none, package, namespace, unexposed, exposed, any"
         )),
     }
 }
@@ -145,7 +141,7 @@ fn parse_toml_file(
                     if uri.starts_with("wasmtime:") {
                         let definition_base: DefinitionBase =
                             toml::Value::Table(def_table).try_into().map_err(|e| {
-                                anyhow::anyhow!("Failed to parse runtime feature '{}': {}", name, e)
+                                anyhow::anyhow!("Failed to parse runtime feature '{name}': {e}")
                             })?;
                         runtime_features.push(RuntimeFeatureDefinition {
                             name: name.clone(),
@@ -165,7 +161,7 @@ fn parse_toml_file(
                             toml::Value::Table(definition_value)
                                 .try_into()
                                 .map_err(|e| {
-                                    anyhow::anyhow!("Failed to parse component '{}': {}", name, e)
+                                    anyhow::anyhow!("Failed to parse component '{name}': {e}")
                                 })?;
 
                         component_base.config = config;
@@ -176,12 +172,11 @@ fn parse_toml_file(
                     }
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Definition '{}' missing required 'uri' field",
-                        name
+                        "Definition '{name}' missing required 'uri' field"
                     ));
                 }
             } else {
-                return Err(anyhow::anyhow!("Definition '{}' must be a table", name));
+                return Err(anyhow::anyhow!("Definition '{name}' must be a table"));
             }
         }
     } else {
@@ -208,7 +203,7 @@ fn create_implicit_component_definitions(
                     pkg_part.to_string()
                 }
             } else {
-                return Err(anyhow::anyhow!("Invalid OCI URI format: {}", path_str));
+                return Err(anyhow::anyhow!("Invalid OCI URI format: {path_str}"));
             }
         } else {
             path.file_stem()

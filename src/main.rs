@@ -62,12 +62,12 @@ async fn main() -> Result<()> {
 
     if cli.mode.dry_run {
         println!("--- Component Dependency Graph (Dry Run) ---");
-        println!("{:#?}", graph);
+        println!("{graph:#?}");
         println!("--------------------------------------------");
     } else if cli.mode.export {
         let filename = "graph.dot";
         graph.write_dot_file(filename)?;
-        println!("Graph exported to {}", filename);
+        println!("Graph exported to {filename}");
     } else if cli.mode.interactive {
         run_interactive_session(&graph).await?;
     }
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 
 async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
     println!("Building runtime...");
-    let runtime = Runtime::from_graph(&graph).await?;
+    let runtime = Runtime::from_graph(graph).await?;
     let components = runtime.list_components();
     println!(
         "Successfully built runtime with {} exposed components.",
@@ -104,7 +104,7 @@ async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
                 break;
             }
             Err(err) => {
-                eprintln!("Error: {:?}", err);
+                eprintln!("Error: {err:?}");
                 break;
             }
         }
@@ -176,14 +176,14 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                     }
                     targets.sort();
                     for target in targets {
-                        println!("- {}", target);
+                        println!("- {target}");
                     }
                 }
                 Commands::Describe { target } => {
                     if let Some((component_name, func_name)) = target.split_once('.') {
                         if let Some(component) = runtime.get_component(component_name) {
                             if let Some(function) = component.functions.get(func_name) {
-                                println!("Target: {}", target);
+                                println!("Target: {target}");
                                 if !function.docs().is_empty() {
                                     println!("Docs: {}", function.docs());
                                 }
@@ -207,12 +207,11 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                                 );
                             } else {
                                 eprintln!(
-                                    "Error: Function '{}' not found in component '{}'.",
-                                    func_name, component_name
+                                    "Error: Function '{func_name}' not found in component '{component_name}'."
                                 );
                             }
                         } else {
-                            eprintln!("Error: Component '{}' not found.", component_name);
+                            eprintln!("Error: Component '{component_name}' not found.");
                         }
                     } else {
                         eprintln!("Error: Invalid target format. Use 'component.function'.");
@@ -271,7 +270,7 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                                     }
                                 }
 
-                                println!("Invoking {}...", target);
+                                println!("Invoking {target}...");
                                 match runtime
                                     .invoke(component_name, function.function_name(), final_args)
                                     .await
@@ -282,16 +281,15 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                                             serde_json::to_string_pretty(&result).unwrap()
                                         );
                                     }
-                                    Err(e) => eprintln!("Error: {}", e),
+                                    Err(e) => eprintln!("Error: {e}"),
                                 }
                             } else {
                                 eprintln!(
-                                    "Error: Function '{}' not found in component '{}'.",
-                                    func_name, component_name
+                                    "Error: Function '{func_name}' not found in component '{component_name}'."
                                 );
                             }
                         } else {
-                            eprintln!("Error: Component '{}' not found.", component_name);
+                            eprintln!("Error: Component '{component_name}' not found.");
                         }
                     } else {
                         eprintln!("Error: Invalid target format. Use 'component.function'.");

@@ -286,8 +286,7 @@ impl ComponentGraph {
                 Node::RuntimeFeature(def) => &def.name,
             };
             return Err(anyhow::anyhow!(
-                "Circular dependency detected involving '{}'",
-                node_name
+                "Circular dependency detected involving '{node_name}'"
             ));
         }
 
@@ -298,7 +297,7 @@ impl ComponentGraph {
     pub fn write_dot_file<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
         let dot_content = self.dot();
         std::fs::write(path, dot_content)
-            .map_err(|e| anyhow::anyhow!("Failed to write DOT file: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to write DOT file: {e}"))?;
         Ok(())
     }
 

@@ -45,8 +45,7 @@ impl Interface {
         }
 
         Err(anyhow::anyhow!(
-            "Invalid WIT interface format: expected namespace:package/interface[@version], got: {}",
-            s
+            "Invalid WIT interface format: expected namespace:package/interface[@version], got: {s}"
         ))
     }
 
@@ -246,8 +245,7 @@ impl Parser {
                 Ok(full_interface_name)
             } else {
                 Err(anyhow::anyhow!(
-                    "Interface '{}' missing required package metadata",
-                    interface_name
+                    "Interface '{interface_name}' missing required package metadata"
                 ))
             }
         } else {
