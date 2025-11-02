@@ -4,6 +4,7 @@ use wasmtime::{
     Cache, Config, Engine, Store,
     component::{Component as WasmComponent, Linker, Type, Val},
 };
+use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
@@ -150,7 +151,10 @@ impl Invoker {
     ) -> Result<Linker<ComponentState>> {
         let mut linker = Linker::new(&self.engine);
 
-        // Add WASI interfaces based on explicitly requested runtime_features
+        // Multiple runtime features may provide the same interface
+        linker.allow_shadowing(true);
+
+        // Add WASI interfaces based on explicitly requested runtime features
         for feature_name in runtime_features {
             if let Some(runtime_feature) =
                 runtime_feature_registry.get_runtime_feature(feature_name)
@@ -166,8 +170,16 @@ impl Invoker {
                     "wasmtime:io" => {
                         wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
                     }
+                    "wasmtime:random" => {
+                        wasmtime_wasi::p2::bindings::random::random::add_to_linker::<
+                            ComponentState,
+                            WasiRandom,
+                        >(&mut linker, |state| {
+                            <ComponentState as WasiRandomView>::random(state)
+                        })?;
+                    }
                     "wasmtime:inherit-network" | "wasmtime:allow-ip-name-lookup" => {
-                        // These runtime_features are handled in WASI context, not linker
+                        // These runtime features are handled in WASI context, not linker
                         // No linker functions to add, only context configuration
                     }
                     _ => {
@@ -178,7 +190,7 @@ impl Invoker {
                     }
                 }
             }
-            // Component runtime_features are handled during composition, not at runtime
+            // Component runtime features are handled during composition, not at runtime
         }
         Ok(linker)
     }
@@ -235,6 +247,7 @@ impl Invoker {
         } else {
             None
         };
+
         let state = ComponentState {
             wasi_ctx: wasi,
             wasi_http_ctx,

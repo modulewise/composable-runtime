@@ -270,6 +270,7 @@ fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
             "wasi:io/poll@0.2.6".to_string(),
             "wasi:io/streams@0.2.6".to_string(),
         ],
+        "wasmtime:random" => vec!["wasi:random/random@0.2.6".to_string()],
         "wasmtime:inherit-network" => vec![
             "wasi:sockets/tcp@0.2.6".to_string(),
             "wasi:sockets/udp@0.2.6".to_string(),
