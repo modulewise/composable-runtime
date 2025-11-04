@@ -242,13 +242,28 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                                             serde_json::Value::String(trimmed.to_string())
                                         });
 
-                                    // Proactively convert numbers to strings if the parameter's schema expects a string.
+                                    // Convert numbers/objects/arrays to strings if the parameter's schema expects a string.
                                     if let Some(param) = params.get(i) {
                                         if let Some("string") =
                                             param.json_schema.get("type").and_then(|v| v.as_str())
                                         {
-                                            if let serde_json::Value::Number(n) = &json_val {
-                                                json_val = serde_json::Value::String(n.to_string());
+                                            match &json_val {
+                                                serde_json::Value::Number(n) => {
+                                                    json_val =
+                                                        serde_json::Value::String(n.to_string());
+                                                }
+                                                serde_json::Value::Object(_)
+                                                | serde_json::Value::Array(_) => {
+                                                    json_val = serde_json::Value::String(
+                                                        serde_json::to_string(&json_val)
+                                                            .unwrap_or_else(|_| {
+                                                                json_val.to_string()
+                                                            }),
+                                                    );
+                                                }
+                                                _ => {
+                                                    // Already a string or other type, keep as is
+                                                }
                                             }
                                         }
                                     }

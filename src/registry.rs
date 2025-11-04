@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::composer::Composer;
 use crate::graph::{ComponentDefinition, ComponentGraph, Node, RuntimeFeatureDefinition};
@@ -19,7 +20,7 @@ pub struct ComponentSpec {
     pub name: String,
     pub namespace: Option<String>,
     pub package: Option<String>,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
     pub imports: Vec<String>,
     pub exports: Vec<String>,
     pub runtime_features: Vec<String>,
@@ -28,13 +29,13 @@ pub struct ComponentSpec {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeFeatureRegistry {
-    pub runtime_features: HashMap<String, RuntimeFeature>,
+    pub runtime_features: Arc<HashMap<String, RuntimeFeature>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ComponentRegistry {
-    pub components: HashMap<String, ComponentSpec>,
-    pub enabling_components: HashMap<String, EnablingComponent>,
+    pub components: Arc<HashMap<String, ComponentSpec>>,
+    pub enabling_components: Arc<HashMap<String, EnablingComponent>>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +47,9 @@ pub struct EnablingComponent {
 
 impl RuntimeFeatureRegistry {
     pub fn new(runtime_features: HashMap<String, RuntimeFeature>) -> Self {
-        Self { runtime_features }
+        Self {
+            runtime_features: Arc::new(runtime_features),
+        }
     }
 
     pub fn get_runtime_feature(&self, name: &str) -> Option<&RuntimeFeature> {
@@ -92,8 +95,8 @@ impl ComponentRegistry {
         enabling_components: HashMap<String, EnablingComponent>,
     ) -> Self {
         Self {
-            components,
-            enabling_components,
+            components: Arc::new(components),
+            enabling_components: Arc::new(enabling_components),
         }
     }
 
@@ -192,8 +195,8 @@ pub async fn build_registries(
     for node_index in sorted_indices {
         if let Node::Component(definition) = &component_graph[node_index] {
             let temp_component_registry = ComponentRegistry {
-                components: built_components.clone(),
-                enabling_components: enabling_components.clone(),
+                components: Arc::new(built_components.clone()),
+                enabling_components: Arc::new(enabling_components.clone()),
             };
 
             match process_component(
@@ -235,8 +238,8 @@ pub async fn build_registries(
     Ok((
         runtime_feature_registry,
         ComponentRegistry {
-            components: exposed_components,
-            enabling_components,
+            components: Arc::new(exposed_components),
+            enabling_components: Arc::new(enabling_components),
         },
     ))
 }
@@ -476,7 +479,7 @@ async fn process_component(
         name: definition.name.clone(),
         namespace: metadata.namespace,
         package: metadata.package,
-        bytes,
+        bytes: Arc::from(bytes),
         imports,
         exports,
         runtime_features: all_runtime_features.into_iter().collect(),
