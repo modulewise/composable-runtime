@@ -136,9 +136,9 @@ fn parse_toml_file(
     if let toml::Value::Table(table) = toml_doc {
         for (name, value) in table {
             if let toml::Value::Table(def_table) = value {
-                // Check if this is a runtime feature (wasmtime:*) or component
+                // Check if this is a runtime feature (wasmtime:* or host:*) or component
                 if let Some(uri) = def_table.get("uri").and_then(|v| v.as_str()) {
-                    if uri.starts_with("wasmtime:") {
+                    if uri.starts_with("wasmtime:") || uri.starts_with("host:") {
                         let definition_base: DefinitionBase =
                             toml::Value::Table(def_table).try_into().map_err(|e| {
                                 anyhow::anyhow!("Failed to parse runtime feature '{name}': {e}")
