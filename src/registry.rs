@@ -309,7 +309,7 @@ async fn create_runtime_feature_registry(
 ) -> Result<RuntimeFeatureRegistry> {
     let mut runtime_features = HashMap::new();
 
-    // convert to map for lookup
+    // Convert to map for lookup
     let mut host_extensions: HashMap<String, HostExtension> = host_extensions
         .into_iter()
         .map(|ext| (ext.name.clone(), ext))
