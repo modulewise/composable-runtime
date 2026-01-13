@@ -5,7 +5,7 @@
 
 pub use graph::ComponentGraph;
 pub use loader::load_definitions;
-pub use registry::register_host_feature;
+pub use registry::HostExtension;
 pub use runtime::{Component, ComponentState, Runtime};
 pub use wit::{Function, FunctionParam};
 

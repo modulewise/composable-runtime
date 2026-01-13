@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::composer::Composer;
 use crate::graph::{ComponentDefinition, ComponentGraph, Node, RuntimeFeatureDefinition};
@@ -13,26 +13,35 @@ type InitializerFn = Box<
         + Send
         + Sync,
 >;
-type HostFeature = (Vec<String>, InitializerFn); // (interfaces, initializer)
 
-static HOST_FEATURES: Mutex<Option<HashMap<String, HostFeature>>> = Mutex::new(None);
+/// A host-provided extension that can be passed to Runtime::from_graph_with_host_extensions().
+///
+/// Host extensions provide custom runtime features implemented by the embedding application.
+/// They are matched to `host:` URI entries in the component graph's TOML configuration.
+pub struct HostExtension {
+    /// The extension name (matches the name after "host:" in the URI)
+    pub name: String,
+    /// List of WIT interfaces this extension provides (e.g., "example:foo/bar")
+    pub interfaces: Vec<String>,
+    /// Function to add implementations to the linker
+    pub initializer: InitializerFn,
+}
 
-/// Register a host-provided feature before Runtime creation
-pub fn register_host_feature<F>(name: &str, interfaces: Vec<String>, initializer: F) -> Result<()>
-where
-    F: Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
-        + Send
-        + Sync
-        + 'static,
-{
-    let mut map = HOST_FEATURES.lock().unwrap();
-    if map.is_none() {
-        *map = Some(HashMap::new());
+impl HostExtension {
+    /// Create a new host extension
+    pub fn new<F>(name: impl Into<String>, interfaces: Vec<String>, initializer: F) -> Self
+    where
+        F: Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            name: name.into(),
+            interfaces,
+            initializer: Box::new(initializer),
+        }
     }
-    map.as_mut()
-        .unwrap()
-        .insert(name.to_string(), (interfaces, Box::new(initializer)));
-    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -224,6 +233,7 @@ impl Default for ComponentRegistry {
 /// Build registries from definitions
 pub async fn build_registries(
     component_graph: &ComponentGraph,
+    host_extensions: Vec<HostExtension>,
 ) -> Result<(RuntimeFeatureRegistry, ComponentRegistry)> {
     let mut runtime_feature_definitions = Vec::new();
     for node in component_graph.nodes() {
@@ -233,7 +243,7 @@ pub async fn build_registries(
     }
 
     let runtime_feature_registry =
-        create_runtime_feature_registry(runtime_feature_definitions).await?;
+        create_runtime_feature_registry(runtime_feature_definitions, host_extensions).await?;
 
     let sorted_indices = component_graph.get_build_order();
 
@@ -295,20 +305,26 @@ pub async fn build_registries(
 
 async fn create_runtime_feature_registry(
     runtime_feature_definitions: Vec<RuntimeFeatureDefinition>,
+    host_extensions: Vec<HostExtension>,
 ) -> Result<RuntimeFeatureRegistry> {
     let mut runtime_features = HashMap::new();
 
+    // Convert host extensions vec into a map for lookup
+    let mut host_extensions_map: HashMap<String, HostExtension> = host_extensions
+        .into_iter()
+        .map(|ext| (ext.name.clone(), ext))
+        .collect();
+
     for def in runtime_feature_definitions {
         let (interfaces, initializer) = if let Some(feature_name) = def.uri.strip_prefix("host:") {
-            let mut map = HOST_FEATURES.lock().unwrap();
-            let (interfaces, initializer) = map.as_mut()
-                .and_then(|m| m.remove(feature_name))
-                .ok_or_else(|| anyhow::anyhow!(
-                    "Host feature '{}' (URI: '{}') not registered. Call register_host_feature() before Runtime::from_graph()",
+            let host_ext = host_extensions_map.remove(feature_name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Host extension '{}' (URI: '{}') not provided. Pass it to Runtime::from_graph_with_host_extensions()",
                     feature_name,
                     def.uri
-                ))?;
-            (interfaces, Some(initializer))
+                )
+            })?;
+            (host_ext.interfaces, Some(host_ext.initializer))
         } else {
             // wasmtime feature
             (get_interfaces_for_runtime_feature(&def.uri), None)

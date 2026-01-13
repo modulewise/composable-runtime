@@ -10,7 +10,7 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::graph::ComponentGraph;
-use crate::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
+use crate::registry::{ComponentRegistry, HostExtension, RuntimeFeatureRegistry, build_registries};
 use crate::wit::Function;
 
 /// Wasm Component whose functions can be invoked
@@ -31,7 +31,19 @@ pub struct Runtime {
 impl Runtime {
     /// Create a Runtime from a ComponentGraph
     pub async fn from_graph(graph: &ComponentGraph) -> Result<Self> {
-        let (runtime_feature_registry, component_registry) = build_registries(graph).await?;
+        Self::from_graph_with_host_extensions(graph, vec![]).await
+    }
+
+    /// Create a Runtime from a ComponentGraph with host extensions
+    ///
+    /// Host extensions provide custom runtime features implemented by the embedding application.
+    /// Each extension is matched to a `host:<name>` URI entry in the component graph's TOML configuration.
+    pub async fn from_graph_with_host_extensions(
+        graph: &ComponentGraph,
+        host_extensions: Vec<HostExtension>,
+    ) -> Result<Self> {
+        let (runtime_feature_registry, component_registry) =
+            build_registries(graph, host_extensions).await?;
         let invoker = Invoker::new()?;
         Ok(Self {
             invoker,
