@@ -34,10 +34,7 @@ impl Runtime {
         Self::from_graph_with_host_extensions(graph, vec![]).await
     }
 
-    /// Create a Runtime from a ComponentGraph with host extensions
-    ///
-    /// Host extensions provide custom runtime features implemented by the embedding application.
-    /// Each extension is matched to a `host:<name>` URI entry in the component graph's TOML configuration.
+    /// Create a Runtime from a ComponentGraph with HostExtensions
     pub async fn from_graph_with_host_extensions(
         graph: &ComponentGraph,
         host_extensions: Vec<HostExtension>,
@@ -127,7 +124,7 @@ impl Runtime {
         self.instantiate_with_env(component_name, &[]).await
     }
 
-    /// Instantiate a component
+    /// Instantiate a component with environment variables
     pub async fn instantiate_with_env(
         &self,
         component_name: &str,

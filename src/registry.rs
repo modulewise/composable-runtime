@@ -21,7 +21,7 @@ type InitializerFn = Box<
 pub struct HostExtension {
     /// The extension name (matches the name after "host:" in the URI)
     pub name: String,
-    /// List of WIT interfaces this extension provides (e.g., "example:foo/bar")
+    /// List of WIT interfaces this extension provides (e.g. "example:foo/bar")
     pub interfaces: Vec<String>,
     /// Function to add implementations to the linker
     pub initializer: InitializerFn,
@@ -309,15 +309,15 @@ async fn create_runtime_feature_registry(
 ) -> Result<RuntimeFeatureRegistry> {
     let mut runtime_features = HashMap::new();
 
-    // Convert host extensions vec into a map for lookup
-    let mut host_extensions_map: HashMap<String, HostExtension> = host_extensions
+    // convert to map for lookup
+    let mut host_extensions: HashMap<String, HostExtension> = host_extensions
         .into_iter()
         .map(|ext| (ext.name.clone(), ext))
         .collect();
 
     for def in runtime_feature_definitions {
         let (interfaces, initializer) = if let Some(feature_name) = def.uri.strip_prefix("host:") {
-            let host_ext = host_extensions_map.remove(feature_name).ok_or_else(|| {
+            let host_ext = host_extensions.remove(feature_name).ok_or_else(|| {
                 anyhow::anyhow!(
                     "Host extension '{}' (URI: '{}') not provided. Pass it to Runtime::from_graph_with_host_extensions()",
                     feature_name,
