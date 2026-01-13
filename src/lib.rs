@@ -5,7 +5,8 @@
 
 pub use graph::ComponentGraph;
 pub use loader::load_definitions;
-pub use runtime::{Component, Runtime};
+pub use registry::HostExtension;
+pub use runtime::{Component, ComponentState, Runtime};
 pub use wit::{Function, FunctionParam};
 
 // exposed for testing, hidden from docs

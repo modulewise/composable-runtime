@@ -8,11 +8,69 @@ use crate::composer::Composer;
 use crate::graph::{ComponentDefinition, ComponentGraph, Node, RuntimeFeatureDefinition};
 use crate::wit::{ComponentMetadata, Parser};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+type InitializerFn = Box<
+    dyn Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
+        + Send
+        + Sync,
+>;
+
+/// A host-provided extension that can be passed to Runtime::from_graph_with_host_extensions().
+///
+/// Host extensions provide custom runtime features implemented by the embedding application.
+/// They are matched to `host:` URI entries in the component graph's TOML configuration.
+pub struct HostExtension {
+    /// The extension name (matches the name after "host:" in the URI)
+    pub name: String,
+    /// List of WIT interfaces this extension provides (e.g. "example:foo/bar")
+    pub interfaces: Vec<String>,
+    /// Function to add implementations to the linker
+    pub initializer: InitializerFn,
+}
+
+impl HostExtension {
+    /// Create a new host extension
+    pub fn new<F>(name: impl Into<String>, interfaces: Vec<String>, initializer: F) -> Self
+    where
+        F: Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            name: name.into(),
+            interfaces,
+            initializer: Box::new(initializer),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct RuntimeFeature {
     pub uri: String,
     pub enables: String,
-    pub interfaces: Vec<String>, // WASI interfaces this runtime feature provides
+    pub interfaces: Vec<String>,
+    #[serde(skip)]
+    pub initializer: Option<
+        Box<
+            dyn Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
+                + Send
+                + Sync,
+        >,
+    >,
+}
+
+impl std::fmt::Debug for RuntimeFeature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeFeature")
+            .field("uri", &self.uri)
+            .field("enables", &self.enables)
+            .field("interfaces", &self.interfaces)
+            .field(
+                "initializer",
+                &self.initializer.as_ref().map(|_| "<function>"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +233,7 @@ impl Default for ComponentRegistry {
 /// Build registries from definitions
 pub async fn build_registries(
     component_graph: &ComponentGraph,
+    host_extensions: Vec<HostExtension>,
 ) -> Result<(RuntimeFeatureRegistry, ComponentRegistry)> {
     let mut runtime_feature_definitions = Vec::new();
     for node in component_graph.nodes() {
@@ -184,7 +243,7 @@ pub async fn build_registries(
     }
 
     let runtime_feature_registry =
-        create_runtime_feature_registry(runtime_feature_definitions).await?;
+        create_runtime_feature_registry(runtime_feature_definitions, host_extensions).await?;
 
     let sorted_indices = component_graph.get_build_order();
 
@@ -246,15 +305,36 @@ pub async fn build_registries(
 
 async fn create_runtime_feature_registry(
     runtime_feature_definitions: Vec<RuntimeFeatureDefinition>,
+    host_extensions: Vec<HostExtension>,
 ) -> Result<RuntimeFeatureRegistry> {
     let mut runtime_features = HashMap::new();
 
+    // Convert to map for lookup
+    let mut host_extensions: HashMap<String, HostExtension> = host_extensions
+        .into_iter()
+        .map(|ext| (ext.name.clone(), ext))
+        .collect();
+
     for def in runtime_feature_definitions {
-        let interfaces = get_interfaces_for_runtime_feature(&def.uri);
+        let (interfaces, initializer) = if let Some(feature_name) = def.uri.strip_prefix("host:") {
+            let host_ext = host_extensions.remove(feature_name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Host extension '{}' (URI: '{}') not provided. Pass it to Runtime::from_graph_with_host_extensions()",
+                    feature_name,
+                    def.uri
+                )
+            })?;
+            (host_ext.interfaces, Some(host_ext.initializer))
+        } else {
+            // wasmtime feature
+            (get_interfaces_for_runtime_feature(&def.uri), None)
+        };
+
         let runtime_feature = RuntimeFeature {
             uri: def.uri.clone(),
             enables: def.enables.clone(),
             interfaces,
+            initializer,
         };
         runtime_features.insert(def.name.clone(), runtime_feature);
     }
@@ -273,7 +353,10 @@ fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
             "wasi:io/poll@0.2.6".to_string(),
             "wasi:io/streams@0.2.6".to_string(),
         ],
-        "wasmtime:random" => vec!["wasi:random/random@0.2.6".to_string()],
+        "wasmtime:random" => vec![
+            "wasi:random/random@0.2.6".to_string(),
+            "wasi:random/insecure-seed@0.2.6".to_string(),
+        ],
         "wasmtime:inherit-network" => vec![
             "wasi:sockets/tcp@0.2.6".to_string(),
             "wasi:sockets/udp@0.2.6".to_string(),
@@ -281,6 +364,11 @@ fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
             "wasi:sockets/instance-network@0.2.6".to_string(),
         ],
         "wasmtime:allow-ip-name-lookup" => vec!["wasi:sockets/ip-name-lookup@0.2.6".to_string()],
+        "wasmtime:inherit-stdio" => vec![
+            "wasi:cli/stdin@0.2.6".to_string(),
+            "wasi:cli/stdout@0.2.6".to_string(),
+            "wasi:cli/stderr@0.2.6".to_string(),
+        ],
         "wasmtime:wasip2" => vec![
             "wasi:cli/environment@0.2.6".to_string(),
             "wasi:cli/exit@0.2.6".to_string(),
@@ -300,6 +388,7 @@ fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
             "wasi:io/poll@0.2.6".to_string(),
             "wasi:io/streams@0.2.6".to_string(),
             "wasi:random/random@0.2.6".to_string(),
+            "wasi:random/insecure-seed@0.2.6".to_string(),
             "wasi:sockets/tcp@0.2.6".to_string(),
             "wasi:sockets/udp@0.2.6".to_string(),
             "wasi:sockets/network@0.2.6".to_string(),
@@ -321,21 +410,20 @@ fn is_import_satisfied(import: &str, runtime_interfaces: &HashSet<String>) -> bo
         return true;
     }
 
-    if let Some((interface_name, requested_version)) = import.rsplit_once('@') {
-        if let Some(requested_semver) = parse_semver(requested_version) {
-            for available in runtime_interfaces {
-                if let Some((available_name, available_version)) = available.rsplit_once('@') {
-                    if interface_name == available_name {
-                        if let Some(available_semver) = parse_semver(available_version) {
-                            // same major, same minor, patch >= requested
-                            if available_semver.0 == requested_semver.0
-                                && available_semver.1 == requested_semver.1
-                                && available_semver.2 >= requested_semver.2
-                            {
-                                return true;
-                            }
-                        }
-                    }
+    if let Some((interface_name, requested_version)) = import.rsplit_once('@')
+        && let Some(requested_semver) = parse_semver(requested_version)
+    {
+        for available in runtime_interfaces {
+            if let Some((available_name, available_version)) = available.rsplit_once('@')
+                && interface_name == available_name
+                && let Some(available_semver) = parse_semver(available_version)
+            {
+                // same major, same minor, patch >= requested
+                if available_semver.0 == requested_semver.0
+                    && available_semver.1 == requested_semver.1
+                    && available_semver.2 >= requested_semver.2
+                {
+                    return true;
                 }
             }
         }
@@ -345,14 +433,14 @@ fn is_import_satisfied(import: &str, runtime_interfaces: &HashSet<String>) -> bo
 
 fn parse_semver(version: &str) -> Option<(u32, u32, u32)> {
     let parts: Vec<&str> = version.split('.').collect();
-    if parts.len() == 3 {
-        if let (Ok(major), Ok(minor), Ok(patch)) = (
+    if parts.len() == 3
+        && let (Ok(major), Ok(minor), Ok(patch)) = (
             parts[0].parse::<u32>(),
             parts[1].parse::<u32>(),
             parts[2].parse::<u32>(),
-        ) {
-            return Some((major, minor, patch));
-        }
+        )
+    {
+        return Some((major, minor, patch));
     }
     None
 }

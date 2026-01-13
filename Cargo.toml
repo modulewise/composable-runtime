@@ -1,6 +1,6 @@
 [package]
 name = "composable-runtime"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Modulewise Composable Runtime"
 
@@ -12,24 +12,24 @@ petgraph = "0.8"
 rustyline = "17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-static-config = "0.1"
+static-config = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 toml = "0.9"
 wac-graph = "0.8"
 wac-types = "0.8"
-wasm-pkg-client = "0.12"
-wasmtime = "37"
-wasmtime-wasi = "37"
-wasmtime-wasi-config = "37"
-wasmtime-wasi-http = "37"
-wasmtime-wasi-io = "37"
-wit-component = "0.239"
-wit-parser = "0.239"
+wasm-pkg-client = "0.13"
+wasmtime = "39"
+wasmtime-wasi = "39"
+wasmtime-wasi-config = "39"
+wasmtime-wasi-http = "39"
+wasmtime-wasi-io = "39"
+wit-component = "0.240"
+wit-parser = "0.240"
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-wat = "1.239.0"
+wat = "1.240"
 
 [features]
 default = ["cli"]

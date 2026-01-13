@@ -10,7 +10,7 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::graph::ComponentGraph;
-use crate::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
+use crate::registry::{ComponentRegistry, HostExtension, RuntimeFeatureRegistry, build_registries};
 use crate::wit::Function;
 
 /// Wasm Component whose functions can be invoked
@@ -31,7 +31,16 @@ pub struct Runtime {
 impl Runtime {
     /// Create a Runtime from a ComponentGraph
     pub async fn from_graph(graph: &ComponentGraph) -> Result<Self> {
-        let (runtime_feature_registry, component_registry) = build_registries(graph).await?;
+        Self::from_graph_with_host_extensions(graph, vec![]).await
+    }
+
+    /// Create a Runtime from a ComponentGraph with HostExtensions
+    pub async fn from_graph_with_host_extensions(
+        graph: &ComponentGraph,
+        host_extensions: Vec<HostExtension>,
+    ) -> Result<Self> {
+        let (runtime_feature_registry, component_registry) =
+            build_registries(graph, host_extensions).await?;
         let invoker = Invoker::new()?;
         Ok(Self {
             invoker,
@@ -68,6 +77,18 @@ impl Runtime {
         function_name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value> {
+        self.invoke_with_env(component_name, function_name, args, &[])
+            .await
+    }
+
+    /// Invoke a component function with environment variables
+    pub async fn invoke_with_env(
+        &self,
+        component_name: &str,
+        function_name: &str,
+        args: Vec<serde_json::Value>,
+        env_vars: &[(&str, &str)],
+    ) -> Result<serde_json::Value> {
         let spec = self
             .component_registry
             .get_component(component_name)
@@ -90,6 +111,36 @@ impl Runtime {
                 &self.runtime_feature_registry,
                 function.clone(),
                 args,
+                env_vars,
+            )
+            .await
+    }
+
+    /// Instantiate a component
+    pub async fn instantiate(
+        &self,
+        component_name: &str,
+    ) -> Result<(Store<ComponentState>, wasmtime::component::Instance)> {
+        self.instantiate_with_env(component_name, &[]).await
+    }
+
+    /// Instantiate a component with environment variables
+    pub async fn instantiate_with_env(
+        &self,
+        component_name: &str,
+        env_vars: &[(&str, &str)],
+    ) -> Result<(Store<ComponentState>, wasmtime::component::Instance)> {
+        let spec = self
+            .component_registry
+            .get_component(component_name)
+            .ok_or_else(|| anyhow::anyhow!("Component '{component_name}' not found"))?;
+
+        self.invoker
+            .instantiate_from_bytes(
+                &spec.bytes,
+                &spec.runtime_features,
+                &self.runtime_feature_registry,
+                env_vars,
             )
             .await
     }
@@ -159,40 +210,119 @@ impl Invoker {
             if let Some(runtime_feature) =
                 runtime_feature_registry.get_runtime_feature(feature_name)
             {
-                match runtime_feature.uri.as_str() {
-                    "wasmtime:wasip2" => {
-                        // Comprehensive WASI Preview 2 support
-                        wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+                if let Some(wasmtime_feature) = runtime_feature.uri.strip_prefix("wasmtime:") {
+                    match wasmtime_feature {
+                        "wasip2" => {
+                            // Comprehensive WASI Preview 2 support
+                            wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+                        }
+                        "http" => {
+                            wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
+                        }
+                        "io" => {
+                            wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
+                        }
+                        "random" => {
+                            wasmtime_wasi::p2::bindings::random::random::add_to_linker::<
+                                ComponentState,
+                                WasiRandom,
+                            >(&mut linker, |state| {
+                                <ComponentState as WasiRandomView>::random(state)
+                            })?;
+                            wasmtime_wasi::p2::bindings::random::insecure_seed::add_to_linker::<
+                                ComponentState,
+                                WasiRandom,
+                            >(&mut linker, |state| {
+                                <ComponentState as WasiRandomView>::random(state)
+                            })?;
+                        }
+                        "inherit-stdio" | "inherit-network" | "allow-ip-name-lookup" => {
+                            // These runtime features are handled in WASI context, not linker
+                            // No linker functions to add, only context configuration
+                        }
+                        _ => {
+                            println!(
+                                "Unknown wasmtime feature for linker: {}",
+                                runtime_feature.uri
+                            );
+                        }
                     }
-                    "wasmtime:http" => {
-                        wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
-                    }
-                    "wasmtime:io" => {
-                        wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
-                    }
-                    "wasmtime:random" => {
-                        wasmtime_wasi::p2::bindings::random::random::add_to_linker::<
-                            ComponentState,
-                            WasiRandom,
-                        >(&mut linker, |state| {
-                            <ComponentState as WasiRandomView>::random(state)
-                        })?;
-                    }
-                    "wasmtime:inherit-network" | "wasmtime:allow-ip-name-lookup" => {
-                        // These runtime features are handled in WASI context, not linker
-                        // No linker functions to add, only context configuration
-                    }
-                    _ => {
-                        println!(
-                            "Unknown runtime feature for linker: {}",
-                            runtime_feature.uri
-                        );
+                } else if runtime_feature.uri.starts_with("host:") {
+                    if let Some(initializer) = &runtime_feature.initializer {
+                        initializer(&mut linker)?;
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "Host feature '{}' requested but no initializer registered",
+                            feature_name
+                        ));
                     }
                 }
             }
             // Component runtime features are handled during composition, not at runtime
         }
         Ok(linker)
+    }
+
+    async fn instantiate_from_bytes(
+        &self,
+        bytes: &[u8],
+        runtime_features: &[String],
+        runtime_feature_registry: &RuntimeFeatureRegistry,
+        env_vars: &[(&str, &str)],
+    ) -> Result<(Store<ComponentState>, wasmtime::component::Instance)> {
+        let component_bytes = bytes.to_vec();
+        let linker = self.create_linker(runtime_features, runtime_feature_registry)?;
+
+        // Build WASI context based on runtime features
+        let mut wasi_builder = WasiCtxBuilder::new();
+
+        if !env_vars.is_empty() {
+            wasi_builder.envs(env_vars);
+        }
+
+        for feature_name in runtime_features {
+            if let Some(runtime_feature) =
+                runtime_feature_registry.get_runtime_feature(feature_name)
+                && let Some(wasmtime_feature) = runtime_feature.uri.strip_prefix("wasmtime:")
+            {
+                match wasmtime_feature {
+                    "inherit-stdio" => {
+                        wasi_builder.inherit_stdio();
+                    }
+                    "inherit-network" => {
+                        wasi_builder.inherit_network();
+                    }
+                    "allow-ip-name-lookup" => {
+                        wasi_builder.allow_ip_name_lookup(true);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Check if HTTP context needed
+        let needs_http = runtime_features.iter().any(|feature_name| {
+            runtime_feature_registry
+                .get_runtime_feature(feature_name)
+                .and_then(|cap| cap.uri.strip_prefix("wasmtime:"))
+                == Some("http")
+        });
+
+        let state = ComponentState {
+            wasi_ctx: wasi_builder.build(),
+            wasi_http_ctx: if needs_http {
+                Some(WasiHttpCtx::new())
+            } else {
+                None
+            },
+            resource_table: ResourceTable::new(),
+        };
+
+        let mut store = Store::new(&self.engine, state);
+        let component = WasmComponent::from_binary(&self.engine, &component_bytes)?;
+        let instance = linker.instantiate_async(&mut store, &component).await?;
+
+        Ok((store, instance))
     }
 
     pub async fn invoke(
@@ -202,60 +332,14 @@ impl Invoker {
         runtime_feature_registry: &RuntimeFeatureRegistry,
         function: Function,
         args: Vec<serde_json::Value>,
+        env_vars: &[(&str, &str)],
     ) -> Result<serde_json::Value> {
-        let component_bytes = bytes.to_vec();
-
         let interface_str = function.interface().as_str();
         let function_name = function.function_name();
-        let linker = self.create_linker(runtime_features, runtime_feature_registry)?;
-        let mut wasi_builder = WasiCtxBuilder::new();
 
-        // Process wasmtime runtime_features for WASI context
-        for feature_name in runtime_features {
-            if let Some(runtime_feature) =
-                runtime_feature_registry.get_runtime_feature(feature_name)
-            {
-                if let Some(wasmtime_feature) = runtime_feature.uri.strip_prefix("wasmtime:") {
-                    match wasmtime_feature {
-                        "inherit-network" => {
-                            wasi_builder.inherit_network();
-                        }
-                        "allow-ip-name-lookup" => {
-                            wasi_builder.allow_ip_name_lookup(true);
-                        }
-                        "http" => {
-                            // HTTP feature only adds linker functions, no WASI context changes
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        let wasi = wasi_builder.build();
-
-        // Check if any feature requires HTTP context
-        let needs_http = runtime_features.iter().any(|feature_name| {
-            runtime_feature_registry
-                .get_runtime_feature(feature_name)
-                .and_then(|cap| cap.uri.strip_prefix("wasmtime:"))
-                == Some("http")
-        });
-
-        let wasi_http_ctx = if needs_http {
-            Some(WasiHttpCtx::new())
-        } else {
-            None
-        };
-
-        let state = ComponentState {
-            wasi_ctx: wasi,
-            wasi_http_ctx,
-            resource_table: ResourceTable::new(),
-        };
-        let mut store = Store::new(&self.engine, state);
-        let component = WasmComponent::from_binary(&self.engine, &component_bytes)?;
-        let instance = linker.instantiate_async(&mut store, &component).await?;
+        let (mut store, instance) = self
+            .instantiate_from_bytes(bytes, runtime_features, runtime_feature_registry, env_vars)
+            .await?;
 
         let interface_export = instance
             .get_export(&mut store, None, interface_str)
@@ -273,7 +357,8 @@ impl Invoker {
             .ok_or_else(|| anyhow::anyhow!("Function handle invalid for '{function_name}'"))?;
 
         let mut arg_vals: Vec<Val> = vec![];
-        let params = func.params(&store).clone();
+        let func_ty = func.ty(&store);
+        let params: Vec<_> = func_ty.params().collect();
         if args.len() != params.len() {
             return Err(anyhow::anyhow!(
                 "Wrong number of args: expected {}, got {}",
@@ -288,7 +373,7 @@ impl Invoker {
             arg_vals.push(val);
         }
 
-        let num_results = func.results(&store).len();
+        let num_results = func_ty.results().len();
         let mut results = vec![Val::Bool(false); num_results];
 
         func.call_async(&mut store, &arg_vals, &mut results).await?;
@@ -317,14 +402,12 @@ impl Invoker {
     // This handles the case where wasmtime decomposes tuples/records into separate Val objects
     fn reconstruct_wit_return(results: &[Val], function: &Function) -> Result<serde_json::Value> {
         // Check if this is a record that needs field mapping to reconstruct as an object
-        if let Some(return_schema) = function.result() {
-            if let Some(schema_obj) = return_schema.as_object() {
-                if schema_obj.get("type").and_then(|t| t.as_str()) == Some("object")
-                    && schema_obj.contains_key("properties")
-                {
-                    return Self::reconstruct_record(results, schema_obj);
-                }
-            }
+        if let Some(return_schema) = function.result()
+            && let Some(schema_obj) = return_schema.as_object()
+            && schema_obj.get("type").and_then(|t| t.as_str()) == Some("object")
+            && schema_obj.contains_key("properties")
+        {
+            return Self::reconstruct_record(results, schema_obj);
         }
 
         // All other cases (tuples, unknown schemas, malformed schemas) -> array
@@ -581,7 +664,18 @@ fn val_to_json(val: &Val) -> serde_json::Value {
             let mut obj = serde_json::Map::new();
             obj.insert("type".to_string(), serde_json::Value::String(name.clone()));
             if let Some(v) = val {
-                obj.insert("value".to_string(), val_to_json(v));
+                match val_to_json(v) {
+                    serde_json::Value::Object(payload_obj) => {
+                        for (k, v) in payload_obj {
+                            obj.insert(k, v);
+                        }
+                    }
+                    other => {
+                        // If payload is not an object (primitive, array, etc.),
+                        // fall back to "value" key to maintain valid JSON
+                        obj.insert("value".to_string(), other);
+                    }
+                }
             }
             serde_json::Value::Object(obj)
         }

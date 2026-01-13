@@ -313,7 +313,7 @@ impl ComponentGraph {
         self.node_map.get(name).copied()
     }
 
-    pub fn get_dependencies(&self, index: NodeIndex) -> petgraph::graph::Neighbors<Edge> {
+    pub fn get_dependencies(&self, index: NodeIndex) -> petgraph::graph::Neighbors<'_, Edge> {
         self.graph
             .neighbors_directed(index, petgraph::Direction::Incoming)
     }

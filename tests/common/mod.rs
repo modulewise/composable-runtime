@@ -94,7 +94,7 @@ pub fn interceptor_wasm() -> TestFile {
 pub fn configurable_wasm() -> TestFile {
     let wat = r#"
         (component
-            (import "wasi:config/store@0.2.0-draft" (instance))
+            (import "wasi:config/store@0.2.0-rc.1" (instance))
         )
     "#;
     create_wasm_test_file(wat)

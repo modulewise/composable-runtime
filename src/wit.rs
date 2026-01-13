@@ -26,22 +26,22 @@ pub struct Interface {
 impl Interface {
     /// Parse and validate a WIT interface string
     pub fn parse(s: &str) -> Result<Self> {
-        if let Some((namespace, rest)) = s.split_once(':') {
-            if let Some((package, after_slash)) = rest.split_once('/') {
-                let (interface, version) = if let Some((i, v)) = after_slash.split_once('@') {
-                    (i, Some(v.to_string()))
-                } else {
-                    (after_slash, None)
-                };
+        if let Some((namespace, rest)) = s.split_once(':')
+            && let Some((package, after_slash)) = rest.split_once('/')
+        {
+            let (interface, version) = if let Some((i, v)) = after_slash.split_once('@') {
+                (i, Some(v.to_string()))
+            } else {
+                (after_slash, None)
+            };
 
-                return Ok(Self {
-                    namespace: namespace.to_string(),
-                    package: package.to_string(),
-                    interface: interface.to_string(),
-                    version,
-                    full_name: s.to_string(),
-                });
-            }
+            return Ok(Self {
+                namespace: namespace.to_string(),
+                package: package.to_string(),
+                interface: interface.to_string(),
+                version,
+                full_name: s.to_string(),
+            });
         }
 
         Err(anyhow::anyhow!(
@@ -188,6 +188,11 @@ impl Parser {
         let mut imports = Vec::new();
         for (_, item) in &world.imports {
             if let wit_parser::WorldItem::Interface { id, stability: _ } = item {
+                let interface = resolve.interfaces.get(*id).unwrap();
+                // Skip type-only interfaces (no functions to satisfy at runtime)
+                if interface.functions.is_empty() {
+                    continue;
+                }
                 let interface_name = Self::build_full_interface_name(&resolve, *id)?;
                 imports.push(interface_name);
             }
@@ -393,12 +398,9 @@ impl Parser {
                         Ok(())
                     }
                     wit_parser::TypeDefKind::Flags(_) => Ok(()),
-                    wit_parser::TypeDefKind::Resource => Err(anyhow::anyhow!(
-                        "Resource types cannot be represented in JSON-RPC"
-                    )),
-                    wit_parser::TypeDefKind::Handle(_) => Err(anyhow::anyhow!(
-                        "Resource handles cannot be represented in JSON-RPC"
-                    )),
+                    // Resources get placeholders
+                    wit_parser::TypeDefKind::Resource => Ok(()),
+                    wit_parser::TypeDefKind::Handle(_) => Ok(()),
                     _ => Err(anyhow::anyhow!("Unsupported WIT type: {:?}", type_def.kind)),
                 }
             }
@@ -567,10 +569,10 @@ impl Parser {
                         })
                     }
                     wit_parser::TypeDefKind::Resource => {
-                        unreachable!("Resource types should be caught by validation")
+                        json!({"type": "resource", "description": "Resource handle (not representable in JSON-RPC)"})
                     }
                     wit_parser::TypeDefKind::Handle(_) => {
-                        unreachable!("Resource handles should be caught by validation")
+                        json!({"type": "resource", "description": "Resource handle (not representable in JSON-RPC)"})
                     }
                     _ => {
                         unreachable!("Unsupported types should be caught by validation")
