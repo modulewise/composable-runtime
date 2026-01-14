@@ -282,10 +282,7 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                                 }
 
                                 println!("Invoking {target}...");
-                                match runtime
-                                    .invoke(component_name, function.function_name(), final_args)
-                                    .await
-                                {
+                                match runtime.invoke(component_name, func_name, final_args).await {
                                     Ok(result) => {
                                         println!(
                                             "{}",

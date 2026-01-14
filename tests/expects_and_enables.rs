@@ -65,11 +65,11 @@ async fn test_expects_and_enables() {
     assert_eq!(component.runtime_features, ["infra"]);
     let functions = component.functions.clone().unwrap();
     assert_eq!(functions.len(), 1);
-    let function = functions.get("handle").unwrap();
+    let function = functions.get("handler.handle").unwrap();
     assert!(function.params().is_empty());
     assert_eq!(function.result(), None);
     assert_eq!(
-        function.interface().as_str(),
-        "modulewise:test/handler@0.1.0"
+        function.interface().map(|i| i.as_str()),
+        Some("modulewise:test/handler@0.1.0")
     );
 }

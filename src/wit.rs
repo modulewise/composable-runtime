@@ -84,7 +84,7 @@ impl fmt::Display for Interface {
 /// A function specification
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function {
-    interface: Interface,
+    interface: Option<Interface>,
     function_name: String,
     docs: String,
     params: Vec<FunctionParam>,
@@ -94,7 +94,7 @@ pub struct Function {
 impl Function {
     /// Create a new WIT function specification from parsed data
     fn new(
-        interface: Interface,
+        interface: Option<Interface>,
         function_name: String,
         docs: String,
         params: Vec<FunctionParam>,
@@ -109,9 +109,9 @@ impl Function {
         }
     }
 
-    /// Get the interface
-    pub fn interface(&self) -> &Interface {
-        &self.interface
+    /// Get the interface (None for direct function exports)
+    pub fn interface(&self) -> Option<&Interface> {
+        self.interface.as_ref()
     }
 
     /// Get the function name
@@ -133,11 +133,24 @@ impl Function {
     pub fn result(&self) -> Option<&serde_json::Value> {
         self.result.as_ref()
     }
+
+    /// Get the function key used in maps and invoke calls.
+    /// - Direct function exports: `function_name`
+    /// - Interface function exports: `unqualified_interface.function_name`
+    pub fn key(&self) -> String {
+        match &self.interface {
+            Some(iface) => format!("{}.{}", iface.interface_name(), self.function_name),
+            None => self.function_name.clone(),
+        }
+    }
 }
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}#{}", self.interface, self.function_name)
+        match &self.interface {
+            Some(iface) => write!(f, "{}#{}", iface, self.function_name),
+            None => write!(f, "{}", self.function_name),
+        }
     }
 }
 
@@ -211,17 +224,21 @@ impl Parser {
         let function_map = if parse_functions {
             let mut functions = Vec::new();
             for (_, item) in &world.exports {
-                if let wit_parser::WorldItem::Interface { id, stability: _ } = item {
-                    let interface_functions = Self::parse_interface(id, &resolve)?;
-                    functions.extend(interface_functions);
+                match item {
+                    wit_parser::WorldItem::Interface { id, stability: _ } => {
+                        let interface_functions = Self::parse_interface(id, &resolve)?;
+                        functions.extend(interface_functions);
+                    }
+                    wit_parser::WorldItem::Function(func) => {
+                        let function = Self::parse_function(func, None, &resolve)?;
+                        functions.push(function);
+                    }
+                    wit_parser::WorldItem::Type(_) => {
+                        // No functions
+                    }
                 }
             }
-            Some(
-                functions
-                    .into_iter()
-                    .map(|f| (f.function_name().to_string(), f))
-                    .collect(),
-            )
+            Some(Self::build_function_map(functions)?)
         } else {
             None
         };
@@ -298,39 +315,70 @@ impl Parser {
         };
 
         let mut functions = Vec::new();
-        for (func_name, func) in &interface.functions {
-            // Validate and resolve parameter types
-            let mut params = Vec::new();
-            for (param_name, param_type) in &func.params {
-                Self::validate_wit_type_for_json_rpc(*param_type, resolve)?;
-                let json_schema = Self::wit_type_to_json_schema(*param_type, resolve);
-                let is_optional = Self::is_optional_type(*param_type, resolve);
-                params.push(FunctionParam {
-                    name: param_name.clone(),
-                    is_optional,
-                    json_schema,
-                });
-            }
-
-            // Validate and convert result type
-            let result = match &func.result {
-                Some(return_type) => {
-                    Self::validate_wit_type_for_json_rpc(*return_type, resolve)?;
-                    Some(Self::wit_type_to_json_schema(*return_type, resolve))
-                }
-                None => None,
-            };
-
-            let function_obj = Function::new(
-                interface_obj.clone(),
-                func_name.clone(),
-                func.docs.contents.as_deref().unwrap_or("").to_string(),
-                params,
-                result,
-            );
+        for (_, func) in &interface.functions {
+            let function_obj = Self::parse_function(func, Some(interface_obj.clone()), resolve)?;
             functions.push(function_obj);
         }
         Ok(functions)
+    }
+
+    fn parse_function(
+        func: &wit_parser::Function,
+        interface: Option<Interface>,
+        resolve: &Resolve,
+    ) -> Result<Function> {
+        // Validate and resolve parameter types
+        let mut params = Vec::new();
+        for (param_name, param_type) in &func.params {
+            Self::validate_wit_type_for_json_rpc(*param_type, resolve)?;
+            let json_schema = Self::wit_type_to_json_schema(*param_type, resolve);
+            let is_optional = Self::is_optional_type(*param_type, resolve);
+            params.push(FunctionParam {
+                name: param_name.clone(),
+                is_optional,
+                json_schema,
+            });
+        }
+
+        // Validate and convert result type
+        let result = match &func.result {
+            Some(return_type) => {
+                Self::validate_wit_type_for_json_rpc(*return_type, resolve)?;
+                Some(Self::wit_type_to_json_schema(*return_type, resolve))
+            }
+            None => None,
+        };
+
+        Ok(Function::new(
+            interface,
+            func.name.clone(),
+            func.docs.contents.as_deref().unwrap_or("").to_string(),
+            params,
+            result,
+        ))
+    }
+
+    // Build a function map keyed by Function::key().
+    // Returns an error if more than one interface with the same unqualified
+    // name exports the same function name.
+    fn build_function_map(functions: Vec<Function>) -> Result<HashMap<String, Function>> {
+        let mut result: HashMap<String, Function> = HashMap::new();
+
+        for func in functions {
+            let key = func.key();
+
+            if let Some(existing) = result.get(&key) {
+                return Err(anyhow::anyhow!(
+                    "Ambiguous function: interfaces '{}' and '{}' both export '{}'.",
+                    existing.interface().unwrap().as_str(),
+                    func.interface().unwrap().as_str(),
+                    key
+                ));
+            }
+            result.insert(key, func);
+        }
+
+        Ok(result)
     }
 
     fn validate_wit_type_for_json_rpc(wit_type: Type, resolve: &Resolve) -> Result<()> {
