@@ -33,14 +33,14 @@ async fn test_direct_wasm_file() {
     assert_eq!(component.runtime_features.len(), 0);
     let functions = component.functions.clone().unwrap();
     assert_eq!(functions.len(), 1);
-    let function = functions.get("query").unwrap();
+    let function = functions.get("client.query").unwrap();
     assert_eq!(
         function.params(),
         Vec::<composable_runtime::FunctionParam>::new()
     );
     assert_eq!(function.result(), None);
     assert_eq!(
-        function.interface().as_str(),
-        "modulewise:test/client@0.1.0"
+        function.interface().map(|i| i.as_str()),
+        Some("modulewise:test/client@0.1.0")
     );
 }

@@ -334,24 +334,33 @@ impl Invoker {
         args: Vec<serde_json::Value>,
         env_vars: &[(&str, &str)],
     ) -> Result<serde_json::Value> {
-        let interface_str = function.interface().as_str();
         let function_name = function.function_name();
 
         let (mut store, instance) = self
             .instantiate_from_bytes(bytes, runtime_features, runtime_feature_registry, env_vars)
             .await?;
 
-        let interface_export = instance
-            .get_export(&mut store, None, interface_str)
-            .ok_or_else(|| anyhow::anyhow!("Interface '{interface_str}' not found"))?;
-        let parent_export_idx = Some(&interface_export.1);
-        let func_export = instance
-            .get_export(&mut store, parent_export_idx, function_name)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Function '{function_name}' not found in interface '{interface_str}'"
-                )
-            })?;
+        // Look up the function - either within an interface or as a direct export
+        let func_export = if let Some(interface) = function.interface() {
+            let interface_str = interface.as_str();
+            let interface_export = instance
+                .get_export(&mut store, None, interface_str)
+                .ok_or_else(|| anyhow::anyhow!("Interface '{interface_str}' not found"))?;
+            let parent_export_idx = Some(&interface_export.1);
+            instance
+                .get_export(&mut store, parent_export_idx, function_name)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Function '{function_name}' not found in interface '{interface_str}'"
+                    )
+                })?
+        } else {
+            instance
+                .get_export(&mut store, None, function_name)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Function '{function_name}' not found in component exports")
+                })?
+        };
         let func = instance
             .get_func(&mut store, func_export.1)
             .ok_or_else(|| anyhow::anyhow!("Function handle invalid for '{function_name}'"))?;
