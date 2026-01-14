@@ -133,7 +133,7 @@ pub fn get_runtime_feature_definition<'a>(
 pub async fn build_registries_and_assert_ok(
     graph: &ComponentGraph,
 ) -> (RuntimeFeatureRegistry, ComponentRegistry) {
-    let registries_result = build_registries(graph).await;
+    let registries_result = build_registries(graph, vec![]).await;
     assert!(
         registries_result.is_ok(),
         "build_registries failed with: {:?}",
