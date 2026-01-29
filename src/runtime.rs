@@ -190,6 +190,7 @@ impl Invoker {
         config.cache(Some(Cache::from_file(None)?));
         config.parallel_compilation(true);
         config.async_support(true);
+        config.wasm_component_model_async(true);
         config.memory_init_cow(true);
         let engine = Engine::new(&config)?;
         Ok(Self { engine })
