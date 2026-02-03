@@ -44,6 +44,9 @@ pub struct RuntimeFeatureDefinition {
     pub name: String,
     #[serde(flatten)]
     pub base: DefinitionBase,
+    /// Configuration from `config.[key]` entries in TOML
+    #[serde(default)]
+    pub config: HashMap<String, serde_json::Value>,
 }
 
 impl std::ops::Deref for RuntimeFeatureDefinition {
@@ -59,6 +62,7 @@ impl std::fmt::Debug for RuntimeFeatureDefinition {
             .field("name", &self.name)
             .field("uri", &self.uri)
             .field("enables", &self.enables)
+            .field("config", &self.config)
             .finish()
     }
 }

@@ -1,5 +1,9 @@
 use anyhow::Result;
+use serde::de::DeserializeOwned;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::marker::PhantomData;
 use wasmtime::{
     Cache, Config, Engine, Store,
     component::{Component as WasmComponent, Linker, Type, Val},
@@ -10,7 +14,10 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::graph::ComponentGraph;
-use crate::registry::{ComponentRegistry, HostExtension, RuntimeFeatureRegistry, build_registries};
+use crate::registry::{
+    ComponentRegistry, HostExtension, HostExtensionFactory, RuntimeFeatureRegistry,
+    build_registries,
+};
 use crate::wit::Function;
 
 /// Wasm Component whose functions can be invoked
@@ -29,24 +36,9 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Create a Runtime from a ComponentGraph
-    pub async fn from_graph(graph: &ComponentGraph) -> Result<Self> {
-        Self::from_graph_with_host_extensions(graph, vec![]).await
-    }
-
-    /// Create a Runtime from a ComponentGraph with HostExtensions
-    pub async fn from_graph_with_host_extensions(
-        graph: &ComponentGraph,
-        host_extensions: Vec<HostExtension>,
-    ) -> Result<Self> {
-        let (runtime_feature_registry, component_registry) =
-            build_registries(graph, host_extensions).await?;
-        let invoker = Invoker::new()?;
-        Ok(Self {
-            invoker,
-            runtime_feature_registry,
-            component_registry,
-        })
+    /// Create a RuntimeBuilder from a ComponentGraph
+    pub fn builder(graph: &ComponentGraph) -> RuntimeBuilder<'_> {
+        RuntimeBuilder::new(graph)
     }
 
     /// List all exposed components
@@ -146,10 +138,74 @@ impl Runtime {
     }
 }
 
+/// Builder for configuring and creating a Runtime
+pub struct RuntimeBuilder<'a> {
+    graph: &'a ComponentGraph,
+    factories: HashMap<&'static str, Box<dyn HostExtensionFactory>>,
+}
+
+impl<'a> RuntimeBuilder<'a> {
+    fn new(graph: &'a ComponentGraph) -> Self {
+        Self {
+            graph,
+            factories: HashMap::new(),
+        }
+    }
+
+    /// Register a host extension type for the given name.
+    ///
+    /// The name corresponds to the suffix in `uri = "host:name"` in TOML.
+    ///
+    /// The type must implement both `Default` and `DeserializeOwned`.
+    /// If the TOML block has an empty config and deserialization fails,
+    /// falls back to `Default::default()`
+    pub fn with_host_extension<T>(mut self, name: &'static str) -> Self
+    where
+        T: HostExtension + DeserializeOwned + Default + 'static,
+    {
+        self.factories.insert(name, Box::new(PhantomData::<T>));
+        self
+    }
+
+    /// Build the Runtime
+    pub async fn build(self) -> Result<Runtime> {
+        let (runtime_feature_registry, component_registry) =
+            build_registries(self.graph, self.factories).await?;
+        let invoker = Invoker::new()?;
+        Ok(Runtime {
+            invoker,
+            runtime_feature_registry,
+            component_registry,
+        })
+    }
+}
+
 pub struct ComponentState {
     pub wasi_ctx: WasiCtx,
     pub wasi_http_ctx: Option<WasiHttpCtx>,
     pub resource_table: ResourceTable,
+    extensions: HashMap<TypeId, Box<dyn Any + Send>>,
+}
+
+impl ComponentState {
+    /// Get a reference to an extension by type.
+    pub fn get_extension<T: 'static + Send>(&self) -> Option<&T> {
+        self.extensions
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref())
+    }
+
+    /// Get a mutable reference to an extension by type.
+    pub fn get_extension_mut<T: 'static + Send>(&mut self) -> Option<&mut T> {
+        self.extensions
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_mut())
+    }
+
+    /// Set an extension value by type.
+    pub fn set_extension<T: 'static + Send>(&mut self, value: T) {
+        self.extensions.insert(TypeId::of::<T>(), Box::new(value));
+    }
 }
 
 impl IoView for ComponentState {
@@ -249,11 +305,11 @@ impl Invoker {
                         }
                     }
                 } else if runtime_feature.uri.starts_with("host:") {
-                    if let Some(initializer) = &runtime_feature.initializer {
-                        initializer(&mut linker)?;
+                    if let Some(ext) = &runtime_feature.extension {
+                        ext.link(&mut linker)?;
                     } else {
                         return Err(anyhow::anyhow!(
-                            "Host feature '{}' requested but no initializer registered",
+                            "Host feature '{}' requested but no extension registered",
                             feature_name
                         ));
                     }
@@ -309,6 +365,28 @@ impl Invoker {
                 == Some("http")
         });
 
+        // Collect extension states before creating ComponentState
+        let mut extensions = HashMap::new();
+        for feature_name in runtime_features {
+            if let Some(runtime_feature) =
+                runtime_feature_registry.get_runtime_feature(feature_name)
+                && runtime_feature.uri.starts_with("host:")
+                && let Some(ext) = &runtime_feature.extension
+                && let Some((type_id, boxed_state)) = ext.create_state_boxed()?
+            {
+                match extensions.entry(type_id) {
+                    Entry::Vacant(e) => {
+                        e.insert(boxed_state);
+                    }
+                    Entry::Occupied(_) => {
+                        anyhow::bail!(
+                            "Duplicate extension state type for feature '{feature_name}'"
+                        );
+                    }
+                }
+            }
+        }
+
         let state = ComponentState {
             wasi_ctx: wasi_builder.build(),
             wasi_http_ctx: if needs_http {
@@ -317,6 +395,7 @@ impl Invoker {
                 None
             },
             resource_table: ResourceTable::new(),
+            extensions,
         };
 
         let mut store = Store::new(&self.engine, state);

@@ -3,6 +3,7 @@
 use composable_runtime::graph::{ComponentDefinition, Node, RuntimeFeatureDefinition};
 use composable_runtime::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
 use composable_runtime::{ComponentGraph, load_definitions};
+use std::collections::HashMap;
 use std::io::Write;
 use std::ops::Deref;
 use std::path::Path;
@@ -133,7 +134,7 @@ pub fn get_runtime_feature_definition<'a>(
 pub async fn build_registries_and_assert_ok(
     graph: &ComponentGraph,
 ) -> (RuntimeFeatureRegistry, ComponentRegistry) {
-    let registries_result = build_registries(graph, vec![]).await;
+    let registries_result = build_registries(graph, HashMap::new()).await;
     assert!(
         registries_result.is_ok(),
         "build_registries failed with: {:?}",

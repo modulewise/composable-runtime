@@ -1,6 +1,6 @@
 [package]
 name = "composable-runtime"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 description = "Modulewise Composable Runtime"
 
@@ -15,9 +15,9 @@ serde_json = "1"
 static-config = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 toml = "0.9"
-wac-graph = "0.8"
-wac-types = "0.8"
-wasm-pkg-client = "0.13"
+wac-graph = "0.9"
+wac-types = "0.9"
+wasm-pkg-client = "0.14"
 wasmtime = "41"
 wasmtime-wasi = "41"
 wasmtime-wasi-config = "41"

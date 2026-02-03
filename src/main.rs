@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 
 async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
     println!("Building runtime...");
-    let runtime = Runtime::from_graph(graph).await?;
+    let runtime = Runtime::builder(graph).build().await?;
     let components = runtime.list_components();
     println!(
         "Successfully built runtime with {} exposed components.",

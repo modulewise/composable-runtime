@@ -138,25 +138,27 @@ fn parse_toml_file(
             if let toml::Value::Table(def_table) = value {
                 // Check if this is a runtime feature (wasmtime:* or host:*) or component
                 if let Some(uri) = def_table.get("uri").and_then(|v| v.as_str()) {
+                    let mut definition_value = def_table.clone();
+                    let config = if let Some(toml::Value::Table(config_table)) =
+                        definition_value.remove("config")
+                    {
+                        Some(convert_toml_table_to_json_map(&config_table)?)
+                    } else {
+                        None
+                    };
+
                     if uri.starts_with("wasmtime:") || uri.starts_with("host:") {
-                        let definition_base: DefinitionBase =
-                            toml::Value::Table(def_table).try_into().map_err(|e| {
+                        let definition_base: DefinitionBase = toml::Value::Table(definition_value)
+                            .try_into()
+                            .map_err(|e| {
                                 anyhow::anyhow!("Failed to parse runtime feature '{name}': {e}")
                             })?;
                         runtime_features.push(RuntimeFeatureDefinition {
                             name: name.clone(),
                             base: definition_base,
+                            config: config.unwrap_or_default(),
                         });
                     } else {
-                        let mut definition_value = def_table.clone();
-                        let config = if let Some(toml::Value::Table(config_table)) =
-                            definition_value.remove("config")
-                        {
-                            Some(convert_toml_table_to_json_map(&config_table)?)
-                        } else {
-                            None
-                        };
-
                         let mut component_base: ComponentDefinitionBase =
                             toml::Value::Table(definition_value)
                                 .try_into()
