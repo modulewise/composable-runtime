@@ -2,7 +2,6 @@ use anyhow::Result;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::marker::PhantomData;
 use wasmtime::{
     Cache, Config, Engine, Store,
     component::{Component as WasmComponent, Linker, Type, Val},
@@ -141,7 +140,7 @@ impl Runtime {
 /// Builder for configuring and creating a Runtime
 pub struct RuntimeBuilder<'a> {
     graph: &'a ComponentGraph,
-    factories: HashMap<&'static str, Box<dyn HostExtensionFactory>>,
+    factories: HashMap<&'static str, HostExtensionFactory>,
 }
 
 impl<'a> RuntimeBuilder<'a> {
@@ -156,14 +155,29 @@ impl<'a> RuntimeBuilder<'a> {
     ///
     /// The name corresponds to the suffix in `uri = "host:name"` in TOML.
     ///
-    /// The type must implement both `Default` and `DeserializeOwned`.
     /// If the TOML block has an empty config and deserialization fails,
-    /// falls back to `Default::default()`
+    /// falls back to `Default::default()`.
     pub fn with_host_extension<T>(mut self, name: &'static str) -> Self
     where
         T: HostExtension + DeserializeOwned + Default + 'static,
     {
-        self.factories.insert(name, Box::new(PhantomData::<T>));
+        self.factories.insert(
+            name,
+            Box::new(
+                |config: serde_json::Value| -> Result<Box<dyn HostExtension>> {
+                    match serde_json::from_value::<T>(config.clone()) {
+                        Ok(instance) => Ok(Box::new(instance)),
+                        Err(e) => {
+                            if config == serde_json::json!({}) {
+                                Ok(Box::new(T::default()))
+                            } else {
+                                Err(e.into())
+                            }
+                        }
+                    }
+                },
+            ),
+        );
         self
     }
 

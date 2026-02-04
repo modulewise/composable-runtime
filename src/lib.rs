@@ -4,7 +4,7 @@
 //! composition, config, and capability management.
 
 pub use graph::{ComponentGraph, GraphBuilder};
-pub use registry::{HostExtension, HostExtensionFactory};
+pub use registry::HostExtension;
 pub use runtime::{Component, Runtime, RuntimeBuilder};
 pub use types::ComponentState;
 pub use wit::{Function, FunctionParam};

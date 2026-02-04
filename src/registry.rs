@@ -1,9 +1,7 @@
 use anyhow::Result;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use wasmtime::component::Linker;
@@ -31,34 +29,9 @@ pub trait HostExtension: Send + Sync {
     }
 }
 
-/// Factory for creating HostExtension instances from TOML config.
-///
-/// Users don't implement this directly. The blanket impl handles it.
-pub trait HostExtensionFactory: Send + Sync {
-    fn create(&self, config: serde_json::Value) -> Result<Box<dyn HostExtension>>;
-}
-
-/// Blanket impl: any HostExtension + DeserializeOwned + Default gets a factory via PhantomData.
-///
-/// If the config is an empty object and deserialization fails, falls back to `Default::default()`.
-impl<T> HostExtensionFactory for PhantomData<T>
-where
-    T: HostExtension + DeserializeOwned + Default + 'static,
-{
-    fn create(&self, config: serde_json::Value) -> Result<Box<dyn HostExtension>> {
-        match serde_json::from_value::<T>(config.clone()) {
-            Ok(instance) => Ok(Box::new(instance)),
-            Err(e) => {
-                // If config is empty object, fall back to Default
-                if config == serde_json::json!({}) {
-                    Ok(Box::new(T::default()))
-                } else {
-                    Err(e.into())
-                }
-            }
-        }
-    }
-}
+/// Factory function that creates a HostExtension instance from TOML config.
+pub(crate) type HostExtensionFactory =
+    Box<dyn Fn(serde_json::Value) -> Result<Box<dyn HostExtension>> + Send + Sync>;
 
 /// Macro for implementing `create_state_boxed()` with automatic TypeId inference.
 ///
@@ -274,7 +247,7 @@ impl Default for ComponentRegistry {
 /// Build registries from definitions
 pub async fn build_registries(
     component_graph: &ComponentGraph,
-    factories: HashMap<&'static str, Box<dyn HostExtensionFactory>>,
+    factories: HashMap<&'static str, HostExtensionFactory>,
 ) -> Result<(RuntimeFeatureRegistry, ComponentRegistry)> {
     let mut runtime_feature_definitions = Vec::new();
     for node in component_graph.nodes() {
@@ -346,7 +319,7 @@ pub async fn build_registries(
 
 fn create_runtime_feature_registry(
     runtime_feature_definitions: Vec<RuntimeFeatureDefinition>,
-    factories: HashMap<&'static str, Box<dyn HostExtensionFactory>>,
+    factories: HashMap<&'static str, HostExtensionFactory>,
 ) -> Result<RuntimeFeatureRegistry> {
     let mut runtime_features = HashMap::new();
 
@@ -363,7 +336,7 @@ fn create_runtime_feature_registry(
 
             // Deserialize config into extension instance
             let config_value = serde_json::to_value(&def.config)?;
-            let ext = factory.create(config_value).map_err(|e| {
+            let ext = factory(config_value).map_err(|e| {
                 anyhow::anyhow!(
                     "Failed to create host extension '{}' from TOML block '{}': {}",
                     feature_name,
