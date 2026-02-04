@@ -3,10 +3,10 @@
 //! A runtime for Wasm Components that supports
 //! composition, config, and capability management.
 
-pub use graph::ComponentGraph;
-pub use loader::load_definitions;
+pub use graph::{ComponentGraph, GraphBuilder};
 pub use registry::{HostExtension, HostExtensionFactory};
-pub use runtime::{Component, ComponentState, Runtime, RuntimeBuilder};
+pub use runtime::{Component, Runtime, RuntimeBuilder};
+pub use types::ComponentState;
 pub use wit::{Function, FunctionParam};
 
 // exposed for testing, hidden from docs
@@ -14,6 +14,8 @@ pub use wit::{Function, FunctionParam};
 pub mod graph;
 #[doc(hidden)]
 pub mod registry;
+#[doc(hidden)]
+pub mod types;
 
 mod composer;
 mod loader;

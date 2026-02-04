@@ -1,5 +1,5 @@
 mod common;
-use composable_runtime::load_definitions;
+use composable_runtime::ComponentGraph;
 
 #[test]
 #[should_panic(expected = "Circular dependency detected")]
@@ -23,5 +23,8 @@ fn test_circular_dependency() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    load_definitions(&[toml_file.to_path_buf()]).unwrap();
+    ComponentGraph::builder()
+        .load_file(toml_file.to_path_buf())
+        .build()
+        .unwrap();
 }

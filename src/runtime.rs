@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde::de::DeserializeOwned;
-use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::marker::PhantomData;
@@ -9,7 +8,7 @@ use wasmtime::{
     component::{Component as WasmComponent, Linker, Type, Val},
 };
 use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
@@ -18,6 +17,7 @@ use crate::registry::{
     ComponentRegistry, HostExtension, HostExtensionFactory, RuntimeFeatureRegistry,
     build_registries,
 };
+use crate::types::ComponentState;
 use crate::wit::Function;
 
 /// Wasm Component whose functions can be invoked
@@ -177,34 +177,6 @@ impl<'a> RuntimeBuilder<'a> {
             runtime_feature_registry,
             component_registry,
         })
-    }
-}
-
-pub struct ComponentState {
-    pub wasi_ctx: WasiCtx,
-    pub wasi_http_ctx: Option<WasiHttpCtx>,
-    pub resource_table: ResourceTable,
-    extensions: HashMap<TypeId, Box<dyn Any + Send>>,
-}
-
-impl ComponentState {
-    /// Get a reference to an extension by type.
-    pub fn get_extension<T: 'static + Send>(&self) -> Option<&T> {
-        self.extensions
-            .get(&TypeId::of::<T>())
-            .and_then(|boxed| boxed.downcast_ref())
-    }
-
-    /// Get a mutable reference to an extension by type.
-    pub fn get_extension_mut<T: 'static + Send>(&mut self) -> Option<&mut T> {
-        self.extensions
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|boxed| boxed.downcast_mut())
-    }
-
-    /// Set an extension value by type.
-    pub fn set_extension<T: 'static + Send>(&mut self, value: T) {
-        self.extensions.insert(TypeId::of::<T>(), Box::new(value));
     }
 }
 

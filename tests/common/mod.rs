@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
-use composable_runtime::graph::{ComponentDefinition, Node, RuntimeFeatureDefinition};
+use composable_runtime::ComponentGraph;
+use composable_runtime::graph::Node;
 use composable_runtime::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
-use composable_runtime::{ComponentGraph, load_definitions};
+use composable_runtime::types::{ComponentDefinition, RuntimeFeatureDefinition};
 use std::collections::HashMap;
 use std::io::Write;
 use std::ops::Deref;
@@ -144,10 +145,14 @@ pub async fn build_registries_and_assert_ok(
 }
 
 pub fn load_graph_and_assert_ok(paths: &[PathBuf]) -> ComponentGraph {
-    let graph_result = load_definitions(paths);
+    let mut builder = ComponentGraph::builder();
+    for path in paths {
+        builder = builder.load_file(path);
+    }
+    let graph_result = builder.build();
     assert!(
         graph_result.is_ok(),
-        "load_definitions failed with: {:?}",
+        "ComponentGraph::builder().build() failed with: {:?}",
         graph_result.err()
     );
     graph_result.unwrap()

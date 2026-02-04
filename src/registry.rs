@@ -9,8 +9,8 @@ use std::sync::Arc;
 use wasmtime::component::Linker;
 
 use crate::composer::Composer;
-use crate::graph::{ComponentDefinition, ComponentGraph, Node, RuntimeFeatureDefinition};
-use crate::runtime::ComponentState;
+use crate::graph::{ComponentGraph, Node};
+use crate::types::{ComponentDefinition, ComponentState, RuntimeFeatureDefinition};
 use crate::wit::{ComponentMetadata, Parser};
 
 /// Trait implemented by host extension instances.

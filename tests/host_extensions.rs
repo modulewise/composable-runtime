@@ -209,9 +209,10 @@ impl HostExtension for MultiplierFeature {
     fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
         let multiplier = self.multiplier;
         let mut inst = linker.instance("modulewise:test-host/multiplier")?;
-        inst.func_wrap("multiply", move |_ctx, (value,): (u32,)| -> Result<(u32,)> {
-            Ok((value * multiplier,))
-        })?;
+        inst.func_wrap(
+            "multiply",
+            move |_ctx, (value,): (u32,)| -> Result<(u32,)> { Ok((value * multiplier,)) },
+        )?;
         Ok(())
     }
 }
