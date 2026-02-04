@@ -41,8 +41,6 @@ pub trait HostExtensionFactory: Send + Sync {
 /// Blanket impl: any HostExtension + DeserializeOwned + Default gets a factory via PhantomData.
 ///
 /// If the config is an empty object and deserialization fails, falls back to `Default::default()`.
-/// This allows simple extensions with no config to use `#[derive(Default)]` without needing
-/// `#[derive(Deserialize)]`.
 impl<T> HostExtensionFactory for PhantomData<T>
 where
     T: HostExtension + DeserializeOwned + Default + 'static,
