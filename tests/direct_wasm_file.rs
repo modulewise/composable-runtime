@@ -19,7 +19,7 @@ async fn test_direct_wasm_file() {
         panic!("Node was not a component");
     }
 
-    let (_runtime_feature_registry, component_registry) =
+    let (component_registry, _runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
 
     assert_eq!(component_registry.get_components().count(), 1);

@@ -47,7 +47,7 @@ async fn test_expects_and_enables() {
     assert_eq!(handler_def.enables, "none");
     assert!(handler_def.exposed);
 
-    let (runtime_feature_registry, component_registry) =
+    let (component_registry, runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
     assert_eq!(
         runtime_feature_registry

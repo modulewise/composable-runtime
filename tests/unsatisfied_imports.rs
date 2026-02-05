@@ -15,7 +15,7 @@ async fn test_unsatisfied_import_for_exposed_component() {
 
     let toml_file = common::create_toml_test_file(&toml_content);
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
-    let (_runtime_feature_registry, component_registry) =
+    let (component_registry, _runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
     // Unsatisfied import should cause an exposed component to be skipped.
     assert_eq!(component_registry.get_components().count(), 0);
@@ -37,6 +37,6 @@ async fn test_unsatisfied_import_for_enabling_component() {
 
     let toml_file = common::create_toml_test_file(&toml_content);
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
-    let (_runtime_feature_registry, _component_registry) =
+    let (_component_registry, _runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
 }

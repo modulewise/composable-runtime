@@ -30,8 +30,8 @@ pub struct Component {
 #[derive(Clone)]
 pub struct Runtime {
     invoker: Invoker,
-    runtime_feature_registry: RuntimeFeatureRegistry,
     component_registry: ComponentRegistry,
+    runtime_feature_registry: RuntimeFeatureRegistry,
 }
 
 impl Runtime {
@@ -183,13 +183,13 @@ impl<'a> RuntimeBuilder<'a> {
 
     /// Build the Runtime
     pub async fn build(self) -> Result<Runtime> {
-        let (runtime_feature_registry, component_registry) =
+        let (component_registry, runtime_feature_registry) =
             build_registries(self.graph, self.factories).await?;
         let invoker = Invoker::new()?;
         Ok(Runtime {
             invoker,
-            runtime_feature_registry,
             component_registry,
+            runtime_feature_registry,
         })
     }
 }

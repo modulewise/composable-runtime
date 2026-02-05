@@ -134,7 +134,7 @@ pub fn get_runtime_feature_definition<'a>(
 
 pub async fn build_registries_and_assert_ok(
     graph: &ComponentGraph,
-) -> (RuntimeFeatureRegistry, ComponentRegistry) {
+) -> (ComponentRegistry, RuntimeFeatureRegistry) {
     let registries_result = build_registries(graph, HashMap::new()).await;
     assert!(
         registries_result.is_ok(),

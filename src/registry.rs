@@ -248,7 +248,7 @@ impl Default for ComponentRegistry {
 pub async fn build_registries(
     component_graph: &ComponentGraph,
     factories: HashMap<&'static str, HostExtensionFactory>,
-) -> Result<(RuntimeFeatureRegistry, ComponentRegistry)> {
+) -> Result<(ComponentRegistry, RuntimeFeatureRegistry)> {
     let mut runtime_feature_definitions = Vec::new();
     for node in component_graph.nodes() {
         if let Node::RuntimeFeature(def) = &node.weight {
@@ -309,11 +309,11 @@ pub async fn build_registries(
     }
 
     Ok((
-        runtime_feature_registry,
         ComponentRegistry {
             components: Arc::new(exposed_components),
             enabling_components: Arc::new(enabling_components),
         },
+        runtime_feature_registry,
     ))
 }
 
