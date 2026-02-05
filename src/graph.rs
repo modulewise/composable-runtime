@@ -1,170 +1,27 @@
 use anyhow::Result;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
+use std::path::PathBuf;
 
-// Type definitions for component and runtime feature definitions
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct DefinitionBase {
-    pub uri: String,
-    #[serde(default = "default_enables")]
-    pub enables: String, // "none"|"package"|"namespace"|"unexposed"|"exposed"|"any"
-}
-
-pub fn default_enables() -> String {
-    "none".to_string()
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ComponentDefinitionBase {
-    #[serde(flatten)]
-    pub base: DefinitionBase,
-    #[serde(default)]
-    pub expects: Vec<String>, // Named components this expects to be available
-    #[serde(default)]
-    pub intercepts: Vec<String>, // Components this intercepts
-    #[serde(default)]
-    pub precedence: i32, // Lower values have higher precedence
-    #[serde(default)]
-    pub exposed: bool,
-    pub config: Option<HashMap<String, serde_json::Value>>,
-}
-
-impl std::ops::Deref for ComponentDefinitionBase {
-    type Target = DefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct RuntimeFeatureDefinition {
-    pub name: String,
-    #[serde(flatten)]
-    pub base: DefinitionBase,
-}
-
-impl std::ops::Deref for RuntimeFeatureDefinition {
-    type Target = DefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-impl std::fmt::Debug for RuntimeFeatureDefinition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RuntimeFeatureDefinition")
-            .field("name", &self.name)
-            .field("uri", &self.uri)
-            .field("enables", &self.enables)
-            .finish()
-    }
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct ComponentDefinition {
-    pub name: String,
-    #[serde(flatten)]
-    pub base: ComponentDefinitionBase,
-}
-
-impl std::ops::Deref for ComponentDefinition {
-    type Target = ComponentDefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-impl std::fmt::Debug for ComponentDefinition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ComponentDefinition")
-            .field("name", &self.name)
-            .field("uri", &self.uri)
-            .field("enables", &self.enables)
-            .field("expects", &self.expects)
-            .field("intercepts", &self.intercepts)
-            .field("precedence", &self.precedence)
-            .field("exposed", &self.exposed)
-            .field("config", &self.config)
-            .finish()
-    }
-}
-
-impl AsRef<DefinitionBase> for ComponentDefinition {
-    fn as_ref(&self) -> &DefinitionBase {
-        &self.base.base
-    }
-}
+use crate::loader;
+use crate::types::{ComponentDefinition, RuntimeFeatureDefinition};
 
 pub struct ComponentGraph {
     graph: DiGraph<Node, Edge>,
     node_map: HashMap<String, NodeIndex>,
 }
 
-impl std::fmt::Debug for ComponentGraph {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        struct FlatNode<'a>(&'a Node);
-        impl<'a> std::fmt::Debug for FlatNode<'a> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                match self.0 {
-                    Node::Component(def) => std::fmt::Debug::fmt(def, f),
-                    Node::RuntimeFeature(def) => std::fmt::Debug::fmt(def, f),
-                }
-            }
-        }
-
-        let mut debug_struct = f.debug_struct("ComponentGraph");
-
-        let nodes: Vec<_> = self
-            .graph
-            .raw_nodes()
-            .iter()
-            .map(|n| FlatNode(&n.weight))
-            .collect();
-        debug_struct.field("nodes", &nodes);
-
-        let edges: Vec<String> = self
-            .graph
-            .edge_references()
-            .map(|edge| {
-                let source_node = &self.graph[edge.source()];
-                let target_node = &self.graph[edge.target()];
-                let source_name = match source_node {
-                    Node::Component(def) => &def.name,
-                    Node::RuntimeFeature(def) => &def.name,
-                };
-                let target_name = match target_node {
-                    Node::Component(def) => &def.name,
-                    Node::RuntimeFeature(def) => &def.name,
-                };
-                format!("{} -> {} ({:?})", source_name, target_name, edge.weight())
-            })
-            .collect();
-        debug_struct.field("edges", &edges);
-        debug_struct.finish()
-    }
-}
-
-impl Index<NodeIndex> for ComponentGraph {
-    type Output = Node;
-
-    fn index(&self, index: NodeIndex) -> &Self::Output {
-        &self.graph[index]
-    }
-}
-
-impl IndexMut<NodeIndex> for ComponentGraph {
-    fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
-        &mut self.graph[index]
-    }
-}
-
 impl ComponentGraph {
+    /// Create a new GraphBuilder
+    pub fn builder() -> GraphBuilder {
+        GraphBuilder::new()
+    }
+
     /// Create a graph where each component and runtime feature is a node
     /// and each dependency or interceptor relationship is an edge.
-    pub fn build(
+    pub(crate) fn build(
         component_definitions: &[ComponentDefinition],
         runtime_feature_definitions: &[RuntimeFeatureDefinition],
     ) -> Result<Self> {
@@ -375,6 +232,64 @@ impl ComponentGraph {
     }
 }
 
+impl std::fmt::Debug for ComponentGraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct FlatNode<'a>(&'a Node);
+        impl<'a> std::fmt::Debug for FlatNode<'a> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self.0 {
+                    Node::Component(def) => std::fmt::Debug::fmt(def, f),
+                    Node::RuntimeFeature(def) => std::fmt::Debug::fmt(def, f),
+                }
+            }
+        }
+
+        let mut debug_struct = f.debug_struct("ComponentGraph");
+
+        let nodes: Vec<_> = self
+            .graph
+            .raw_nodes()
+            .iter()
+            .map(|n| FlatNode(&n.weight))
+            .collect();
+        debug_struct.field("nodes", &nodes);
+
+        let edges: Vec<String> = self
+            .graph
+            .edge_references()
+            .map(|edge| {
+                let source_node = &self.graph[edge.source()];
+                let target_node = &self.graph[edge.target()];
+                let source_name = match source_node {
+                    Node::Component(def) => &def.name,
+                    Node::RuntimeFeature(def) => &def.name,
+                };
+                let target_name = match target_node {
+                    Node::Component(def) => &def.name,
+                    Node::RuntimeFeature(def) => &def.name,
+                };
+                format!("{} -> {} ({:?})", source_name, target_name, edge.weight())
+            })
+            .collect();
+        debug_struct.field("edges", &edges);
+        debug_struct.finish()
+    }
+}
+
+impl Index<NodeIndex> for ComponentGraph {
+    type Output = Node;
+
+    fn index(&self, index: NodeIndex) -> &Self::Output {
+        &self.graph[index]
+    }
+}
+
+impl IndexMut<NodeIndex> for ComponentGraph {
+    fn index_mut(&mut self, index: NodeIndex) -> &mut Self::Output {
+        &mut self.graph[index]
+    }
+}
+
 fn is_interceptor_enabled(
     interceptor: &ComponentDefinition,
     consumer: &ComponentDefinition,
@@ -405,4 +320,28 @@ pub enum Node {
 pub enum Edge {
     Dependency,
     Interceptor(i32), // Precedence
+}
+
+/// Builder for constructing a ComponentGraph
+pub struct GraphBuilder {
+    paths: Vec<PathBuf>,
+}
+
+impl GraphBuilder {
+    fn new() -> Self {
+        Self { paths: Vec::new() }
+    }
+
+    /// Load definitions from a file (.toml or .wasm)
+    pub fn load_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.paths.push(path.into());
+        self
+    }
+
+    /// Build the ComponentGraph from all loaded definitions
+    pub fn build(self) -> Result<ComponentGraph> {
+        let (component_definitions, runtime_feature_definitions) =
+            loader::parse_definition_files(&self.paths)?;
+        ComponentGraph::build(&component_definitions, &runtime_feature_definitions)
+    }
 }

@@ -3,24 +3,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::graph::{
-    ComponentDefinition, ComponentDefinitionBase, ComponentGraph, DefinitionBase,
-    RuntimeFeatureDefinition, default_enables,
+use crate::types::{
+    ComponentDefinition, ComponentDefinitionBase, DefinitionBase, RuntimeFeatureDefinition,
+    default_enables,
 };
 
-/// Load component definitions and runtime feature definitions from configuration files
-/// and build a component graph
-pub fn load_definitions(
+pub(crate) fn parse_definition_files(
     definition_files: &[PathBuf], // .toml and .wasm files
-) -> Result<ComponentGraph> {
-    let (runtime_feature_definitions, component_definitions) =
-        parse_definition_files(definition_files)?;
-    ComponentGraph::build(&component_definitions, &runtime_feature_definitions)
-}
-
-fn parse_definition_files(
-    definition_files: &[PathBuf], // .toml and .wasm files
-) -> Result<(Vec<RuntimeFeatureDefinition>, Vec<ComponentDefinition>)> {
+) -> Result<(Vec<ComponentDefinition>, Vec<RuntimeFeatureDefinition>)> {
     let mut toml_files = Vec::new();
     let mut wasm_files = Vec::new();
 
@@ -49,15 +39,15 @@ fn parse_definition_files(
 fn build_definitions(
     toml_files: &[PathBuf],
     wasm_files: &[PathBuf],
-) -> Result<(Vec<RuntimeFeatureDefinition>, Vec<ComponentDefinition>)> {
-    let mut runtime_feature_definitions = Vec::new();
+) -> Result<(Vec<ComponentDefinition>, Vec<RuntimeFeatureDefinition>)> {
     let mut component_definitions = Vec::new();
+    let mut runtime_feature_definitions = Vec::new();
 
-    // Parse TOML files to extract both runtime features and components
+    // Parse TOML files to extract both components and runtime features
     for file in toml_files {
-        let (runtime_features, components) = parse_toml_file(file)?;
-        runtime_feature_definitions.extend(runtime_features);
+        let (components, runtime_features) = parse_toml_file(file)?;
         component_definitions.extend(components);
+        runtime_feature_definitions.extend(runtime_features);
     }
 
     // Add implicit component definitions from standalone .wasm files
@@ -100,7 +90,7 @@ fn build_definitions(
         }
     }
 
-    Ok((runtime_feature_definitions, component_definitions))
+    Ok((component_definitions, runtime_feature_definitions))
 }
 
 fn validate_runtime_feature_enables_scope(enables: &str, name: &str) -> Result<()> {
@@ -126,37 +116,39 @@ fn validate_component_enables_scope(enables: &str) -> Result<()> {
 
 fn parse_toml_file(
     path: &PathBuf,
-) -> Result<(Vec<RuntimeFeatureDefinition>, Vec<ComponentDefinition>)> {
+) -> Result<(Vec<ComponentDefinition>, Vec<RuntimeFeatureDefinition>)> {
     let content = fs::read_to_string(path)?;
     let toml_doc: toml::Value = toml::from_str(&content)?;
 
-    let mut runtime_features = Vec::new();
     let mut components = Vec::new();
+    let mut runtime_features = Vec::new();
 
     if let toml::Value::Table(table) = toml_doc {
         for (name, value) in table {
             if let toml::Value::Table(def_table) = value {
                 // Check if this is a runtime feature (wasmtime:* or host:*) or component
                 if let Some(uri) = def_table.get("uri").and_then(|v| v.as_str()) {
+                    let mut definition_value = def_table.clone();
+                    let config = if let Some(toml::Value::Table(config_table)) =
+                        definition_value.remove("config")
+                    {
+                        Some(convert_toml_table_to_json_map(&config_table)?)
+                    } else {
+                        None
+                    };
+
                     if uri.starts_with("wasmtime:") || uri.starts_with("host:") {
-                        let definition_base: DefinitionBase =
-                            toml::Value::Table(def_table).try_into().map_err(|e| {
+                        let definition_base: DefinitionBase = toml::Value::Table(definition_value)
+                            .try_into()
+                            .map_err(|e| {
                                 anyhow::anyhow!("Failed to parse runtime feature '{name}': {e}")
                             })?;
                         runtime_features.push(RuntimeFeatureDefinition {
                             name: name.clone(),
                             base: definition_base,
+                            config: config.unwrap_or_default(),
                         });
                     } else {
-                        let mut definition_value = def_table.clone();
-                        let config = if let Some(toml::Value::Table(config_table)) =
-                            definition_value.remove("config")
-                        {
-                            Some(convert_toml_table_to_json_map(&config_table)?)
-                        } else {
-                            None
-                        };
-
                         let mut component_base: ComponentDefinitionBase =
                             toml::Value::Table(definition_value)
                                 .try_into()
@@ -184,7 +176,7 @@ fn parse_toml_file(
             "TOML file must contain a table at root level"
         ));
     }
-    Ok((runtime_features, components))
+    Ok((components, runtime_features))
 }
 
 fn create_implicit_component_definitions(

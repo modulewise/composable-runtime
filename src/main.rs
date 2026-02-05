@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use composable_runtime::{ComponentGraph, Runtime, load_definitions};
+use composable_runtime::{ComponentGraph, Runtime};
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
@@ -58,7 +58,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     println!("Loading definitions from: {:?}...", cli.definitions);
-    let graph = load_definitions(&cli.definitions)?;
+    let mut builder = ComponentGraph::builder();
+    for path in &cli.definitions {
+        builder = builder.load_file(path);
+    }
+    let graph = builder.build()?;
 
     if cli.mode.dry_run {
         println!("--- Component Dependency Graph (Dry Run) ---");
@@ -77,7 +81,7 @@ async fn main() -> Result<()> {
 
 async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
     println!("Building runtime...");
-    let runtime = Runtime::from_graph(graph).await?;
+    let runtime = Runtime::builder(graph).build().await?;
     let components = runtime.list_components();
     println!(
         "Successfully built runtime with {} exposed components.",

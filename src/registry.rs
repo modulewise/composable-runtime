@@ -1,47 +1,66 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use wasmtime::component::Linker;
 
 use crate::composer::Composer;
-use crate::graph::{ComponentDefinition, ComponentGraph, Node, RuntimeFeatureDefinition};
+use crate::graph::{ComponentGraph, Node};
+use crate::types::{ComponentDefinition, ComponentState, RuntimeFeatureDefinition};
 use crate::wit::{ComponentMetadata, Parser};
 
-type InitializerFn = Box<
-    dyn Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
-        + Send
-        + Sync,
->;
-
-/// A host-provided extension that can be passed to Runtime::from_graph_with_host_extensions().
+/// Trait implemented by host extension instances.
 ///
-/// Host extensions provide custom runtime features implemented by the embedding application.
-/// They are matched to `host:` URI entries in the component graph's TOML configuration.
-pub struct HostExtension {
-    /// The extension name (matches the name after "host:" in the URI)
-    pub name: String,
-    /// List of WIT interfaces this extension provides (e.g. "example:foo/bar")
-    pub interfaces: Vec<String>,
-    /// Function to add implementations to the linker
-    pub initializer: InitializerFn,
+/// An instance represents a configured feature (from one TOML block).
+/// Multiple TOML blocks with the same `uri = "host:X"` create multiple instances.
+pub trait HostExtension: Send + Sync {
+    /// Fully qualified interfaces this extension provides (namespace:package/interface@version)
+    fn interfaces(&self) -> Vec<String>;
+
+    /// Add bindings to the linker. Called once per component instantiation.
+    fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()>;
+
+    /// Create per-component-instance state. Called once per component instantiation.
+    /// Returns None if extension needs no per-instance state.
+    fn create_state_boxed(&self) -> Result<Option<(TypeId, Box<dyn Any + Send>)>> {
+        Ok(None)
+    }
 }
 
-impl HostExtension {
-    /// Create a new host extension
-    pub fn new<F>(name: impl Into<String>, interfaces: Vec<String>, initializer: F) -> Self
-    where
-        F: Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
-            + Send
-            + Sync
-            + 'static,
-    {
-        Self {
-            name: name.into(),
-            interfaces,
-            initializer: Box::new(initializer),
+/// Factory function that creates a HostExtension instance from TOML config.
+pub(crate) type HostExtensionFactory =
+    Box<dyn Fn(serde_json::Value) -> Result<Box<dyn HostExtension>> + Send + Sync>;
+
+/// Macro for implementing `create_state_boxed()` with automatic TypeId inference.
+///
+/// The `$body` expression has access to `self` (the extension instance) and can use `?`
+/// for fallible operations.
+///
+/// # Example
+///
+/// ```ignore
+/// impl HostExtension for MyFeature {
+///     // ...
+///     create_state!(MyState, {
+///         MyState {
+///             shared_resource: self.get_resource(),
+///             counter: 0,
+///         }
+///     });
+/// }
+/// ```
+#[macro_export]
+macro_rules! create_state {
+    ($type:ty, $body:expr) => {
+        fn create_state_boxed(
+            &self,
+        ) -> anyhow::Result<Option<(std::any::TypeId, Box<dyn std::any::Any + Send>)>> {
+            let state: $type = $body;
+            Ok(Some((std::any::TypeId::of::<$type>(), Box::new(state))))
         }
-    }
+    };
 }
 
 #[derive(Serialize, Deserialize)]
@@ -49,14 +68,9 @@ pub struct RuntimeFeature {
     pub uri: String,
     pub enables: String,
     pub interfaces: Vec<String>,
+    /// The host extension instance (for `host:` URIs)
     #[serde(skip)]
-    pub initializer: Option<
-        Box<
-            dyn Fn(&mut wasmtime::component::Linker<crate::runtime::ComponentState>) -> Result<()>
-                + Send
-                + Sync,
-        >,
-    >,
+    pub extension: Option<Box<dyn HostExtension>>,
 }
 
 impl std::fmt::Debug for RuntimeFeature {
@@ -66,8 +80,8 @@ impl std::fmt::Debug for RuntimeFeature {
             .field("enables", &self.enables)
             .field("interfaces", &self.interfaces)
             .field(
-                "initializer",
-                &self.initializer.as_ref().map(|_| "<function>"),
+                "extension",
+                &self.extension.as_ref().map(|_| "<dyn HostExtension>"),
             )
             .finish()
     }
@@ -233,8 +247,8 @@ impl Default for ComponentRegistry {
 /// Build registries from definitions
 pub async fn build_registries(
     component_graph: &ComponentGraph,
-    host_extensions: Vec<HostExtension>,
-) -> Result<(RuntimeFeatureRegistry, ComponentRegistry)> {
+    factories: HashMap<&'static str, HostExtensionFactory>,
+) -> Result<(ComponentRegistry, RuntimeFeatureRegistry)> {
     let mut runtime_feature_definitions = Vec::new();
     for node in component_graph.nodes() {
         if let Node::RuntimeFeature(def) = &node.weight {
@@ -243,7 +257,7 @@ pub async fn build_registries(
     }
 
     let runtime_feature_registry =
-        create_runtime_feature_registry(runtime_feature_definitions, host_extensions).await?;
+        create_runtime_feature_registry(runtime_feature_definitions, factories)?;
 
     let sorted_indices = component_graph.get_build_order();
 
@@ -295,38 +309,51 @@ pub async fn build_registries(
     }
 
     Ok((
-        runtime_feature_registry,
         ComponentRegistry {
             components: Arc::new(exposed_components),
             enabling_components: Arc::new(enabling_components),
         },
+        runtime_feature_registry,
     ))
 }
 
-async fn create_runtime_feature_registry(
+fn create_runtime_feature_registry(
     runtime_feature_definitions: Vec<RuntimeFeatureDefinition>,
-    host_extensions: Vec<HostExtension>,
+    factories: HashMap<&'static str, HostExtensionFactory>,
 ) -> Result<RuntimeFeatureRegistry> {
     let mut runtime_features = HashMap::new();
 
-    // Convert to map for lookup
-    let mut host_extensions: HashMap<String, HostExtension> = host_extensions
-        .into_iter()
-        .map(|ext| (ext.name.clone(), ext))
-        .collect();
-
     for def in runtime_feature_definitions {
-        let (interfaces, initializer) = if let Some(feature_name) = def.uri.strip_prefix("host:") {
-            let host_ext = host_extensions.remove(feature_name).ok_or_else(|| {
+        let (interfaces, extension) = if let Some(feature_name) = def.uri.strip_prefix("host:") {
+            let factory = factories.get(feature_name).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Host extension '{}' (URI: '{}') not provided. Pass it to Runtime::from_graph_with_host_extensions()",
+                    "Host extension '{}' (URI: '{}') not registered. Use Runtime::builder().with_host_extension::<T>(\"{}\")",
                     feature_name,
-                    def.uri
+                    def.uri,
+                    feature_name
                 )
             })?;
-            (host_ext.interfaces, Some(host_ext.initializer))
+
+            // Deserialize config into extension instance
+            let config_value = serde_json::to_value(&def.config)?;
+            let ext = factory(config_value).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create host extension '{}' from TOML block '{}': {}",
+                    feature_name,
+                    def.name,
+                    e
+                )
+            })?;
+
+            (ext.interfaces(), Some(ext))
         } else {
             // wasmtime feature
+            if !def.config.is_empty() {
+                println!(
+                    "Warning: Config provided for runtime feature '{}' but only host extensions support config",
+                    def.name
+                );
+            }
             (get_interfaces_for_runtime_feature(&def.uri), None)
         };
 
@@ -334,9 +361,9 @@ async fn create_runtime_feature_registry(
             uri: def.uri.clone(),
             enables: def.enables.clone(),
             interfaces,
-            initializer,
+            extension,
         };
-        runtime_features.insert(def.name.clone(), runtime_feature);
+        runtime_features.insert(def.name, runtime_feature);
     }
 
     Ok(RuntimeFeatureRegistry::new(runtime_features))

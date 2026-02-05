@@ -54,7 +54,7 @@ async fn test_simple_interceptor() {
     assert_eq!(handler_def.enables, "none");
     assert!(handler_def.exposed);
 
-    let (_runtime_feature_registry, component_registry) =
+    let (component_registry, _runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
 
     assert_eq!(component_registry.get_components().count(), 1);
@@ -126,7 +126,7 @@ async fn test_interceptor_with_enables_scope_mismatch() {
         provider_name
     );
 
-    let (_runtime_feature_registry, component_registry) =
+    let (component_registry, _runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
     assert_eq!(component_registry.get_components().count(), 1);
 }
@@ -210,7 +210,7 @@ async fn test_selective_interception_for_exposed_and_unexposed() {
         unexposed_provider_name
     );
 
-    let (_runtime_feature_registry, component_registry) =
+    let (component_registry, _runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
     assert_eq!(component_registry.get_components().count(), 1); // Only exposed-handler is exposed
 }
@@ -309,7 +309,7 @@ async fn test_multiple_interceptors() {
         };
     assert_eq!(inner_provider_name, "client");
 
-    let (_runtime_feature_registry, component_registry) =
+    let (component_registry, _runtime_feature_registry) =
         common::build_registries_and_assert_ok(&graph).await;
     assert_eq!(component_registry.get_components().count(), 1);
 }
