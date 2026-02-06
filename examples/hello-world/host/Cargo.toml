@@ -1,0 +1,10 @@
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+composable-runtime = { path = "../../.." }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
