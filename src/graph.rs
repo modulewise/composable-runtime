@@ -53,9 +53,10 @@ impl ComponentGraph {
                 if let Some(target_index) = node_map.get(target_name) {
                     graph.update_edge(*target_index, source_index, Edge::Dependency);
                 } else {
-                    println!(
-                        "Warning: Component '{}' expects '{}', which is not defined.",
-                        definition.name, target_name
+                    tracing::warn!(
+                        "Component '{}' expects '{}', which is not defined.",
+                        definition.name,
+                        target_name
                     );
                 }
             }
@@ -87,7 +88,7 @@ impl ComponentGraph {
                 .filter(|def| {
                     let enabled = is_interceptor_enabled(def, consumer_def);
                     if !enabled && def.name != consumer_def.name {
-                        println!(
+                        tracing::debug!(
                             "Interceptor '{}' skipped for consumer '{}' (enables='{}', consumer exposed={})",
                             def.name, consumer_def.name, def.enables, consumer_def.exposed
                         );
