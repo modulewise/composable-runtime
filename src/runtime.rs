@@ -284,7 +284,7 @@ impl Invoker {
                             // No linker functions to add, only context configuration
                         }
                         _ => {
-                            println!(
+                            tracing::warn!(
                                 "Unknown wasmtime feature for linker: {}",
                                 runtime_feature.uri
                             );

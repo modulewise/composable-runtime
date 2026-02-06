@@ -296,10 +296,7 @@ pub async fn build_registries(
                 }
                 Err(e) => {
                     if definition.exposed {
-                        eprintln!(
-                            "Warning: Skipping exposed component '{}': {}",
-                            definition.name, e
-                        );
+                        tracing::warn!("Skipping exposed component '{}': {}", definition.name, e);
                     } else {
                         return Err(e);
                     }
@@ -349,8 +346,8 @@ fn create_runtime_feature_registry(
         } else {
             // wasmtime feature
             if !def.config.is_empty() {
-                println!(
-                    "Warning: Config provided for runtime feature '{}' but only host extensions support config",
+                tracing::warn!(
+                    "Config provided for runtime feature '{}' but only host extensions support config",
                     def.name
                 );
             }
@@ -425,7 +422,7 @@ fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
             "wasi:sockets/udp-create-socket@0.2.6".to_string(),
         ],
         _ => {
-            println!("Unknown runtime feature URI: {uri}");
+            tracing::warn!("Unknown runtime feature URI: {uri}");
             vec![]
         }
     }
@@ -509,15 +506,15 @@ async fn process_component(
         })?;
 
         let config_keys: Vec<_> = config_to_use.keys().collect();
-        println!(
+        tracing::info!(
             "Composed component '{}' with config: {config_keys:?}",
             definition.name
         );
 
         imports.retain(|import| !import.starts_with("wasi:config/store"));
     } else if definition.config.is_some() {
-        println!(
-            "Warning: Config provided for component '{}' but component doesn't import wasi:config/store",
+        tracing::warn!(
+            "Config provided for component '{}' but component doesn't import wasi:config/store",
             definition.name
         );
     }
@@ -535,9 +532,10 @@ async fn process_component(
                     &dependency_def.name,
                 ) {
                     bytes = Composer::compose_components(&bytes, &component_spec.bytes)?;
-                    println!(
+                    tracing::info!(
                         "Composed component '{}' with dependency '{}'",
-                        definition.name, dependency_def.name
+                        definition.name,
+                        dependency_def.name
                     );
 
                     for export in &component_spec.exports {
