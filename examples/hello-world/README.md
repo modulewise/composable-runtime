@@ -21,7 +21,7 @@ hello-world/
 ./build.sh
 ```
 
-Builds the `greeter` Wasm Component to and the `host` binary.
+Builds the `greeter` Wasm Component and the `host` binary.
 
 ## Run
 
