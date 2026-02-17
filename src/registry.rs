@@ -2,9 +2,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
-use wasmtime::component::Linker;
+use wasmtime::component::{HasData, Linker};
 
 use crate::composer::Composer;
 use crate::graph::{ComponentGraph, Node};
@@ -29,13 +30,37 @@ pub trait HostExtension: Send + Sync {
     }
 }
 
+/// `HasData` implementation that projects `ComponentState` to an extension's state type.
+///
+/// Use this in `link()` when adding bindings so host impls receive only their own state
+/// (the type created by `create_state_boxed`), not full `ComponentState`.
+///
+/// # Example
+///
+/// ```ignore
+/// fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+///     my_feature::add_to_linker::<_, ExtensionStateHasData<MyState>>(
+///         linker,
+///         |state| state.get_extension_mut::<MyState>().expect("MyState not initialized"),
+///     )?;
+///     Ok(())
+/// }
+/// ```
+///
+/// The host impl must then be `my_feature::Host for MyState` (not `ComponentState`).
+pub struct ExtensionStateHasData<T>(PhantomData<T>);
+
+impl<T: Send + 'static> HasData for ExtensionStateHasData<T> {
+    type Data<'a> = &'a mut T;
+}
+
 /// Factory function that creates a HostExtension instance from TOML config.
 pub(crate) type HostExtensionFactory =
     Box<dyn Fn(serde_json::Value) -> Result<Box<dyn HostExtension>> + Send + Sync>;
 
 /// Macro for implementing `create_state_boxed()` with automatic TypeId inference.
 ///
-/// The `$body` expression has access to `self` (the extension instance) and can use `?`
+/// The `$body` expression receives the extension instance via `$self` and can use `?`
 /// for fallible operations.
 ///
 /// # Example
@@ -43,9 +68,9 @@ pub(crate) type HostExtensionFactory =
 /// ```ignore
 /// impl HostExtension for MyFeature {
 ///     // ...
-///     create_state!(MyState, {
+///     create_state!(this, MyState, {
 ///         MyState {
-///             shared_resource: self.get_resource(),
+///             shared_resource: this.get_resource(),
 ///             counter: 0,
 ///         }
 ///     });
@@ -53,10 +78,11 @@ pub(crate) type HostExtensionFactory =
 /// ```
 #[macro_export]
 macro_rules! create_state {
-    ($type:ty, $body:expr) => {
+    ($self:ident, $type:ty, $body:expr) => {
         fn create_state_boxed(
             &self,
         ) -> anyhow::Result<Option<(std::any::TypeId, Box<dyn std::any::Any + Send>)>> {
+            let $self = self;
             let state: $type = $body;
             Ok(Some((std::any::TypeId::of::<$type>(), Box::new(state))))
         }

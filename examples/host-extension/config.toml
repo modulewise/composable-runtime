@@ -1,0 +1,8 @@
+[greeting]
+uri = "host:greeting"
+enables = "any"
+
+[greeter]
+uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
+expects = ["greeting"]
+exposed = true
