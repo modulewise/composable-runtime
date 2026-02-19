@@ -44,11 +44,31 @@ impl Composer {
 fn create_config_component(config: &HashMap<String, serde_json::Value>) -> Result<Vec<u8>> {
     let mut config_properties = Vec::new();
     for (key, value) in config {
-        let string_value = convert_json_value_to_string(value)?;
-        config_properties.push((key.clone(), string_value));
+        flatten_config(key, value, &mut config_properties)?;
     }
     static_config::create_component(config_properties)
         .map_err(|e| anyhow::anyhow!("Failed to create config component: {e}"))
+}
+
+/// Recursively flatten nested JSON objects into dot-delimited keys.
+fn flatten_config(
+    prefix: &str,
+    value: &serde_json::Value,
+    out: &mut Vec<(String, String)>,
+) -> Result<()> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let key = format!("{prefix}.{k}");
+                flatten_config(&key, v, out)?;
+            }
+            Ok(())
+        }
+        other => {
+            out.push((prefix.to_string(), convert_json_value_to_string(other)?));
+            Ok(())
+        }
+    }
 }
 
 fn convert_json_value_to_string(value: &serde_json::Value) -> Result<String> {
@@ -62,9 +82,9 @@ fn convert_json_value_to_string(value: &serde_json::Value) -> Result<String> {
                 arr.iter().map(convert_json_value_to_string).collect();
             Ok(string_items?.join(","))
         }
-        serde_json::Value::Object(_) => {
-            Err(anyhow::anyhow!("Nested objects not supported in config"))
-        }
+        serde_json::Value::Object(_) => Err(anyhow::anyhow!(
+            "Nested objects should be handled by flatten_config"
+        )),
         serde_json::Value::Null => Err(anyhow::anyhow!("Null values not supported in config")),
     }
 }
