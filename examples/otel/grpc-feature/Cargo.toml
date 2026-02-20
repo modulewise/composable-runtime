@@ -1,0 +1,15 @@
+[package]
+name = "grpc-feature"
+version = "0.1.0"
+edition = "2024"
+description = "Example of a generic gRPC host feature for composable-runtime"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+composable-runtime = { path = "../../.." }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["sync", "rt"] }
+tonic = "0.12"
+tracing = "0.1"
+wasmtime = "41"

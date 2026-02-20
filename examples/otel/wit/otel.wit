@@ -1,0 +1,22 @@
+package modulewise:otel-example;
+
+interface test {
+    log: func(message: string) -> result<_, string>;
+}
+
+world guest {
+    export test;
+    import wasi:otel/logs@0.2.0-rc.2+patch;
+}
+
+world otel-to-grpc {
+    export wasi:otel/logs@0.2.0-rc.2+patch;
+    import modulewise:grpc/endpoint@0.1.0;
+    import wasi:clocks/wall-clock@0.2.6;
+}
+
+world grpc-to-http {
+    export modulewise:grpc/endpoint@0.1.0;
+    import wasi:http/outgoing-handler@0.2.6;
+    import wasi:config/store@0.2.0-rc.1;
+}

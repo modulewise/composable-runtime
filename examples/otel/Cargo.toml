@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "grpc-feature",
+    "grpc-to-http",
+    "guest",
+    "host",
+    "otel-to-grpc",
+]
+resolver = "3"
