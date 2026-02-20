@@ -7,6 +7,8 @@ description = "Modulewise Composable Runtime"
 [dependencies]
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1", "http2"] }
 oci-client = "0.15"
 petgraph = "0.8"
 rustyline = "17"
