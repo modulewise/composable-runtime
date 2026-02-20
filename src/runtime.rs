@@ -8,10 +8,16 @@ use wasmtime::{
 };
 use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
 use wasmtime_wasi::{ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
-use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
+use wasmtime_wasi_http::bindings::http::types::ErrorCode;
+use wasmtime_wasi_http::body::HyperOutgoingBody;
+use wasmtime_wasi_http::types::{
+    HostFutureIncomingResponse, OutgoingRequestConfig, default_send_request,
+};
+use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::graph::ComponentGraph;
+use crate::grpc;
 use crate::registry::{
     ComponentRegistry, HostExtension, HostExtensionFactory, RuntimeFeatureRegistry,
     build_registries,
@@ -218,6 +224,28 @@ impl WasiHttpView for ComponentState {
 
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.resource_table
+    }
+
+    fn send_request(
+        &mut self,
+        request: hyper::Request<HyperOutgoingBody>,
+        config: OutgoingRequestConfig,
+    ) -> HttpResult<HostFutureIncomingResponse> {
+        let is_grpc = request
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|ct| ct.starts_with("application/grpc"));
+
+        if is_grpc {
+            if request.uri().scheme_str() == Some("https") {
+                tracing::error!("gRPC over TLS (https) is not yet supported");
+                return Err(ErrorCode::HttpProtocolError.into());
+            }
+            Ok(grpc::send_grpc_request(request, config))
+        } else {
+            Ok(default_send_request(request, config))
+        }
     }
 }
 

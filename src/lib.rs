@@ -18,6 +18,7 @@ pub mod registry;
 pub mod types;
 
 mod composer;
+mod grpc;
 mod loader;
 mod runtime;
 mod wit;
