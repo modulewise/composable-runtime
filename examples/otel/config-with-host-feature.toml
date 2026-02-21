@@ -1,0 +1,20 @@
+[guest]
+uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
+expects = ["otel"]
+exposed = true
+
+[otel]
+uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
+expects = ["grpc", "wasip2"]
+enables = "exposed"
+
+[grpc]
+uri = "host:grpc"
+enables = "unexposed"
+config.url = "http://localhost:4317"
+config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
+config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
+
+[wasip2]
+uri = "wasmtime:wasip2"
+enables = "unexposed"

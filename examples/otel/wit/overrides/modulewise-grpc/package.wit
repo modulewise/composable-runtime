@@ -1,0 +1,5 @@
+package modulewise:grpc@0.1.0;
+
+interface endpoint {
+  send: func(route: string, data: list<u8>) -> result<_, string>;
+}

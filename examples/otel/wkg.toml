@@ -1,0 +1,3 @@
+[overrides]
+"modulewise:grpc" = { path = "./wit/overrides/modulewise-grpc" }
+"wasi:otel" = { path = "./wit/overrides/wasi-otel" }
