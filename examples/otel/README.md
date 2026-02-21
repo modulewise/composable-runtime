@@ -80,7 +80,7 @@ uri = "wasmtime:wasip2"
 enables = "unexposed"
 ```
 
-The `uri = "host:grpc"` tells the runtime to use the registered host extension. The host binary registers it:
+The "grpc" definition with `uri = "host:grpc"` creates an instance of the host feature, which the host binary has registered as an extension:
 
 ```rust
 let runtime = Runtime::builder(&graph)
@@ -89,7 +89,7 @@ let runtime = Runtime::builder(&graph)
     .await?;
 ```
 
-**Advantage:** The tonic `Channel` persists across invocations. If the guest component is instantiated multiple times, all reuse the same underlying connection. If other components rely on the same feature instance, they also share the connection.
+**Advantage:** The underlying channel persists across invocations. If the guest component is instantiated multiple times, all reuse the same connection. If other components rely on the same feature instance, they also share the connection.
 
 ### Option 2: Component as Adapter (`grpc-to-http`)
 
