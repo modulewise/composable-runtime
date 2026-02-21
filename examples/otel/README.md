@@ -1,6 +1,6 @@
 # OpenTelemetry Example
 
-This example demonstrates sending OpenTelemetry logs from a guest wasm component to an OTLP-compatible collector via gRPC. Tracing and metrics will be added to the demo in a future update.
+This example demonstrates sending OpenTelemetry logs from a guest wasm component to an OTLP-compatible collector via the [wasi:otel](https://github.com/WebAssembly/wasi-otel) WIT interface and a gRPC endpoint interface. Tracing and metrics will be added to the demo in a future update.
 
 ## Flow
 
@@ -129,7 +129,7 @@ uri = "wasmtime:wasip2"
 enables = "unexposed"
 ```
 
-The `grpc-to-http` constructs a gRPC-framed request and sends it via `wasi:http/outgoing-handler`.
+The `grpc-to-http` component constructs a gRPC-framed request and sends it via `wasi:http/outgoing-handler`.
 
 **Advantage:** Pure wasm component model, bottoms out at `wasi:http`. No host-feature needed.
 
