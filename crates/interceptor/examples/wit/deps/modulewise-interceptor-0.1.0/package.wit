@@ -1,0 +1,68 @@
+package modulewise:interceptor@0.1.0;
+
+interface types {
+  /// A value that can be passed to or from advice.
+  ///
+  /// Primitive types and strings are fully readable and writable by the
+  /// advice. Complex types use the `complex` variant with an empty payload
+  /// so the advice can only see the name and type-name on the enclosing
+  /// `arg` record, not the actual value.
+  variant value {
+    str(string),
+    num-s64(s64),
+    num-u64(u64),
+    num-f32(f32),
+    num-f64(f64),
+    boolean(bool),
+    complex(string),
+  }
+
+  /// A function argument or return value with metadata.
+  record arg {
+    /// Parameter name or "return" for return values.
+    name: string,
+    /// WIT type name (e.g. "string", "u32", "my-record").
+    type-name: string,
+    /// The value variant, opaque if complex.
+    value: value,
+  }
+}
+
+interface advice {
+  use types.{arg, value};
+
+  /// Returned by before() so the interceptor can take action.
+  variant before-action {
+    /// Proceed with the (possibly modified) args. Complex-typed values
+    /// are ignored (the interceptor uses saved originals).
+    proceed(list<arg>),
+    /// Skip the target function and return this value directly.
+    /// `none` for void functions. Traps if the return type is complex.
+    skip(option<value>),
+    /// Traps immediately.
+    error(string),
+  }
+
+  /// Returned by after() so the interceptor can take action.
+  variant after-action {
+    /// Accept this return value. For complex return types, the interceptor
+    /// uses the target's actual return value regardless of what's provided.
+    accept(option<value>),
+    /// Repeat the call with (possibly modified) args.
+    repeat(list<arg>),
+    /// Traps immediately.
+    error(string),
+  }
+
+  /// Resource representing a single function invocation.
+  resource invocation {
+    /// Create a new invocation context with the function name and args.
+    constructor(function-name: string, args: list<arg>);
+    /// Called before the target function is invoked.
+    before: func() -> before-action;
+    /// Called after the target function returns.
+    /// `ret` is `none` for void functions, `some(value)` otherwise.
+    after: func(ret: option<value>) -> after-action;
+  }
+}
+

@@ -1,0 +1,26 @@
+[package]
+name = "interceptor"
+version = "0.1.0"
+edition = "2024"
+description = "Aspect-Oriented Programming for Wasm Components"
+
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:tracing-subscriber"]
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true, optional = true }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"], optional = true }
+wasm-encoder.workspace = true
+wasmparser.workspace = true
+wat.workspace = true
+wit-parser.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bin]]
+name = "interceptor"
+required-features = ["cli"]
