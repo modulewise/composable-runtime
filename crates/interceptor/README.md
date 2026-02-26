@@ -199,10 +199,10 @@ Both functions return validated wasm component bytes ready for composition.
 
 ## How It Works
 
-Given a WIT world, the interceptor generates three wasm modules and assembles them into a single wasm component:
+Given a WIT world, the interceptor generates three core wasm modules and assembles them into a single wasm component:
 
-- **core module**: marshals arguments into the advice protocol, calls `before()` and `after()`, and handles the returned actions
-- **shim module**: a function table that breaks the circular dependency between the core module and the module-level advice and target functions
+- **main module**: marshals arguments into the advice protocol, calls `before()` and `after()`, and handles the returned actions
+- **shim module**: provides indirect call stubs so the main module can be instantiated before its real imports are available
 - **fixup module**: patches the shim's table with the real lowered function references at instantiation time
 
 The component imports the target interface(s) and `modulewise:interceptor/advice`, then re-exports the target interface(s) with interception applied. Bypassed functions are aliased directly with no overhead. The generated component is a standard wasm component with no special runtime support required. Notice that the run scripts in the examples use [wasmtime](https://github.com/bytecodealliance/wasmtime) directly instead of composable-runtime.
