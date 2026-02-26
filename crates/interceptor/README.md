@@ -57,7 +57,7 @@ For each intercepted call, the interceptor:
 | Variant | Meaning |
 |---|---|
 | `accept(option<value>)` | Return this value to the caller |
-| `repeat(list<arg>)` | Call the target again with new args |
+| `repeat(list<arg>)` | Call the target again with these args |
 | `error(string)` | Trap immediately |
 
 ### arg and value
@@ -83,7 +83,7 @@ variant value {
 Primitive types (`bool`, integers, floats, `char`) and strings are fully readable and writable by advice. Complex types (records, lists, variants, etc.) are passed as `complex("")` which means advice cannot read, modify, or replace them.
 
 > [!NOTE]
-> If access to complex types is required within an interceptor implementation, it's recommended to implement a dedicated component that explicitly imports and exports the same interface as exported by the target component (rather than using generic cross-cutting advice).
+> If access to complex types is required within an interceptor implementation, implement a dedicated component that explicitly imports and exports the same interface as exported by the target component (instead of *generic* cross-cutting advice).
 
 ---
 
@@ -97,7 +97,7 @@ interceptor --world <world> [--wit <path>] [--match <pattern>]... --output <file
 |---|---|---|
 | `--world` | *(required)* | World name whose exports define the interceptor contract |
 | `--wit` | `wit/` | Path to WIT file or directory |
-| `--match` | *(none — intercept all)* | Pattern for selective interception (repeatable) |
+| `--match` | *(none => intercept all)* | Pattern for selective interception (repeatable) |
 | `--output` / `-o` | *(required)* | Output path for the generated interceptor `.wasm` |
 
 ### Examples
@@ -124,7 +124,7 @@ interceptor --world my-world --match 'modulewise:*' --output interceptor.wasm
 
 ### Pattern Syntax
 
-Patterns select which exported functions to intercept. Functions not matched are *bypassed* as direct aliases with no overhead. If no `--match` flags are provided, all functions are intercepted.
+Patterns select which exported functions to intercept. Functions not matched are *bypassed* as direct aliases. If no `--match` flags are provided, all functions are intercepted.
 
 | Pattern form | Matches |
 |---|---|
@@ -160,7 +160,7 @@ let bytes = interceptor::create_from_wit(
 std::fs::write("interceptor.wasm", bytes)?;
 ```
 
-### From a component binary
+### From a Wasm Component binary
 
 When a target component is available, the WIT world can be extracted from the component's embedded type information:
 
@@ -169,7 +169,7 @@ let target_bytes: &[u8] = /* ... */;
 
 let interceptor_bytes = interceptor::create_from_component(
     target_bytes,
-    &[], // empty = intercept all exports
+    &[], // empty => intercept all exports
 )?;
 ```
 
@@ -186,7 +186,7 @@ Both functions return validated wasm component bytes ready for composition.
 | [`examples/logging`](examples/logging/) | Multiple interfaces, WASI logging import in advice |
 
 > [!NOTE]
-> In each of the examples above, the advice components are implemented in Rust, but wasm composition works at the bytecode level regardless of source langague. The square example shows a target component [implemented in Python](examples/square/components/calculator/calculator.py), and the `uppercase` example shows a target component [implemented in JavaScript](examples/uppercase/components/greeter/greeter.js). The logging examples uses Rust for its target components, but exporting the same WIT functions as those other two examples.
+> In each of the examples above, the advice components are implemented in Rust, but wasm composition works at the bytecode level regardless of source language. To demonstrate this, the `square` example uses a target component [implemented in Python](examples/square/calculator/calculator.py), and the `uppercase` example uses a target component [implemented in JavaScript](examples/uppercase/greeter/greeter.js). The logging example uses Rust for all of its components, but its `greeter` and `calculator` components export the same WIT functions as those other two examples.
 
 ---
 
@@ -205,4 +205,4 @@ Given a WIT world, the interceptor generates three core wasm modules and assembl
 - **shim module**: provides indirect call stubs so the main module can be instantiated before its real imports are available
 - **fixup module**: patches the shim's table with the real lowered function references at instantiation time
 
-The component imports the target interface(s) and `modulewise:interceptor/advice`, then re-exports the target interface(s) with interception applied. Bypassed functions are aliased directly with no overhead. The generated component is a standard wasm component with no special runtime support required. Notice that the run scripts in the examples use [wasmtime](https://github.com/bytecodealliance/wasmtime) directly instead of composable-runtime.
+The component imports the target interface(s) and `modulewise:interceptor/advice`, then re-exports the target interface(s) with interception applied. Bypassed functions are aliased. The generated component is a standard wasm component with no special runtime support required. Notice that the run scripts in the examples use [wasmtime](https://github.com/bytecodealliance/wasmtime) directly instead of composable-runtime.
