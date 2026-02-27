@@ -47,6 +47,15 @@ pub trait TypeEncoder {
         None
     }
 
+    /// Whether this encoder operates at the component level (vs instance level).
+    ///
+    /// Component-level encoders always alias named types from imported instances
+    /// rather than encoding them structurally, because the structural definitions
+    /// already exist at the instance level.
+    fn is_component_level(&self) -> bool {
+        false
+    }
+
     /// Import a named type from a foreign interface via `Alias::Outer`.
     /// Only called on instance-type encoders when a referenced type belongs
     /// to a different interface than the one being encoded.
@@ -114,14 +123,16 @@ impl TypeEncoder for InstanceTypeEncoder<'_> {
                 )
             });
 
-        // Alias from outer (component) scope into this instance type.
-        // This is a foreign type referenced by function signatures,
-        // not a type owned by this interface and not exported.
+        // Alias from outer (component) scope and export so the type is named,
+        // matching wit-component's encoding of `use`d types.
         self.inst.alias(Alias::Outer {
             count: 1,
             index: component_idx,
             kind: ComponentOuterAliasKind::Type,
         });
+        let alias_idx = self.inst.type_count() - 1;
+        self.inst
+            .export(name, ComponentTypeRef::Type(TypeBounds::Eq(alias_idx)));
         self.inst.type_count() - 1
     }
 }
@@ -160,16 +171,18 @@ pub fn encode_valtype(
 
             let type_def = &resolve.types[id];
 
-            // Short-circuit: if this is a named type owned by a foreign interface,
-            // import it directly via Alias::Outer rather than encoding structurally.
+            // Short-circuit: alias named types instead of encoding structurally when:
+            // - Component-level encoders: always alias (types are already defined at instance level)
+            // - Instance-level encoders: alias only foreign types (owned by a different interface)
             if let Some(name) = &type_def.name
-                && let Some(enc_iface) = enc.interface()
                 && let TypeOwner::Interface(owner_iface) = type_def.owner
-                && owner_iface != enc_iface
             {
-                let index = enc.import_type(name, owner_iface);
-                type_map.insert(id, index);
-                return Ok(ComponentValType::Type(index));
+                let is_foreign = enc.interface().is_some_and(|enc_iface| owner_iface != enc_iface);
+                if enc.is_component_level() || is_foreign {
+                    let index = enc.import_type(name, owner_iface);
+                    type_map.insert(id, index);
+                    return Ok(ComponentValType::Type(index));
+                }
             }
 
             let encoded = match &type_def.kind {

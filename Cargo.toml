@@ -1,5 +1,21 @@
+[package]
+name = "composable-runtime"
+version = "0.3.1"
+description = "Modulewise Composable Runtime"
+edition.workspace = true
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+categories = ["wasm"]
+keywords = ["wasm"]
+
 [workspace]
 members = [".", "crates/interceptor"]
+
+[workspace.package]
+license = "Apache-2.0"
+repository = "https://github.com/modulewise/composable-runtime"
+edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -10,12 +26,6 @@ wasm-encoder = "0.244"
 wasmparser = "0.244"
 wat = "1.244"
 wit-parser = "0.244"
-
-[package]
-name = "composable-runtime"
-version = "0.3.1"
-edition = "2024"
-description = "Modulewise Composable Runtime"
 
 [dependencies]
 anyhow.workspace = true

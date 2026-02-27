@@ -1,8 +1,13 @@
 [package]
-name = "interceptor"
+name = "composable-runtime-interceptor"
 version = "0.1.0"
-edition = "2024"
 description = "Aspect-Oriented Programming for Wasm Components"
+edition.workspace = true
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+categories = ["wasm"]
+keywords = ["wasm", "aop", "aspect-oriented", "interceptor"]
 
 [features]
 default = ["cli"]
@@ -22,5 +27,6 @@ wit-parser.workspace = true
 tempfile.workspace = true
 
 [[bin]]
-name = "interceptor"
+name = "waspect"
+path = "src/main.rs"
 required-features = ["cli"]

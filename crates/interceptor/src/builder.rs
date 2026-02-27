@@ -579,8 +579,8 @@ impl InterceptorBuilder {
             }
         }
 
-        if ie.used_types.is_empty() {
-            // No used types - flat instance pattern works fine.
+        if ie.used_types.is_empty() && ie.owned_types.is_empty() {
+            // No named types - use flat instance pattern.
             let interface = &resolve.interfaces[ie.interface_id];
             let mut items: Vec<(String, ComponentExportKind, u32)> = Vec::new();
 
@@ -859,6 +859,10 @@ impl TypeEncoder for OuterTypeEncoder<'_> {
 
     fn declare_resource(&mut self, name: &str) -> u32 {
         self.alias_type_from_instance(name)
+    }
+
+    fn is_component_level(&self) -> bool {
+        true
     }
 
     fn interface(&self) -> Option<wit_parser::InterfaceId> {

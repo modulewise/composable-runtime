@@ -142,7 +142,8 @@ impl DecodedInterceptor {
 // Build an interceptor from inline WIT and decode the result.
 fn build_and_decode(package_wit: &str, world: &str, patterns: &[&str]) -> DecodedInterceptor {
     let dir = wit_dir(package_wit);
-    let bytes = interceptor::create_from_wit(&wit_path(&dir), world, patterns).unwrap();
+    let bytes =
+        composable_runtime_interceptor::create_from_wit(&wit_path(&dir), world, patterns).unwrap();
     DecodedInterceptor::from_bytes(&bytes)
 }
 
@@ -576,7 +577,8 @@ fn no_exports_errors() {
         }
         "#,
     );
-    let err = interceptor::create_from_wit(&wit_path(&dir), "target", &[]).unwrap_err();
+    let err = composable_runtime_interceptor::create_from_wit(&wit_path(&dir), "target", &[])
+        .unwrap_err();
     assert!(
         err.to_string().contains("No exports"),
         "expected 'No exports' error, got: {err}"
@@ -593,7 +595,8 @@ fn bad_world_name_errors() {
         }
         "#,
     );
-    let err = interceptor::create_from_wit(&wit_path(&dir), "nonexistent", &[]).unwrap_err();
+    let err = composable_runtime_interceptor::create_from_wit(&wit_path(&dir), "nonexistent", &[])
+        .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("nonexistent") || msg.contains("world"),
@@ -625,7 +628,8 @@ fn from_component_simple_interface() {
         "#,
     )
     .unwrap();
-    let bytes = interceptor::create_from_component(&component_bytes, &[]).unwrap();
+    let bytes =
+        composable_runtime_interceptor::create_from_component(&component_bytes, &[]).unwrap();
     let d = DecodedInterceptor::from_bytes(&bytes);
 
     assert!(d.export_names().contains("test:calc/math@0.1.0"));
@@ -659,7 +663,8 @@ fn from_component_direct_export() {
         "#,
     )
     .unwrap();
-    let bytes = interceptor::create_from_component(&component_bytes, &[]).unwrap();
+    let bytes =
+        composable_runtime_interceptor::create_from_component(&component_bytes, &[]).unwrap();
     let d = DecodedInterceptor::from_bytes(&bytes);
 
     assert_eq!(d.direct_export_func_names(), set(&["add"]));
@@ -712,4 +717,42 @@ fn chained_use_types_across_type_providers() {
     // Both type-providing interfaces must be imported
     assert!(d.import_names().contains("test:chained/shapes@0.1.0"));
     assert!(d.import_names().contains("test:chained/primitives@0.1.0"));
+}
+
+// ============================================================
+// Owned record types in exported interface
+// ============================================================
+
+#[test]
+fn interface_with_owned_record_type() {
+    let d = build_and_decode(
+        r#"
+        package test:owned@0.1.0;
+        interface flights {
+            record flight {
+                id: string,
+                airline: string,
+                origin: string,
+                destination: string,
+            }
+            get-flights: func() -> list<flight>;
+            get-flight-by-id: func(id: string) -> option<flight>;
+        }
+        world target {
+            export flights;
+        }
+        "#,
+        "target",
+        &[],
+    );
+
+    assert_eq!(d.export_names(), set(&["test:owned/flights@0.1.0"]));
+    assert_eq!(
+        d.exported_interface_funcs("test:owned/flights@0.1.0"),
+        set(&["get-flights", "get-flight-by-id"])
+    );
+    assert!(
+        d.exported_interface_types("test:owned/flights@0.1.0")
+            .contains("flight"),
+    );
 }

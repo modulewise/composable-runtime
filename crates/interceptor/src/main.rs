@@ -3,7 +3,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "interceptor")]
+#[command(name = "waspect")]
 #[command(about = "Generate interceptor components for any target WIT interface")]
 struct Cli {
     /// World whose exports define the interceptor contract
@@ -37,7 +37,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let patterns: Vec<&str> = cli.r#match.iter().map(|s| s.as_str()).collect();
 
-    let component_bytes = interceptor::create_from_wit(&cli.wit, &cli.world, &patterns)?;
+    let component_bytes =
+        composable_runtime_interceptor::create_from_wit(&cli.wit, &cli.world, &patterns)?;
 
     std::fs::write(&cli.output, &component_bytes)?;
     tracing::info!("Wrote interceptor to {}", cli.output.display());
