@@ -1,0 +1,12 @@
+{
+  "name": "greeter",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "jco componentize greeter.js --wit ../../wit --world-name greeter-world --disable all -o greeter.wasm"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.15.0",
+    "@bytecodealliance/componentize-js": "^0.19.0"
+  }
+}

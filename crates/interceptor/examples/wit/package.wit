@@ -1,0 +1,30 @@
+package modulewise:examples@0.1.0;
+
+world calculator-world {
+  export add: func(a: s32, b: s32) -> s32;
+  export subtract: func(a: s32, b: s32) -> s32;
+}
+
+interface greeter {
+  say-hello: func(name: string) -> string;
+  say-goodbye: func(name: string) -> string;
+}
+
+world greeter-world {
+  export greeter;
+}
+
+world multi-world {
+  export add: func(a: s32, b: s32) -> s32;
+  export subtract: func(a: s32, b: s32) -> s32;
+  export greeter;
+}
+
+world logger-world {
+  export modulewise:interceptor/advice@0.1.0;
+  import wasi:logging/logging@0.1.0-draft;
+}
+
+world advice-world {
+  export modulewise:interceptor/advice@0.1.0;
+}
