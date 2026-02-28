@@ -1,7 +1,5 @@
 //! Builds an interceptor component from extracted target information and generated core modules.
 //!
-//! Public entry point: `build`
-//!
 //! Internally, `InterceptorBuilder` wraps `wasm_encoder::ComponentBuilder`
 //! and executes four phases in sequence:
 //! 1. `import_targets`: import type-providing interfaces, target interfaces, direct functions

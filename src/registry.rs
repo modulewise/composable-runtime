@@ -557,12 +557,15 @@ async fn process_component(
                     &metadata,
                     &dependency_def.name,
                 ) {
-                    bytes = Composer::compose_components(&bytes, &component_spec.bytes)
-                        .map_err(|e| anyhow::anyhow!(
-                            "Failed composing '{}' with dependency '{}': {e}",
-                            definition.name,
-                            dependency_def.name
-                        ))?;
+                    bytes = Composer::compose_components(&bytes, &component_spec.bytes).map_err(
+                        |e| {
+                            anyhow::anyhow!(
+                                "Failed composing '{}' with dependency '{}': {e}",
+                                definition.name,
+                                dependency_def.name
+                            )
+                        },
+                    )?;
                     tracing::info!(
                         "Composed component '{}' with dependency '{}'",
                         definition.name,

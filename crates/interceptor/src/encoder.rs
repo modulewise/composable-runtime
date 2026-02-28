@@ -177,7 +177,9 @@ pub fn encode_valtype(
             if let Some(name) = &type_def.name
                 && let TypeOwner::Interface(owner_iface) = type_def.owner
             {
-                let is_foreign = enc.interface().is_some_and(|enc_iface| owner_iface != enc_iface);
+                let is_foreign = enc
+                    .interface()
+                    .is_some_and(|enc_iface| owner_iface != enc_iface);
                 if enc.is_component_level() || is_foreign {
                     let index = enc.import_type(name, owner_iface);
                     type_map.insert(id, index);

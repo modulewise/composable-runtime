@@ -1,7 +1,5 @@
 //! WAT code generation: produces the 3 core modules (main, shim, fixup)
 //! and derives ABI context for intercepted functions.
-//!
-//! Public entry point: `generate_modules`.
 
 use std::fmt::Write;
 
@@ -463,10 +461,10 @@ fn generate_main_module(
         )?;
     }
 
-    // === Post-return stubs ===
-    // Reset the heap after the caller has read the return value.
-    // This reclaims all per-call allocations (work areas + cabi_realloc buffers).
-    // Safe because cabi_post runs after canon lift has copied the result out.
+    // === Post-return stubs (cabi_post_*) ===
+    // Per the canonical ABI, these run after canon lift has copied all return
+    // data out of linear memory. We reset the bump allocator here to reclaim
+    // all per-call allocations (work areas + cabi_realloc buffers).
     for ifunc in intercepted {
         let export_name = format!("cabi_post_{}", ifunc.export_name);
         if !ifunc.result_flat_types.is_empty() {
@@ -884,12 +882,12 @@ fn write_accept_return(wat: &mut String, ifunc: &InterceptedFunction) -> Result<
     let disc = ifunc
         .result_discriminant
         .ok_or_else(|| anyhow::anyhow!("accept path requires a return type discriminant"))?;
+    // Guard: trap if advice returned a different value variant than expected.
+    writeln!(
+        wat,
+        "          (if (i32.ne (i32.load8_u offset=16 (local.get $after_ret)) (i32.const {disc})) (then (unreachable)))"
+    )?;
     if disc != DISC_COMPLEX {
-        // Guard: trap if advice returned a different value variant than expected.
-        writeln!(
-            wat,
-            "          (if (i32.ne (i32.load8_u offset=16 (local.get $after_ret)) (i32.const {disc})) (then (unreachable)))"
-        )?;
         let result_flat = ifunc.result_flat_types.first().copied().unwrap_or("i32");
         write_unwrap_value_to_out(wat, disc, result_flat, ifunc.uses_retarea, "$after_ret", 24)?;
     } else {
@@ -990,12 +988,12 @@ fn write_proceed_and_call_target(
             pi * 32
         );
 
+        // Guard: trap if advice returned a different value variant than expected.
+        writeln!(
+            wat,
+            "        (if (i32.ne (i32.load8_u offset=16 {arg_base}) (i32.const {disc})) (then (unreachable)))"
+        )?;
         if *disc != DISC_COMPLEX {
-            // Guard: trap if advice returned a different value variant than expected.
-            writeln!(
-                wat,
-                "        (if (i32.ne (i32.load8_u offset=16 {arg_base}) (i32.const {disc})) (then (unreachable)))"
-            )?;
             let param_flats = &ifunc.param_flat_types[pi];
             match *disc {
                 DISC_STRING => {
