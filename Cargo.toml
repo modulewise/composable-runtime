@@ -41,6 +41,7 @@ static-config = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 toml = "0.9"
 tracing.workspace = true
+uuid = { version = "1", features = ["v4"] }
 wac-graph = "0.9"
 wac-types = "0.9"
 wasm-pkg-client = "0.14"

@@ -20,5 +20,6 @@ pub mod types;
 mod composer;
 mod grpc;
 mod loader;
+mod messaging;
 mod runtime;
 mod wit;
