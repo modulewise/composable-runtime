@@ -110,9 +110,13 @@ mod tests {
         }
 
         // Wait until at least `n` handle() calls have completed.
+        // Panics if not reached within 5 seconds.
         async fn wait_for(&self, n: usize) {
             let mut rx = self.rx.clone();
-            rx.wait_for(|&c| c >= n).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(5), rx.wait_for(|&c| c >= n))
+                .await
+                .unwrap_or_else(|_| panic!("timed out waiting for {n} handle() calls"))
+                .unwrap();
         }
     }
 
@@ -256,6 +260,9 @@ mod tests {
         // Release all and wait for completion.
         semaphore.add_permits(3);
         handler.counter.wait_for(3).await;
+
+        assert_eq!(handler.active.load(Ordering::SeqCst), 0);
+        assert_eq!(handler.max_active.load(Ordering::SeqCst), 1);
 
         cancel.cancel();
         dispatch_handle.await.unwrap();
