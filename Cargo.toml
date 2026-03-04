@@ -39,6 +39,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 static-config = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"], optional = true }
+tokio-util = { version = "0.7", optional = true }
 toml = "0.9"
 tracing.workspace = true
 uuid = { version = "1", features = ["v4"] }
@@ -56,12 +57,13 @@ wit-parser.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 wat.workspace = true
 
 [features]
 default = ["cli"]
 cli = ["dep:tokio"]
-messaging = ["dep:tokio"]
+messaging = ["dep:tokio", "dep:tokio-util"]
 
 [[bin]]
 name = "composable-runtime"
