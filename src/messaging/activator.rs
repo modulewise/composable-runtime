@@ -252,16 +252,20 @@ mod tests {
         Runtime::builder(&graph).build().await.unwrap()
     }
 
-    // Component that exports a single bare function: process(value: u32)
+    // Component that exports a single bare function: double(value: u32) -> u32
     fn single_function_wasm() -> NamedTempFile {
         let wat = r#"
             (component
                 (core module $m
-                    (func (export "process") (param i32))
+                    (func (export "double") (param i32) (result i32)
+                        (i32.mul (local.get 0) (i32.const 2))
+                    )
                 )
                 (core instance $i (instantiate $m))
-                (func $process (param "value" u32) (canon lift (core func $i "process")))
-                (export "process" (func $process))
+                (func $double (param "value" u32) (result u32)
+                    (canon lift (core func $i "double"))
+                )
+                (export "double" (func $double))
             )
         "#;
         create_wasm_file(wat)
@@ -379,11 +383,29 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
 
-        let activator = Activator::new(runtime, "guest", None, None).unwrap();
+        let registry = Arc::new(ChannelRegistry::new());
+        let replies = Arc::new(LocalChannel::with_defaults());
+        registry.register("replies", replies.clone());
 
-        let msg = MessageBuilder::new(b"42".to_vec()).build();
+        let activator = Activator::new(runtime, "guest", None, Some(registry)).unwrap();
+
+        let msg = MessageBuilder::new(b"21".to_vec())
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::REPLY_TO, "replies")
+            .build();
+
+        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+            let ch = replies.clone();
+            tokio::spawn(async move { ch.consume("test").await })
+        };
+        tokio::task::yield_now().await;
+
         let result = activator.handle(msg).await;
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
+
+        let reply = consumer.await.unwrap().unwrap();
+        // double(21) = 42
+        assert_eq!(reply.body(), b"42");
     }
 
     #[tokio::test]
@@ -450,17 +472,35 @@ mod tests {
         impl Mapper for TestMapper {
             fn map(&self, _msg: &Message) -> Result<Invocation, String> {
                 Ok(Invocation {
-                    function_key: "process".to_string(),
-                    args: vec![serde_json::json!(99)],
+                    function_key: "double".to_string(),
+                    args: vec![serde_json::json!(7)],
                 })
             }
         }
 
-        let activator = Activator::new(runtime, "guest", Some(Box::new(TestMapper)), None).unwrap();
+        let registry = Arc::new(ChannelRegistry::new());
+        let replies = Arc::new(LocalChannel::with_defaults());
+        registry.register("replies", replies.clone());
 
-        let msg = MessageBuilder::new(b"ignored".to_vec()).build();
+        let activator =
+            Activator::new(runtime, "guest", Some(Box::new(TestMapper)), Some(registry)).unwrap();
+
+        let msg = MessageBuilder::new(b"ignored".to_vec())
+            .header(header::REPLY_TO, "replies")
+            .build();
+
+        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+            let ch = replies.clone();
+            tokio::spawn(async move { ch.consume("test").await })
+        };
+        tokio::task::yield_now().await;
+
         let result = activator.handle(msg).await;
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
+
+        let reply = consumer.await.unwrap().unwrap();
+        // TestMapper sends 7 to double -> 14
+        assert_eq!(reply.body(), b"14");
     }
 
     #[tokio::test]
