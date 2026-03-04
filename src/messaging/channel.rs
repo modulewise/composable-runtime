@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -333,6 +333,34 @@ impl Channel for LocalChannel {
                 }
             }
         }
+    }
+}
+
+/// Registry for channels that can be accessed by name.
+pub struct ChannelRegistry<C: Channel> {
+    channels: RwLock<HashMap<String, Arc<C>>>,
+}
+
+impl<C: Channel> ChannelRegistry<C> {
+    pub fn new() -> Self {
+        Self {
+            channels: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Register a channel by name. Replaces any existing channel with the same name.
+    pub fn register(&self, name: impl Into<String>, channel: Arc<C>) {
+        self.channels.write().unwrap().insert(name.into(), channel);
+    }
+
+    /// Remove a channel by name.
+    pub fn remove(&self, name: &str) -> Option<Arc<C>> {
+        self.channels.write().unwrap().remove(name)
+    }
+
+    /// Look up a channel by name.
+    pub fn lookup(&self, name: &str) -> Option<Arc<C>> {
+        self.channels.read().unwrap().get(name).cloned()
     }
 }
 

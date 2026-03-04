@@ -1,8 +1,10 @@
 use std::future::Future;
+use std::sync::Arc;
 
 use crate::runtime::{Component, Runtime};
 
-use super::message::Message;
+use super::channel::{Channel, ChannelRegistry, LocalChannel};
+use super::message::{Message, MessageBuilder, header};
 
 /// Handler for messages, used by dispatcher.
 ///
@@ -111,6 +113,7 @@ pub struct Activator {
     runtime: Runtime,
     component_name: String,
     mode: InvocationMode,
+    registry: Option<Arc<ChannelRegistry<LocalChannel>>>,
 }
 
 enum InvocationMode {
@@ -128,6 +131,7 @@ impl Activator {
         runtime: Runtime,
         component_name: &str,
         mapper: Option<Box<dyn Mapper>>,
+        registry: Option<Arc<ChannelRegistry<LocalChannel>>>,
     ) -> Result<Self, String> {
         let component = runtime
             .get_component(component_name)
@@ -147,6 +151,7 @@ impl Activator {
             runtime,
             component_name: component_name.to_string(),
             mode,
+            registry,
         })
     }
 
@@ -167,7 +172,8 @@ impl Handler for Activator {
                 }
                 InvocationMode::Mapped { mapper } => {
                     let invocation = mapper.map(&msg)?;
-                    self.runtime
+                    let result = self
+                        .runtime
                         .invoke(
                             &self.component_name,
                             &invocation.function_key,
@@ -175,6 +181,36 @@ impl Handler for Activator {
                         )
                         .await
                         .map_err(|e| e.to_string())?;
+
+                    if let Some(reply_to) = msg.headers().reply_to() {
+                        let registry = self.registry.as_ref().ok_or_else(|| {
+                            format!("reply-to '{reply_to}' requested but no channel registry")
+                        })?;
+                        let channel = registry
+                            .lookup(reply_to)
+                            .ok_or_else(|| format!("reply-to channel '{reply_to}' not found"))?;
+                        let content_type = msg.headers().content_type();
+                        let body = match content_type {
+                            Some("text/plain") => match &result {
+                                serde_json::Value::String(s) => s.as_bytes().to_vec(),
+                                other => other.to_string().into_bytes(),
+                            },
+                            _ => serde_json::to_vec(&result)
+                                .map_err(|e| format!("failed to serialize reply: {e}"))?,
+                        };
+                        let mut builder = MessageBuilder::new(body);
+                        if let Some(corr_id) = msg.headers().correlation_id() {
+                            builder = builder.header(header::CORRELATION_ID, corr_id);
+                        }
+                        if let Some(ct) = content_type {
+                            builder = builder.header(header::CONTENT_TYPE, ct);
+                        }
+                        channel
+                            .publish(builder.build())
+                            .await
+                            .map_err(|e| format!("failed to publish reply: {e}"))?;
+                    }
+
                     Ok(())
                 }
             }
@@ -186,12 +222,13 @@ impl Handler for Activator {
 mod tests {
     use std::io::Write;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     use tempfile::{Builder, NamedTempFile};
 
     use super::*;
     use crate::graph::ComponentGraph;
-    use crate::messaging::MessageBuilder;
+    use crate::messaging::{Channel, LocalChannel, MessageBuilder};
 
     fn create_wasm_file(wat: &str) -> NamedTempFile {
         let component_bytes = wat::parse_str(wat).unwrap();
@@ -230,6 +267,86 @@ mod tests {
         create_wasm_file(wat)
     }
 
+    // Component that exports greet(name: string) -> string.
+    // Returns "Hello, " + name by copying both parts into memory.
+    fn string_function_wasm() -> NamedTempFile {
+        let wat = r#"
+            (component
+                (core module $m
+                    (memory (export "mem") 1)
+
+                    ;; Simple bump allocator at offset 1024.
+                    (global $bump (mut i32) (i32.const 1024))
+                    (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32)
+                        (call $realloc_internal (local.get 0) (local.get 1) (local.get 2) (local.get 3))
+                    )
+
+                    ;; "Hello, " stored at offset 0 (7 bytes).
+                    (data (i32.const 0) "Hello, ")
+
+                    ;; greet(name_ptr, name_len) -> ret_ptr
+                    ;; Writes (ptr, len) pair for the result string at ret_ptr.
+                    (func $realloc_internal (param $old_ptr i32) (param $old_len i32)
+                                            (param $align i32) (param $new_len i32) (result i32)
+                        (local $ptr i32)
+                        (global.set $bump
+                            (i32.and
+                                (i32.add (global.get $bump) (i32.sub (local.get $align) (i32.const 1)))
+                                (i32.xor (i32.sub (local.get $align) (i32.const 1)) (i32.const -1))
+                            )
+                        )
+                        (local.set $ptr (global.get $bump))
+                        (global.set $bump (i32.add (local.get $ptr) (local.get $new_len)))
+                        (local.get $ptr)
+                    )
+                    (func (export "greet") (param $name_ptr i32) (param $name_len i32) (result i32)
+                        (local $out_ptr i32)
+                        (local $total_len i32)
+                        (local $ret_ptr i32)
+
+                        ;; total_len = 7 + name_len
+                        (local.set $total_len (i32.add (i32.const 7) (local.get $name_len)))
+
+                        ;; Allocate space for the result string (align 1).
+                        (local.set $out_ptr
+                            (call $realloc_internal (i32.const 0) (i32.const 0) (i32.const 1) (local.get $total_len)))
+
+                        ;; Copy "Hello, " (7 bytes from offset 0).
+                        (memory.copy (local.get $out_ptr) (i32.const 0) (i32.const 7))
+
+                        ;; Copy name after "Hello, ".
+                        (memory.copy
+                            (i32.add (local.get $out_ptr) (i32.const 7))
+                            (local.get $name_ptr)
+                            (local.get $name_len)
+                        )
+
+                        ;; Allocate space for the (ptr, len) return pair (align 4).
+                        (local.set $ret_ptr
+                            (call $realloc_internal (i32.const 0) (i32.const 0) (i32.const 4) (i32.const 8)))
+
+                        ;; Write ptr and len.
+                        (i32.store (local.get $ret_ptr) (local.get $out_ptr))
+                        (i32.store offset=4 (local.get $ret_ptr) (local.get $total_len))
+
+                        (local.get $ret_ptr)
+                    )
+
+                    (func (export "cabi_post_greet") (param i32))
+                )
+                (core instance $i (instantiate $m))
+                (func $greet (param "name" string) (result string)
+                    (canon lift (core func $i "greet") (memory $i "mem")
+                        (realloc (func $i "cabi_realloc"))
+                        (post-return (func $i "cabi_post_greet"))
+                    )
+                )
+                (export "greet" (func $greet))
+            )
+        "#;
+        create_wasm_file(wat)
+    }
+
     // Component that exports two bare functions
     fn two_function_wasm() -> NamedTempFile {
         let wat = r#"
@@ -262,7 +379,7 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
 
-        let activator = Activator::new(runtime, "guest", None).unwrap();
+        let activator = Activator::new(runtime, "guest", None, None).unwrap();
 
         let msg = MessageBuilder::new(b"42".to_vec()).build();
         let result = activator.handle(msg).await;
@@ -283,7 +400,7 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(runtime, "guest", None) {
+        match Activator::new(runtime, "guest", None, None) {
             Ok(_) => panic!("expected error for multi-function component without mapper"),
             Err(err) => assert!(
                 err.contains("default mapping currently requires exactly 1 exported function"),
@@ -306,7 +423,7 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(runtime, "nonexistent", None) {
+        match Activator::new(runtime, "nonexistent", None, None) {
             Ok(_) => panic!("expected error for nonexistent component"),
             Err(err) => assert!(
                 err.contains("component 'nonexistent' not found"),
@@ -339,10 +456,94 @@ mod tests {
             }
         }
 
-        let activator = Activator::new(runtime, "guest", Some(Box::new(TestMapper))).unwrap();
+        let activator = Activator::new(runtime, "guest", Some(Box::new(TestMapper)), None).unwrap();
 
         let msg = MessageBuilder::new(b"ignored".to_vec()).build();
         let result = activator.handle(msg).await;
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
+    }
+
+    #[tokio::test]
+    async fn reply_to_json() {
+        let wasm = string_function_wasm();
+        let toml_content = format!(
+            r#"
+            [guest]
+            uri = "{}"
+            exposed = true
+            "#,
+            wasm.path().display()
+        );
+        let toml = create_toml_file(&toml_content);
+        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+
+        let registry = Arc::new(ChannelRegistry::new());
+        let replies = Arc::new(LocalChannel::with_defaults());
+        registry.register("replies", replies.clone());
+
+        let activator = Activator::new(runtime, "guest", None, Some(registry)).unwrap();
+
+        let msg = MessageBuilder::new(b"\"World\"".to_vec())
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::REPLY_TO, "replies")
+            .header(header::CORRELATION_ID, "corr-1")
+            .build();
+
+        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+            let ch = replies.clone();
+            tokio::spawn(async move { ch.consume("test").await })
+        };
+        tokio::task::yield_now().await;
+
+        let result = activator.handle(msg).await;
+        assert!(result.is_ok(), "handle failed: {:?}", result.err());
+
+        let reply = consumer.await.unwrap().unwrap();
+        assert_eq!(reply.headers().correlation_id(), Some("corr-1"));
+        assert_eq!(reply.headers().content_type(), Some("application/json"));
+        // greet("World") -> "Hello, World", JSON-serialized with quotes
+        assert_eq!(reply.body(), b"\"Hello, World\"");
+    }
+
+    #[tokio::test]
+    async fn reply_to_text_plain() {
+        let wasm = string_function_wasm();
+        let toml_content = format!(
+            r#"
+            [guest]
+            uri = "{}"
+            exposed = true
+            "#,
+            wasm.path().display()
+        );
+        let toml = create_toml_file(&toml_content);
+        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+
+        let registry = Arc::new(ChannelRegistry::new());
+        let replies = Arc::new(LocalChannel::with_defaults());
+        registry.register("replies", replies.clone());
+
+        let activator = Activator::new(runtime, "guest", None, Some(registry)).unwrap();
+
+        let msg = MessageBuilder::new(b"World".to_vec())
+            .header(header::CONTENT_TYPE, "text/plain")
+            .header(header::REPLY_TO, "replies")
+            .header(header::CORRELATION_ID, "corr-2")
+            .build();
+
+        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+            let ch = replies.clone();
+            tokio::spawn(async move { ch.consume("test").await })
+        };
+        tokio::task::yield_now().await;
+
+        let result = activator.handle(msg).await;
+        assert!(result.is_ok(), "handle failed: {:?}", result.err());
+
+        let reply = consumer.await.unwrap().unwrap();
+        assert_eq!(reply.headers().correlation_id(), Some("corr-2"));
+        assert_eq!(reply.headers().content_type(), Some("text/plain"));
+        // greet("World") -> "Hello, World", serialized as raw text bytes
+        assert_eq!(reply.body(), b"Hello, World");
     }
 }

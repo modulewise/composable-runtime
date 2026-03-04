@@ -8,7 +8,9 @@ mod dispatcher;
 mod message;
 
 pub(crate) use activator::{Activator, Handler, Mapper};
-pub(crate) use channel::{Channel, ConsumeError, LocalChannel, Overflow, PublishError};
+pub(crate) use channel::{
+    Channel, ChannelRegistry, ConsumeError, LocalChannel, Overflow, PublishError,
+};
 pub(crate) use dispatcher::Dispatcher;
 pub(crate) use message::{
     FromHeaderValue, HeaderValue, Message, MessageBuilder, MessageHeaders, header,
