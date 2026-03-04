@@ -3,8 +3,8 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use super::activator::Handler;
 use super::channel::{Channel, ConsumeError};
-use super::handler::Handler;
 
 /// Per-subscription consumer that connects a channel to a handler.
 ///
