@@ -5,6 +5,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time;
 
+use std::future::Future;
+
 use super::Message;
 
 // Default channel capacity.
@@ -57,6 +59,53 @@ impl std::fmt::Display for ConsumeError {
 
 impl std::error::Error for ConsumeError {}
 
+/// Receipt operation (ack or nack) failed.
+#[derive(Debug)]
+pub enum ReceiptError {
+    /// The provider connection was lost or the receipt is invalid.
+    Failed(String),
+}
+
+impl std::fmt::Display for ReceiptError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReceiptError::Failed(msg) => write!(f, "receipt error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ReceiptError {}
+
+/// Receipt from a `consume()` call, so a consumer may optionally acknowledge
+/// or reject the message. Behavior is specific to each channel implementation.
+/// Each receipt is single-use (consumes `self`).
+pub trait ConsumeReceipt: Send {
+    fn ack(self) -> impl Future<Output = Result<(), ReceiptError>> + Send;
+    fn nack(self) -> impl Future<Output = Result<(), ReceiptError>> + Send;
+}
+
+/// Receipt from a `publish()` call, so a publisher may optionally wait for
+/// broker confirmation that the message was persisted. Behavior is specific to
+/// each channel implementation. Each receipt is single-use (consumes `self`).
+pub trait PublishReceipt: Send {
+    fn confirm(self) -> impl Future<Output = Result<(), PublishError>> + Send;
+}
+
+impl ConsumeReceipt for () {
+    async fn ack(self) -> Result<(), ReceiptError> {
+        Ok(())
+    }
+    async fn nack(self) -> Result<(), ReceiptError> {
+        Ok(())
+    }
+}
+
+impl PublishReceipt for () {
+    async fn confirm(self) -> Result<(), PublishError> {
+        Ok(())
+    }
+}
+
 /// Overflow behavior when the channel is at capacity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Overflow {
@@ -72,8 +121,18 @@ pub enum Overflow {
 /// messages (point-to-point). Consumers with distinct group names each
 /// independently receive every message (pub-sub).
 pub trait Channel: Send + Sync {
-    async fn publish(&self, msg: Message) -> Result<(), PublishError>;
-    async fn consume(&self, group: &str) -> Result<Message, ConsumeError>;
+    type ConsumeReceipt: ConsumeReceipt;
+    type PublishReceipt: PublishReceipt;
+
+    fn publish(
+        &self,
+        msg: Message,
+    ) -> impl Future<Output = Result<Self::PublishReceipt, PublishError>> + Send;
+
+    fn consume(
+        &self,
+        group: &str,
+    ) -> impl Future<Output = Result<(Message, Self::ConsumeReceipt), ConsumeError>> + Send;
 }
 
 /// In-memory channel backed by tokio primitives.
@@ -153,6 +212,9 @@ impl LocalChannel {
 }
 
 impl Channel for LocalChannel {
+    type ConsumeReceipt = ();
+    type PublishReceipt = ();
+
     async fn publish(&self, msg: Message) -> Result<(), PublishError> {
         match &self.inner {
             ChannelInner::Block {
@@ -221,7 +283,7 @@ impl Channel for LocalChannel {
         }
     }
 
-    async fn consume(&self, group: &str) -> Result<Message, ConsumeError> {
+    async fn consume(&self, group: &str) -> Result<(Message, ()), ConsumeError> {
         match &self.inner {
             ChannelInner::Block { senders, receivers } => {
                 let receiver_mutex = {
@@ -241,7 +303,7 @@ impl Channel for LocalChannel {
                 };
 
                 let mut receiver = receiver_mutex.lock().await;
-                match self.consume_timeout_ms {
+                let msg = match self.consume_timeout_ms {
                     t if t < 0 => receiver
                         .recv()
                         .await
@@ -262,7 +324,8 @@ impl Channel for LocalChannel {
                             Err(_) => Err(ConsumeError::Timeout(format!("no message after {t}ms"))),
                         }
                     }
-                }
+                }?;
+                Ok((msg, ()))
             }
             ChannelInner::DropOldest { sender, receivers } => {
                 let receiver_mutex = {
@@ -278,7 +341,7 @@ impl Channel for LocalChannel {
                 };
 
                 let mut receiver = receiver_mutex.lock().await;
-                match self.consume_timeout_ms {
+                let msg = match self.consume_timeout_ms {
                     0 => match receiver.try_recv() {
                         Ok(msg) => Ok(msg),
                         Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
@@ -330,7 +393,8 @@ impl Channel for LocalChannel {
                             }
                         }
                     }
-                }
+                }?;
+                Ok((msg, ()))
             }
         }
     }
@@ -404,7 +468,7 @@ mod tests {
         let msg = MessageBuilder::new(b"hello".to_vec()).build();
         channel.publish(msg).await.unwrap();
 
-        let received = consumer.await.unwrap().unwrap();
+        let (received, _) = consumer.await.unwrap().unwrap();
         assert_eq!(received.body(), b"hello");
     }
 
@@ -430,8 +494,8 @@ mod tests {
         channel.publish(msg1).await.unwrap();
         channel.publish(msg2).await.unwrap();
 
-        let r1 = c1.await.unwrap().unwrap();
-        let r2 = c2.await.unwrap().unwrap();
+        let (r1, _) = c1.await.unwrap().unwrap();
+        let (r2, _) = c2.await.unwrap().unwrap();
 
         // Each consumer gets exactly one unique message.
         assert_ne!(r1.body(), r2.body());
@@ -456,8 +520,8 @@ mod tests {
         let msg = MessageBuilder::new(b"broadcast".to_vec()).build();
         channel.publish(msg).await.unwrap();
 
-        let r1 = c1.await.unwrap().unwrap();
-        let r2 = c2.await.unwrap().unwrap();
+        let (r1, _) = c1.await.unwrap().unwrap();
+        let (r2, _) = c2.await.unwrap().unwrap();
 
         // Both groups receive the same message.
         assert_eq!(r1.body(), b"broadcast");
@@ -549,8 +613,8 @@ mod tests {
         let msg = MessageBuilder::new(b"fanout".to_vec()).build();
         channel.publish(msg).await.unwrap();
 
-        let r1 = c1.await.unwrap().unwrap();
-        let r2 = c2.await.unwrap().unwrap();
+        let (r1, _) = c1.await.unwrap().unwrap();
+        let (r2, _) = c2.await.unwrap().unwrap();
 
         assert_eq!(r1.body(), b"fanout");
         assert_eq!(r2.body(), b"fanout");
@@ -571,7 +635,7 @@ mod tests {
         let msg1 = MessageBuilder::new(b"before".to_vec()).build();
         channel.publish(msg1).await.unwrap();
 
-        let r1 = c1.await.unwrap().unwrap();
+        let (r1, _) = c1.await.unwrap().unwrap();
         assert_eq!(r1.body(), b"before");
 
         // Now create a second group. It should NOT see the previous message.
@@ -591,8 +655,8 @@ mod tests {
         let msg2 = MessageBuilder::new(b"after".to_vec()).build();
         channel.publish(msg2).await.unwrap();
 
-        let r2 = c2.await.unwrap().unwrap();
-        let r1_again = c1_again.await.unwrap().unwrap();
+        let (r2, _) = c2.await.unwrap().unwrap();
+        let (r1_again, _) = c1_again.await.unwrap().unwrap();
         assert_eq!(r2.body(), b"after");
         assert_eq!(r1_again.body(), b"after");
     }

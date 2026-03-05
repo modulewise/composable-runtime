@@ -4,7 +4,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::activator::Handler;
-use super::channel::{Channel, ConsumeError};
+use super::channel::{Channel, ConsumeError, ConsumeReceipt};
 
 /// Per-subscription consumer that connects a channel to a handler.
 ///
@@ -19,7 +19,10 @@ pub struct Dispatcher<C: Channel, H: Handler> {
     cancel: CancellationToken,
 }
 
-impl<C: Channel + 'static, H: Handler + 'static> Dispatcher<C, H> {
+impl<C: Channel + 'static, H: Handler + 'static> Dispatcher<C, H>
+where
+    C::ConsumeReceipt: 'static,
+{
     pub fn new(
         channel: Arc<C>,
         group: String,
@@ -50,11 +53,21 @@ impl<C: Channel + 'static, H: Handler + 'static> Dispatcher<C, H> {
                 _ = self.cancel.cancelled() => break,
                 result = self.channel.consume(&self.group) => {
                     match result {
-                        Ok(msg) => {
+                        Ok((msg, receipt)) => {
                             let handler = Arc::clone(&self.handler);
                             tasks.spawn(async move {
-                                if let Err(e) = handler.handle(msg).await {
-                                    tracing::error!(error = %e, "handler error");
+                                match handler.handle(msg).await {
+                                    Ok(()) => {
+                                        if let Err(e) = receipt.ack().await {
+                                            tracing::error!(error = %e, "ack failed");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "handler error");
+                                        if let Err(e) = receipt.nack().await {
+                                            tracing::error!(error = %e, "nack failed");
+                                        }
+                                    }
                                 }
                             });
                         }

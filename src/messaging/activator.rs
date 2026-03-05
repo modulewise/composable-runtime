@@ -205,7 +205,7 @@ impl Handler for Activator {
                         if let Some(ct) = content_type {
                             builder = builder.header(header::CONTENT_TYPE, ct);
                         }
-                        channel
+                        let _receipt = channel
                             .publish(builder.build())
                             .await
                             .map_err(|e| format!("failed to publish reply: {e}"))?;
@@ -394,7 +394,7 @@ mod tests {
             .header(header::REPLY_TO, "replies")
             .build();
 
-        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+        let consumer = {
             let ch = replies.clone();
             tokio::spawn(async move { ch.consume("test").await })
         };
@@ -403,7 +403,7 @@ mod tests {
         let result = activator.handle(msg).await;
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
 
-        let reply = consumer.await.unwrap().unwrap();
+        let (reply, _) = consumer.await.unwrap().unwrap();
         // double(21) = 42
         assert_eq!(reply.body(), b"42");
     }
@@ -489,7 +489,7 @@ mod tests {
             .header(header::REPLY_TO, "replies")
             .build();
 
-        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+        let consumer = {
             let ch = replies.clone();
             tokio::spawn(async move { ch.consume("test").await })
         };
@@ -498,7 +498,7 @@ mod tests {
         let result = activator.handle(msg).await;
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
 
-        let reply = consumer.await.unwrap().unwrap();
+        let (reply, _) = consumer.await.unwrap().unwrap();
         // TestMapper sends 7 to double -> 14
         assert_eq!(reply.body(), b"14");
     }
@@ -529,7 +529,7 @@ mod tests {
             .header(header::CORRELATION_ID, "corr-1")
             .build();
 
-        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+        let consumer = {
             let ch = replies.clone();
             tokio::spawn(async move { ch.consume("test").await })
         };
@@ -538,7 +538,7 @@ mod tests {
         let result = activator.handle(msg).await;
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
 
-        let reply = consumer.await.unwrap().unwrap();
+        let (reply, _) = consumer.await.unwrap().unwrap();
         assert_eq!(reply.headers().correlation_id(), Some("corr-1"));
         assert_eq!(reply.headers().content_type(), Some("application/json"));
         // greet("World") -> "Hello, World", JSON-serialized with quotes
@@ -571,7 +571,7 @@ mod tests {
             .header(header::CORRELATION_ID, "corr-2")
             .build();
 
-        let consumer: tokio::task::JoinHandle<Result<Message, _>> = {
+        let consumer = {
             let ch = replies.clone();
             tokio::spawn(async move { ch.consume("test").await })
         };
@@ -580,7 +580,7 @@ mod tests {
         let result = activator.handle(msg).await;
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
 
-        let reply = consumer.await.unwrap().unwrap();
+        let (reply, _) = consumer.await.unwrap().unwrap();
         assert_eq!(reply.headers().correlation_id(), Some("corr-2"));
         assert_eq!(reply.headers().content_type(), Some("text/plain"));
         // greet("World") -> "Hello, World", serialized as raw text bytes
