@@ -19,8 +19,7 @@ use wasmtime_wasi_io::IoView;
 use crate::graph::ComponentGraph;
 use crate::grpc;
 use crate::registry::{
-    ComponentRegistry, HostExtension, HostExtensionFactory, RuntimeFeatureRegistry,
-    build_registries,
+    CapabilityRegistry, ComponentRegistry, HostExtension, HostExtensionFactory, build_registries,
 };
 use crate::types::ComponentState;
 use crate::wit::Function;
@@ -37,7 +36,7 @@ pub struct Component {
 pub struct Runtime {
     invoker: Invoker,
     component_registry: ComponentRegistry,
-    runtime_feature_registry: RuntimeFeatureRegistry,
+    capability_registry: CapabilityRegistry,
 }
 
 impl Runtime {
@@ -52,7 +51,7 @@ impl Runtime {
             .get_components()
             .map(|spec| Component {
                 name: spec.name.clone(),
-                functions: spec.functions.clone().unwrap_or_default(),
+                functions: spec.functions.clone(),
             })
             .collect()
     }
@@ -63,7 +62,7 @@ impl Runtime {
             .get_component(name)
             .map(|spec| Component {
                 name: spec.name.clone(),
-                functions: spec.functions.clone().unwrap_or_default(),
+                functions: spec.functions.clone(),
             })
     }
 
@@ -91,21 +90,15 @@ impl Runtime {
             .get_component(component_name)
             .ok_or_else(|| anyhow::anyhow!("Component '{component_name}' not found"))?;
 
-        let function = spec
-            .functions
-            .as_ref()
-            .and_then(|funcs| funcs.get(function_name))
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Function '{function_name}' not found in component '{component_name}'"
-                )
-            })?;
+        let function = spec.functions.get(function_name).ok_or_else(|| {
+            anyhow::anyhow!("Function '{function_name}' not found in component '{component_name}'")
+        })?;
 
         self.invoker
             .invoke(
                 &spec.bytes,
-                &spec.runtime_features,
-                &self.runtime_feature_registry,
+                &spec.capabilities,
+                &self.capability_registry,
                 function.clone(),
                 args,
                 env_vars,
@@ -135,8 +128,8 @@ impl Runtime {
         self.invoker
             .instantiate_from_bytes(
                 &spec.bytes,
-                &spec.runtime_features,
-                &self.runtime_feature_registry,
+                &spec.capabilities,
+                &self.capability_registry,
                 env_vars,
             )
             .await
@@ -189,13 +182,13 @@ impl<'a> RuntimeBuilder<'a> {
 
     /// Build the Runtime
     pub async fn build(self) -> Result<Runtime> {
-        let (component_registry, runtime_feature_registry) =
+        let (component_registry, capability_registry) =
             build_registries(self.graph, self.factories).await?;
         let invoker = Invoker::new()?;
         Ok(Runtime {
             invoker,
             component_registry,
-            runtime_feature_registry,
+            capability_registry,
         })
     }
 }
@@ -219,7 +212,7 @@ impl WasiHttpView for ComponentState {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         self.wasi_http_ctx
             .as_mut()
-            .expect("Component requires 'http' feature, so HTTP context should be available")
+            .expect("Component requires 'http' capability, so HTTP context should be available")
     }
 
     fn table(&mut self) -> &mut ResourceTable {
@@ -268,20 +261,18 @@ impl Invoker {
 
     fn create_linker(
         &self,
-        runtime_features: &[String],
-        runtime_feature_registry: &RuntimeFeatureRegistry,
+        capabilities: &[String],
+        capability_registry: &CapabilityRegistry,
     ) -> Result<Linker<ComponentState>> {
         let mut linker = Linker::new(&self.engine);
 
-        // Multiple runtime features may provide the same interface
+        // Multiple capabilities may provide the same interface
         linker.allow_shadowing(true);
 
-        // Add WASI interfaces based on explicitly requested runtime features
-        for feature_name in runtime_features {
-            if let Some(runtime_feature) =
-                runtime_feature_registry.get_runtime_feature(feature_name)
-            {
-                if let Some(wasmtime_feature) = runtime_feature.uri.strip_prefix("wasmtime:") {
+        // Add WASI interfaces based on explicitly requested capabilities
+        for capability_name in capabilities {
+            if let Some(capability) = capability_registry.get_capability(capability_name) {
+                if let Some(wasmtime_feature) = capability.uri.strip_prefix("wasmtime:") {
                     match wasmtime_feature {
                         "wasip2" => {
                             // Comprehensive WASI Preview 2 support
@@ -308,28 +299,27 @@ impl Invoker {
                             })?;
                         }
                         "inherit-stdio" | "inherit-network" | "allow-ip-name-lookup" => {
-                            // These runtime features are handled in WASI context, not linker
+                            // These capabilities are handled in WASI context, not linker
                             // No linker functions to add, only context configuration
                         }
                         _ => {
                             tracing::warn!(
                                 "Unknown wasmtime feature for linker: {}",
-                                runtime_feature.uri
+                                capability.uri
                             );
                         }
                     }
-                } else if runtime_feature.uri.starts_with("host:") {
-                    if let Some(ext) = &runtime_feature.extension {
+                } else if capability.uri.starts_with("host:") {
+                    if let Some(ext) = &capability.extension {
                         ext.link(&mut linker)?;
                     } else {
                         return Err(anyhow::anyhow!(
-                            "Host feature '{}' requested but no extension registered",
-                            feature_name
+                            "Host capability '{}' requested but no extension registered",
+                            capability_name
                         ));
                     }
                 }
             }
-            // Component runtime features are handled during composition, not at runtime
         }
         Ok(linker)
     }
@@ -337,24 +327,23 @@ impl Invoker {
     async fn instantiate_from_bytes(
         &self,
         bytes: &[u8],
-        runtime_features: &[String],
-        runtime_feature_registry: &RuntimeFeatureRegistry,
+        capabilities: &[String],
+        capability_registry: &CapabilityRegistry,
         env_vars: &[(&str, &str)],
     ) -> Result<(Store<ComponentState>, wasmtime::component::Instance)> {
         let component_bytes = bytes.to_vec();
-        let linker = self.create_linker(runtime_features, runtime_feature_registry)?;
+        let linker = self.create_linker(capabilities, capability_registry)?;
 
-        // Build WASI context based on runtime features
+        // Build WASI context based on capabilities
         let mut wasi_builder = WasiCtxBuilder::new();
 
         if !env_vars.is_empty() {
             wasi_builder.envs(env_vars);
         }
 
-        for feature_name in runtime_features {
-            if let Some(runtime_feature) =
-                runtime_feature_registry.get_runtime_feature(feature_name)
-                && let Some(wasmtime_feature) = runtime_feature.uri.strip_prefix("wasmtime:")
+        for capability_name in capabilities {
+            if let Some(capability) = capability_registry.get_capability(capability_name)
+                && let Some(wasmtime_feature) = capability.uri.strip_prefix("wasmtime:")
             {
                 match wasmtime_feature {
                     "inherit-stdio" => {
@@ -372,20 +361,19 @@ impl Invoker {
         }
 
         // Check if HTTP context needed
-        let needs_http = runtime_features.iter().any(|feature_name| {
-            runtime_feature_registry
-                .get_runtime_feature(feature_name)
+        let needs_http = capabilities.iter().any(|capability_name| {
+            capability_registry
+                .get_capability(capability_name)
                 .and_then(|cap| cap.uri.strip_prefix("wasmtime:"))
                 == Some("http")
         });
 
         // Collect extension states before creating ComponentState
         let mut extensions = HashMap::new();
-        for feature_name in runtime_features {
-            if let Some(runtime_feature) =
-                runtime_feature_registry.get_runtime_feature(feature_name)
-                && runtime_feature.uri.starts_with("host:")
-                && let Some(ext) = &runtime_feature.extension
+        for capability_name in capabilities {
+            if let Some(capability) = capability_registry.get_capability(capability_name)
+                && capability.uri.starts_with("host:")
+                && let Some(ext) = &capability.extension
                 && let Some((type_id, boxed_state)) = ext.create_state_boxed()?
             {
                 match extensions.entry(type_id) {
@@ -394,7 +382,7 @@ impl Invoker {
                     }
                     Entry::Occupied(_) => {
                         anyhow::bail!(
-                            "Duplicate extension state type for feature '{feature_name}'"
+                            "Duplicate extension state type for capability '{capability_name}'"
                         );
                     }
                 }
@@ -422,8 +410,8 @@ impl Invoker {
     pub async fn invoke(
         &self,
         bytes: &[u8],
-        runtime_features: &[String],
-        runtime_feature_registry: &RuntimeFeatureRegistry,
+        capabilities: &[String],
+        capability_registry: &CapabilityRegistry,
         function: Function,
         args: Vec<serde_json::Value>,
         env_vars: &[(&str, &str)],
@@ -431,7 +419,7 @@ impl Invoker {
         let function_name = function.function_name();
 
         let (mut store, instance) = self
-            .instantiate_from_bytes(bytes, runtime_features, runtime_feature_registry, env_vars)
+            .instantiate_from_bytes(bytes, capabilities, capability_registry, env_vars)
             .await?;
 
         // Look up the function - either within an interface or as a direct export

@@ -163,15 +163,14 @@ pub struct FunctionParam {
 }
 
 impl Parser {
-    /// Parse component and return imports, exports, and optionally functions
+    /// Parse component and return imports, exports, and functions
     pub fn parse(
         component_bytes: &[u8],
-        parse_functions: bool,
     ) -> Result<(
         ComponentMetadata,
         Vec<String>,
         Vec<String>,
-        Option<HashMap<String, Function>>,
+        HashMap<String, Function>,
     )> {
         let decoded = wit_parser::decoding::decode(component_bytes)?;
         let resolve = decoded.resolve().clone();
@@ -220,8 +219,7 @@ impl Parser {
             }
         }
 
-        // Conditionally extract functions (only for exposed components)
-        let function_map = if parse_functions {
+        let function_map = {
             let mut functions = Vec::new();
             for (_, item) in &world.exports {
                 match item {
@@ -238,9 +236,7 @@ impl Parser {
                     }
                 }
             }
-            Some(Self::build_function_map(functions)?)
-        } else {
-            None
+            Self::build_function_map(functions)?
         };
 
         Ok((component_metadata, imports, exports, function_map))

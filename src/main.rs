@@ -5,6 +5,7 @@ use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
 use std::path::PathBuf;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "composable")]
@@ -82,6 +83,9 @@ async fn main() -> Result<()> {
             run_invoke(&graph, target_args).await?;
         }
         Command::Run { definitions: _ } => {
+            tracing_subscriber::fmt()
+                .with_env_filter(EnvFilter::from_default_env())
+                .init();
             anyhow::bail!("nothing to run: enable a gateway or messaging features.");
         }
     }
@@ -90,7 +94,7 @@ async fn main() -> Result<()> {
 }
 
 fn build_graph(definitions: &[PathBuf]) -> Result<ComponentGraph> {
-    println!("Loading definitions from: {definitions:?}...");
+    tracing::info!("Loading definitions from: {definitions:?}");
     let mut builder = ComponentGraph::builder();
     for path in definitions {
         builder = builder.load_file(path);
@@ -121,7 +125,6 @@ async fn run_invoke(graph: &ComponentGraph, target_args: Vec<String>) -> Result<
     let final_args =
         parse_invoke_args(args, function.params()).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    println!("Invoking {target}...");
     let result = runtime
         .invoke(component_name, func_name, final_args)
         .await?;
@@ -130,11 +133,10 @@ async fn run_invoke(graph: &ComponentGraph, target_args: Vec<String>) -> Result<
 }
 
 async fn run_shell(graph: &ComponentGraph) -> Result<()> {
-    println!("Building runtime...");
     let runtime = Runtime::builder(graph).build().await?;
     let components = runtime.list_components();
     println!(
-        "Successfully built runtime with {} exposed components.",
+        "Successfully built runtime with {} components.",
         components.len()
     );
 

@@ -2,4 +2,6 @@
 
 set -e
 
-./target/release/host
+cargo run -q --manifest-path ../../Cargo.toml -- \
+  invoke config.toml -- \
+  greeter.greet World

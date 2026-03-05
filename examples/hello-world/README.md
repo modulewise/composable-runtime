@@ -39,9 +39,8 @@ Result: "Hello, World!"
 Edit `config.toml` to customize the greeting:
 
 ```toml
-[greeter]
+[component.greeter]
 uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
-exposed = true
 config.greeting = "Aloha"
 ```
 

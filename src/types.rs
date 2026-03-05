@@ -4,16 +4,16 @@ use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
-/// Base definition with URI and enables scope
+/// Base definition with URI and scope
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DefinitionBase {
     pub uri: String,
-    #[serde(default = "default_enables")]
-    pub enables: String, // "none"|"package"|"namespace"|"unexposed"|"exposed"|"any"
+    #[serde(default = "default_scope")]
+    pub scope: String, // "any"|"package"|"namespace"
 }
 
-pub fn default_enables() -> String {
-    "none".to_string()
+pub fn default_scope() -> String {
+    "any".to_string()
 }
 
 /// Component definition base with additional fields
@@ -22,13 +22,11 @@ pub struct ComponentDefinitionBase {
     #[serde(flatten)]
     pub base: DefinitionBase,
     #[serde(default)]
-    pub expects: Vec<String>, // Named components this expects to be available
+    pub imports: Vec<String>, // Named components this imports
     #[serde(default)]
     pub intercepts: Vec<String>, // Components this intercepts
     #[serde(default)]
     pub precedence: i32, // Lower values have higher precedence
-    #[serde(default)]
-    pub exposed: bool,
     pub config: Option<HashMap<String, serde_json::Value>>,
 }
 
@@ -39,9 +37,9 @@ impl std::ops::Deref for ComponentDefinitionBase {
     }
 }
 
-/// Runtime feature definition
+/// Capability definition (host extensions and wasmtime features)
 #[derive(Deserialize, Serialize, Clone)]
-pub struct RuntimeFeatureDefinition {
+pub struct CapabilityDefinition {
     pub name: String,
     #[serde(flatten)]
     pub base: DefinitionBase,
@@ -50,19 +48,19 @@ pub struct RuntimeFeatureDefinition {
     pub config: HashMap<String, serde_json::Value>,
 }
 
-impl std::ops::Deref for RuntimeFeatureDefinition {
+impl std::ops::Deref for CapabilityDefinition {
     type Target = DefinitionBase;
     fn deref(&self) -> &Self::Target {
         &self.base
     }
 }
 
-impl std::fmt::Debug for RuntimeFeatureDefinition {
+impl std::fmt::Debug for CapabilityDefinition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RuntimeFeatureDefinition")
+        f.debug_struct("CapabilityDefinition")
             .field("name", &self.name)
             .field("uri", &self.uri)
-            .field("enables", &self.enables)
+            .field("scope", &self.scope)
             .field("config", &self.config)
             .finish()
     }
@@ -88,11 +86,10 @@ impl std::fmt::Debug for ComponentDefinition {
         f.debug_struct("ComponentDefinition")
             .field("name", &self.name)
             .field("uri", &self.uri)
-            .field("enables", &self.enables)
-            .field("expects", &self.expects)
+            .field("scope", &self.scope)
+            .field("imports", &self.imports)
             .field("intercepts", &self.intercepts)
             .field("precedence", &self.precedence)
-            .field("exposed", &self.exposed)
             .field("config", &self.config)
             .finish()
     }

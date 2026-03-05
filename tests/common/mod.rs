@@ -2,8 +2,8 @@
 
 use composable_runtime::ComponentGraph;
 use composable_runtime::graph::Node;
-use composable_runtime::registry::{ComponentRegistry, RuntimeFeatureRegistry, build_registries};
-use composable_runtime::types::{ComponentDefinition, RuntimeFeatureDefinition};
+use composable_runtime::registry::{CapabilityRegistry, ComponentRegistry, build_registries};
+use composable_runtime::types::{CapabilityDefinition, ComponentDefinition};
 use std::collections::HashMap;
 use std::io::Write;
 use std::ops::Deref;
@@ -117,24 +117,24 @@ pub fn get_component_definition<'a>(
     }
 }
 
-pub fn get_runtime_feature_definition<'a>(
+pub fn get_capability_definition<'a>(
     graph: &'a ComponentGraph,
     name: &str,
-) -> &'a RuntimeFeatureDefinition {
+) -> &'a CapabilityDefinition {
     let index = graph
         .get_node_index(name)
         .unwrap_or_else(|| panic!("Node '{}' not found in graph", name));
 
-    if let Node::RuntimeFeature(def) = &graph[index] {
+    if let Node::Capability(def) = &graph[index] {
         def
     } else {
-        panic!("Node '{}' is not a RuntimeFeatureDefinition", name);
+        panic!("Node '{}' is not a CapabilityDefinition", name);
     }
 }
 
 pub async fn build_registries_and_assert_ok(
     graph: &ComponentGraph,
-) -> (ComponentRegistry, RuntimeFeatureRegistry) {
+) -> (ComponentRegistry, CapabilityRegistry) {
     let registries_result = build_registries(graph, HashMap::new()).await;
     assert!(
         registries_result.is_ok(),

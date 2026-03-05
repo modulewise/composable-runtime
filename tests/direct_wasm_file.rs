@@ -12,14 +12,12 @@ async fn test_direct_wasm_file() {
 
     if let Node::Component(def) = &node.weight {
         assert_eq!(def.uri, client_wasm.to_path_buf().to_string_lossy());
-        assert_eq!(def.expects.len(), 0);
-        assert_eq!(def.enables, "none");
-        assert!(def.exposed);
+        assert_eq!(def.imports.len(), 0);
     } else {
         panic!("Node was not a component");
     }
 
-    let (component_registry, _runtime_feature_registry) =
+    let (component_registry, _capability_registry) =
         common::build_registries_and_assert_ok(&graph).await;
 
     assert_eq!(component_registry.get_components().count(), 1);
@@ -30,8 +28,8 @@ async fn test_direct_wasm_file() {
     );
     assert_eq!(component.imports.len(), 0);
     assert_eq!(component.exports, vec!["modulewise:test/client@0.1.0"]);
-    assert_eq!(component.runtime_features.len(), 0);
-    let functions = component.functions.clone().unwrap();
+    assert_eq!(component.capabilities.len(), 0);
+    let functions = component.functions.clone();
     assert_eq!(functions.len(), 1);
     let function = functions.get("client.query").unwrap();
     assert_eq!(

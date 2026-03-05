@@ -1,8 +1,6 @@
-[greeting]
+[capability.greeting]
 uri = "host:greeting"
-enables = "any"
 
-[greeter]
+[component.greeter]
 uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
-expects = ["greeting"]
-exposed = true
+imports = ["greeting"]

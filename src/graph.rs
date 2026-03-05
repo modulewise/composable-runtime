@@ -6,7 +6,7 @@ use std::ops::{Index, IndexMut};
 use std::path::PathBuf;
 
 use crate::loader;
-use crate::types::{ComponentDefinition, RuntimeFeatureDefinition};
+use crate::types::{CapabilityDefinition, ComponentDefinition};
 
 pub struct ComponentGraph {
     graph: DiGraph<Node, Edge>,
@@ -19,17 +19,17 @@ impl ComponentGraph {
         GraphBuilder::new()
     }
 
-    /// Create a graph where each component and runtime feature is a node
+    /// Create a graph where each component and capability is a node
     /// and each dependency or interceptor relationship is an edge.
     pub(crate) fn build(
         component_definitions: &[ComponentDefinition],
-        runtime_feature_definitions: &[RuntimeFeatureDefinition],
+        capability_definitions: &[CapabilityDefinition],
     ) -> Result<Self> {
         let mut graph = DiGraph::<Node, Edge>::new();
         let mut node_map = HashMap::<String, NodeIndex>::new();
 
-        for definition in runtime_feature_definitions {
-            let index = graph.add_node(Node::RuntimeFeature(definition.clone()));
+        for definition in capability_definitions {
+            let index = graph.add_node(Node::Capability(definition.clone()));
             node_map.insert(definition.name.clone(), index);
         }
 
@@ -40,21 +40,21 @@ impl ComponentGraph {
 
         for definition in component_definitions {
             let source_index = *node_map.get(&definition.name).unwrap();
-            let mut expects = definition.expects.clone();
-            // `intercepts` implies `expects` because the interceptor component
+            let mut imports = definition.imports.clone();
+            // `intercepts` implies `imports` because the interceptor component
             // must be composed with the component it intercepts.
             for target_name in &definition.intercepts {
-                if !expects.contains(target_name) {
-                    expects.push(target_name.clone());
+                if !imports.contains(target_name) {
+                    imports.push(target_name.clone());
                 }
             }
 
-            for target_name in &expects {
+            for target_name in &imports {
                 if let Some(target_index) = node_map.get(target_name) {
                     graph.update_edge(*target_index, source_index, Edge::Dependency);
                 } else {
                     tracing::warn!(
-                        "Component '{}' expects '{}', which is not defined.",
+                        "Component '{}' imports '{}', which is not defined.",
                         definition.name,
                         target_name
                     );
@@ -72,10 +72,10 @@ impl ComponentGraph {
 
             let provider_name = match &graph[source_node_index] {
                 Node::Component(def) => &def.name,
-                Node::RuntimeFeature(def) => &def.name,
+                Node::Capability(def) => &def.name,
             };
 
-            // RuntimeFeatures can be providers, but not consumers.
+            // Capabilities can be providers, but not consumers.
             let Node::Component(consumer_def) = &graph[target_node_index] else {
                 unreachable!()
             };
@@ -89,8 +89,10 @@ impl ComponentGraph {
                     let enabled = is_interceptor_enabled(def, consumer_def);
                     if !enabled && def.name != consumer_def.name {
                         tracing::debug!(
-                            "Interceptor '{}' skipped for consumer '{}' (enables='{}', consumer exposed={})",
-                            def.name, consumer_def.name, def.enables, consumer_def.exposed
+                            "Interceptor '{}' skipped for consumer '{}' (scope='{}')",
+                            def.name,
+                            consumer_def.name,
+                            def.scope
                         );
                     }
                     enabled
@@ -141,7 +143,7 @@ impl ComponentGraph {
         if let Err(cycle) = petgraph::algo::toposort(&graph, None) {
             let node_name = match &graph[cycle.node_id()] {
                 Node::Component(def) => &def.name,
-                Node::RuntimeFeature(def) => &def.name,
+                Node::Capability(def) => &def.name,
             };
             return Err(anyhow::anyhow!(
                 "Circular dependency detected involving '{node_name}'"
@@ -186,10 +188,7 @@ impl ComponentGraph {
             let node = &self.graph[node_index];
             let node_attrs = match node {
                 Node::Component(def) => {
-                    let shape = if def.exposed { "doubleoctagon" } else { "box" };
-                    let color = if def.exposed {
-                        "lightgreen"
-                    } else if def.intercepts.is_empty() {
+                    let color = if def.intercepts.is_empty() {
                         "lightblue"
                     } else {
                         "yellow"
@@ -200,10 +199,10 @@ impl ComponentGraph {
                         format!("{}\\n(intercepts: {})", def.name, def.intercepts.join(", "))
                     };
                     format!(
-                        "[label=\"{label}\", shape={shape}, fillcolor={color}, style=\"rounded,filled\"]"
+                        "[label=\"{label}\", shape=box, fillcolor={color}, style=\"rounded,filled\"]"
                     )
                 }
-                Node::RuntimeFeature(def) => {
+                Node::Capability(def) => {
                     format!(
                         "[label=\"{}\", shape=ellipse, fillcolor=orange, style=\"rounded,filled\"]",
                         def.name
@@ -240,7 +239,7 @@ impl std::fmt::Debug for ComponentGraph {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self.0 {
                     Node::Component(def) => std::fmt::Debug::fmt(def, f),
-                    Node::RuntimeFeature(def) => std::fmt::Debug::fmt(def, f),
+                    Node::Capability(def) => std::fmt::Debug::fmt(def, f),
                 }
             }
         }
@@ -263,11 +262,11 @@ impl std::fmt::Debug for ComponentGraph {
                 let target_node = &self.graph[edge.target()];
                 let source_name = match source_node {
                     Node::Component(def) => &def.name,
-                    Node::RuntimeFeature(def) => &def.name,
+                    Node::Capability(def) => &def.name,
                 };
                 let target_name = match target_node {
                     Node::Component(def) => &def.name,
-                    Node::RuntimeFeature(def) => &def.name,
+                    Node::Capability(def) => &def.name,
                 };
                 format!("{} -> {} ({:?})", source_name, target_name, edge.weight())
             })
@@ -293,27 +292,24 @@ impl IndexMut<NodeIndex> for ComponentGraph {
 
 fn is_interceptor_enabled(
     interceptor: &ComponentDefinition,
-    consumer: &ComponentDefinition,
+    _consumer: &ComponentDefinition,
 ) -> bool {
-    match interceptor.enables.as_str() {
-        "none" => false,
+    match interceptor.scope.as_str() {
         "any" => true,
-        "exposed" => consumer.exposed,
-        "unexposed" => !consumer.exposed,
         // TODO: The graph builder does not have access to component metadata, so we
         // cannot evaluate these scopes here. The final check is performed in the
         // registry builder, which does have the metadata. Accepting here means it could
         // fail later, rather than be skipped.
         "package" => true,
         "namespace" => true,
-        _ => false, // Unknown enables scope, default to false.
+        _ => false, // Unknown scope, default to false.
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Node {
     Component(ComponentDefinition),
-    RuntimeFeature(RuntimeFeatureDefinition),
+    Capability(CapabilityDefinition),
 }
 
 #[derive(Debug, Clone)]
@@ -341,8 +337,8 @@ impl GraphBuilder {
 
     /// Build the ComponentGraph from all loaded definitions
     pub fn build(self) -> Result<ComponentGraph> {
-        let (component_definitions, runtime_feature_definitions) =
+        let (component_definitions, capability_definitions) =
             loader::parse_definition_files(&self.paths)?;
-        ComponentGraph::build(&component_definitions, &runtime_feature_definitions)
+        ComponentGraph::build(&component_definitions, &capability_definitions)
     }
 }

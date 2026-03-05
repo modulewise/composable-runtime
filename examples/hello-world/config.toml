@@ -1,3 +1,2 @@
-[greeter]
-uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
-exposed = true
+[component.greeter]
+uri = "./greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
