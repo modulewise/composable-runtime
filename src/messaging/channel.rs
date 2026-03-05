@@ -217,18 +217,15 @@ impl Channel for LocalChannel {
 
     async fn publish(&self, msg: Message) -> Result<(), PublishError> {
         match &self.inner {
-            ChannelInner::Block {
-                senders, receivers, ..
-            } => {
+            ChannelInner::Block { senders, .. } => {
                 let group_senders: Vec<mpsc::Sender<Message>> = {
-                    let receiver_map = receivers.lock().unwrap();
-                    if receiver_map.is_empty() {
-                        return Err(PublishError::Closed("no active receivers".to_string()));
-                    }
-                    drop(receiver_map);
                     let map = senders.lock().unwrap();
                     map.values().cloned().collect()
                 };
+
+                if group_senders.is_empty() {
+                    return Err(PublishError::Closed("no active receivers".to_string()));
+                }
 
                 for sender in &group_senders {
                     match self.publish_timeout_ms {
@@ -268,13 +265,7 @@ impl Channel for LocalChannel {
 
                 Ok(())
             }
-            ChannelInner::DropOldest { sender, receivers } => {
-                {
-                    let map = receivers.lock().unwrap();
-                    if map.is_empty() {
-                        return Err(PublishError::Closed("no active receivers".to_string()));
-                    }
-                }
+            ChannelInner::DropOldest { sender, .. } => {
                 sender
                     .send(msg)
                     .map_err(|_| PublishError::Closed("no active receivers".to_string()))?;
@@ -414,17 +405,27 @@ impl<C: Channel> ChannelRegistry<C> {
 
     /// Register a channel by name. Replaces any existing channel with the same name.
     pub fn register(&self, name: impl Into<String>, channel: Arc<C>) {
-        self.channels.write().unwrap().insert(name.into(), channel);
+        self.channels
+            .write()
+            .expect("channel registry lock poisoned")
+            .insert(name.into(), channel);
     }
 
     /// Remove a channel by name.
     pub fn remove(&self, name: &str) -> Option<Arc<C>> {
-        self.channels.write().unwrap().remove(name)
+        self.channels
+            .write()
+            .expect("channel registry lock poisoned")
+            .remove(name)
     }
 
     /// Look up a channel by name.
     pub fn lookup(&self, name: &str) -> Option<Arc<C>> {
-        self.channels.read().unwrap().get(name).cloned()
+        self.channels
+            .read()
+            .expect("channel registry lock poisoned")
+            .get(name)
+            .cloned()
     }
 }
 

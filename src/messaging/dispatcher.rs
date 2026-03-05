@@ -4,7 +4,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::activator::Handler;
-use super::channel::{Channel, ConsumeError, ConsumeReceipt};
+use super::channel::{Channel, ConsumeError, ConsumeReceipt, PublishReceipt};
 
 /// Per-subscription consumer that connects a channel to a handler.
 ///
@@ -97,7 +97,9 @@ mod tests {
     use tokio::sync::Semaphore;
 
     use super::*;
-    use crate::messaging::{LocalChannel, Message, MessageBuilder, Overflow};
+    use crate::messaging::{
+        ConsumeError, LocalChannel, Message, MessageBuilder, Overflow, PublishError, ReceiptError,
+    };
 
     fn init_tracing() {
         let _ = tracing_subscriber::fmt()
@@ -208,6 +210,114 @@ mod tests {
             self.active.fetch_sub(1, Ordering::SeqCst);
             Ok(())
         }
+    }
+
+    // Channel wrapper that tracks ack/nack calls via a custom receipt.
+    struct TrackingChannel {
+        inner: LocalChannel,
+        acks: Arc<AtomicUsize>,
+        nacks: Arc<AtomicUsize>,
+    }
+
+    impl TrackingChannel {
+        fn new() -> Self {
+            Self {
+                inner: LocalChannel::new(256, Overflow::Block, -1, 50),
+                acks: Arc::new(AtomicUsize::new(0)),
+                nacks: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+
+    struct TrackingReceipt {
+        acks: Arc<AtomicUsize>,
+        nacks: Arc<AtomicUsize>,
+    }
+
+    impl ConsumeReceipt for TrackingReceipt {
+        async fn ack(self) -> Result<(), ReceiptError> {
+            self.acks.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn nack(self) -> Result<(), ReceiptError> {
+            self.nacks.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    impl Channel for TrackingChannel {
+        type ConsumeReceipt = TrackingReceipt;
+        type PublishReceipt = ();
+
+        async fn publish(&self, msg: Message) -> Result<(), PublishError> {
+            self.inner.publish(msg).await
+        }
+
+        async fn consume(&self, group: &str) -> Result<(Message, TrackingReceipt), ConsumeError> {
+            let (msg, _) = self.inner.consume(group).await?;
+            let receipt = TrackingReceipt {
+                acks: Arc::clone(&self.acks),
+                nacks: Arc::clone(&self.nacks),
+            };
+            Ok((msg, receipt))
+        }
+    }
+
+    #[tokio::test]
+    async fn ack_called_on_handler_success() {
+        let channel = Arc::new(TrackingChannel::new());
+        let handler = Arc::new(StubHandler::new());
+        let cancel = CancellationToken::new();
+
+        let dispatcher = Dispatcher::new(
+            Arc::clone(&channel),
+            "test".to_string(),
+            Arc::clone(&handler),
+            1,
+            cancel.clone(),
+        );
+
+        let dispatch_handle = tokio::spawn(async move { dispatcher.run().await });
+        tokio::task::yield_now().await;
+
+        let msg = MessageBuilder::new(b"hello".to_vec()).build();
+        channel.publish(msg).await.unwrap();
+
+        handler.counter.wait_for(1).await;
+        cancel.cancel();
+        dispatch_handle.await.unwrap();
+
+        assert_eq!(channel.acks.load(Ordering::SeqCst), 1);
+        assert_eq!(channel.nacks.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn nack_called_on_handler_error() {
+        let channel = Arc::new(TrackingChannel::new());
+        let handler = Arc::new(ErrorHandler::new());
+        let cancel = CancellationToken::new();
+
+        let dispatcher = Dispatcher::new(
+            Arc::clone(&channel),
+            "test".to_string(),
+            Arc::clone(&handler),
+            1,
+            cancel.clone(),
+        );
+
+        let dispatch_handle = tokio::spawn(async move { dispatcher.run().await });
+        tokio::task::yield_now().await;
+
+        let msg = MessageBuilder::new(b"fail".to_vec()).build();
+        channel.publish(msg).await.unwrap();
+
+        handler.counter.wait_for(1).await;
+        cancel.cancel();
+        dispatch_handle.await.unwrap();
+
+        assert_eq!(channel.acks.load(Ordering::SeqCst), 0);
+        assert_eq!(channel.nacks.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
