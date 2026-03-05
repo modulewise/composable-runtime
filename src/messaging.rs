@@ -1,6 +1,6 @@
 //! Messaging for Wasm components.
 //!
-//! Provides the internal messaging primitives: message, channel, and dispatcher.
+//! Provides message, channel, dispatcher, and activator.
 
 mod activator;
 mod channel;

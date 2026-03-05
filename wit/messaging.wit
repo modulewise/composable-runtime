@@ -8,7 +8,7 @@ interface types {
         value: string,
     }
 
-    /// A message with headers and an opaque body.
+    /// A message with headers and a body as bytes.
     record message {
         headers: list<header>,
         body: list<u8>,
@@ -23,26 +23,26 @@ interface handler {
     handle: async func(msg: message) -> result<_, string>;
 }
 
-/// Provides the ability to send messages to channels.
+/// Provides the ability to send messages to channels by name.
 interface sender {
     use types.{message, header};
 
     /// Error returned when a send fails.
     variant send-error {
-        /// Message expired before acceptance.
+        /// Message send timed out.
         timeout,
         /// No channel exists with this name.
         unknown-channel,
     }
 
-    /// Fire-and-forget. Awaits channel acceptance (backpressure).
+    /// Send a message to a channel by name.
     send: async func(
         channel: string,
         body: list<u8>,
         headers: option<list<header>>,
     ) -> result<_, send-error>;
 
-    /// Send and await a reply.
+    /// Send a message to a channel by name and await a reply.
     send-and-receive: async func(
         channel: string,
         body: list<u8>,
