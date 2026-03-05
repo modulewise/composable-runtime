@@ -239,7 +239,6 @@ mod tests {
             self.acks.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
-
         async fn nack(self) -> Result<(), ReceiptError> {
             self.nacks.fetch_add(1, Ordering::SeqCst);
             Ok(())
