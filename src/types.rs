@@ -27,7 +27,8 @@ pub struct ComponentDefinitionBase {
     pub intercepts: Vec<String>, // Components this intercepts
     #[serde(default)]
     pub precedence: i32, // Lower values have higher precedence
-    pub config: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub config: HashMap<String, serde_json::Value>,
 }
 
 impl std::ops::Deref for ComponentDefinitionBase {

@@ -165,9 +165,9 @@ fn parse_component_definition(name: &str, value: toml::Value) -> Result<Componen
     }
 
     let config = if let Some(toml::Value::Table(config_table)) = def_table.remove("config") {
-        Some(convert_toml_table_to_json_map(&config_table)?)
+        convert_toml_table_to_json_map(&config_table)?
     } else {
-        None
+        HashMap::new()
     };
 
     let mut component_base: ComponentDefinitionBase = toml::Value::Table(def_table)
@@ -251,7 +251,7 @@ fn create_implicit_component_definitions(
                 imports: Vec::new(),
                 intercepts: Vec::new(),
                 precedence: 0,
-                config: None,
+                config: HashMap::new(),
             },
         };
         definitions.push(definition);

@@ -470,11 +470,7 @@ async fn process_component(
         .any(|import| import.starts_with("wasi:config/store"));
 
     if imports_config {
-        let config_to_use = match &definition.config {
-            Some(c) => c,
-            None => &HashMap::new(),
-        };
-        bytes = Composer::compose_with_config(&bytes, config_to_use).map_err(|e| {
+        bytes = Composer::compose_with_config(&bytes, &definition.config).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to compose component '{}' with config: {}",
                 definition.name,
@@ -482,14 +478,14 @@ async fn process_component(
             )
         })?;
 
-        let config_keys: Vec<_> = config_to_use.keys().collect();
+        let config_keys: Vec<_> = definition.config.keys().collect();
         tracing::info!(
             "Composed component '{}' with config: {config_keys:?}",
             definition.name
         );
 
         imports.retain(|import| !import.starts_with("wasi:config/store"));
-    } else if definition.config.is_some() {
+    } else if !definition.config.is_empty() {
         tracing::warn!(
             "Config provided for component '{}' but component doesn't import wasi:config/store",
             definition.name
