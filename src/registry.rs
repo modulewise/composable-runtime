@@ -133,13 +133,6 @@ pub struct CapabilityRegistry {
 #[derive(Debug, Clone)]
 pub struct ComponentRegistry {
     pub components: Arc<HashMap<String, ComponentSpec>>,
-    pub enabling_components: Arc<HashMap<String, EnablingComponent>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EnablingComponent {
-    pub component: ComponentSpec,
-    pub scope: String,
 }
 
 impl CapabilityRegistry {
@@ -153,37 +146,27 @@ impl CapabilityRegistry {
         self.capabilities.get(name)
     }
 
-    pub fn get_enabled_capability(
+    pub fn verify_importable(
         &self,
-        _requesting_component: &ComponentDefinition,
-        capability_name: &str,
-    ) -> Option<&Capability> {
-        if let Some(capability) = self.capabilities.get(capability_name) {
-            match capability.scope.as_str() {
-                "any" => Some(capability),
-                "package" => None,
-                "namespace" => None,
-                _ => None,
-            }
-        } else {
-            None
+        candidate: &CapabilityDefinition,
+        requester: &ComponentDefinition,
+    ) -> Result<()> {
+        match candidate.scope.as_str() {
+            "any" => Ok(()),
+            scope => Err(anyhow::anyhow!(
+                "Component '{}' cannot import capability '{}' (scope: '{scope}')",
+                requester.name,
+                candidate.name
+            )),
         }
     }
 }
 
 impl ComponentRegistry {
-    fn new(
-        components: HashMap<String, ComponentSpec>,
-        enabling_components: HashMap<String, EnablingComponent>,
-    ) -> Self {
-        Self {
-            components: Arc::new(components),
-            enabling_components: Arc::new(enabling_components),
-        }
-    }
-
     pub fn empty() -> Self {
-        Self::new(HashMap::new(), HashMap::new())
+        Self {
+            components: Arc::new(HashMap::new()),
+        }
     }
 
     pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
@@ -194,41 +177,23 @@ impl ComponentRegistry {
         self.components.get(name)
     }
 
-    pub fn get_enabled_component_dependency(
+    pub fn get_required_import(
         &self,
-        _requesting_component: &ComponentDefinition,
-        requesting_metadata: &ComponentMetadata,
-        dependency_name: &str,
-    ) -> Option<&ComponentSpec> {
-        if let Some(enabling_component) = self.enabling_components.get(dependency_name) {
-            match enabling_component.scope.as_str() {
-                "any" => Some(&enabling_component.component),
-                "package" => {
-                    match (
-                        requesting_metadata.package.as_deref(),
-                        enabling_component.component.package.as_deref(),
-                    ) {
-                        (Some(req_pkg), Some(enable_pkg)) if req_pkg == enable_pkg => {
-                            Some(&enabling_component.component)
-                        }
-                        _ => None,
-                    }
-                }
-                "namespace" => {
-                    match (
-                        requesting_metadata.namespace.as_deref(),
-                        enabling_component.component.namespace.as_deref(),
-                    ) {
-                        (Some(req_ns), Some(enable_ns)) if req_ns == enable_ns => {
-                            Some(&enabling_component.component)
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            }
-        } else {
-            None
+        candidate: &ComponentDefinition,
+        requester: &ComponentDefinition,
+        _requester_metadata: &ComponentMetadata,
+    ) -> Result<&ComponentSpec> {
+        let component = self
+            .components
+            .get(&candidate.name)
+            .expect("component must exist in registry");
+        match candidate.scope.as_str() {
+            "any" => Ok(component),
+            scope => Err(anyhow::anyhow!(
+                "Component '{}' cannot import dependency '{}' (scope: '{scope}')",
+                requester.name,
+                candidate.name
+            )),
         }
     }
 }
@@ -256,13 +221,11 @@ pub async fn build_registries(
     let sorted_indices = component_graph.get_build_order();
 
     let mut built_components = HashMap::new();
-    let mut enabling_components = HashMap::new();
 
     for node_index in sorted_indices {
         if let Node::Component(definition) = &component_graph[node_index] {
             let temp_component_registry = ComponentRegistry {
                 components: Arc::new(built_components.clone()),
-                enabling_components: Arc::new(enabling_components.clone()),
             };
 
             let component_spec = process_component(
@@ -273,19 +236,13 @@ pub async fn build_registries(
             )
             .await?;
 
-            built_components.insert(definition.name.clone(), component_spec.clone());
-            let enabling = EnablingComponent {
-                component: component_spec,
-                scope: definition.scope.clone(),
-            };
-            enabling_components.insert(definition.name.clone(), enabling);
+            built_components.insert(definition.name.clone(), component_spec);
         }
     }
 
     Ok((
         ComponentRegistry {
             components: Arc::new(built_components),
-            enabling_components: Arc::new(enabling_components),
         },
         capability_registry,
     ))
@@ -499,51 +456,33 @@ async fn process_component(
         let dependency_node = &component_graph[dependency_node_index];
         match dependency_node {
             Node::Component(dependency_def) => {
-                if let Some(component_spec) = component_registry.get_enabled_component_dependency(
+                let component_spec = component_registry.get_required_import(
+                    dependency_def,
                     definition,
                     &metadata,
-                    &dependency_def.name,
-                ) {
-                    bytes = Composer::compose_components(&bytes, &component_spec.bytes).map_err(
-                        |e| {
-                            anyhow::anyhow!(
-                                "Failed composing '{}' with dependency '{}': {e}",
-                                definition.name,
-                                dependency_def.name
-                            )
-                        },
-                    )?;
-                    tracing::info!(
-                        "Composed component '{}' with dependency '{}'",
-                        definition.name,
-                        dependency_def.name
-                    );
+                )?;
+                bytes =
+                    Composer::compose_components(&bytes, &component_spec.bytes).map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed composing '{}' with dependency '{}': {e}",
+                            definition.name,
+                            dependency_def.name
+                        )
+                    })?;
+                tracing::info!(
+                    "Composed component '{}' with dependency '{}'",
+                    definition.name,
+                    dependency_def.name
+                );
 
-                    for export in &component_spec.exports {
-                        imports.retain(|import| import != export);
-                    }
-                    all_capabilities.extend(component_spec.capabilities.iter().cloned());
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Component '{}' requested dependency '{}', but access is not enabled",
-                        definition.name,
-                        dependency_def.name
-                    ));
+                for export in &component_spec.exports {
+                    imports.retain(|import| import != export);
                 }
+                all_capabilities.extend(component_spec.capabilities.iter().cloned());
             }
             Node::Capability(capability_def) => {
-                if capability_registry
-                    .get_enabled_capability(definition, &capability_def.name)
-                    .is_some()
-                {
-                    all_capabilities.insert(capability_def.name.clone());
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Component '{}' requested capability '{}', but access is not enabled",
-                        definition.name,
-                        capability_def.name
-                    ));
-                }
+                capability_registry.verify_importable(capability_def, definition)?;
+                all_capabilities.insert(capability_def.name.clone());
             }
         }
     }
