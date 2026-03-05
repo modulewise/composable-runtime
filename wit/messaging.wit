@@ -1,0 +1,57 @@
+package modulewise:messaging@0.1.0;
+
+/// Core message types.
+interface types {
+    /// A single header key-value pair.
+    record header {
+        key: string,
+        value: string,
+    }
+
+    /// A message with headers and a body as bytes.
+    record message {
+        headers: list<header>,
+        body: list<u8>,
+    }
+}
+
+/// Exported by components that handle messages directly.
+interface handler {
+    use types.{message};
+
+    /// Handle an incoming message.
+    handle: async func(msg: message) -> result<_, string>;
+}
+
+/// Provides the ability to send messages to channels by name.
+interface sender {
+    use types.{message, header};
+
+    /// Error returned when a send fails.
+    variant send-error {
+        /// Message send timed out.
+        timeout,
+        /// No channel exists with this name.
+        unknown-channel,
+    }
+
+    /// Send a message to a channel by name.
+    send: async func(
+        channel: string,
+        body: list<u8>,
+        headers: option<list<header>>,
+    ) -> result<_, send-error>;
+
+    /// Send a message to a channel by name and await a reply.
+    send-and-receive: async func(
+        channel: string,
+        body: list<u8>,
+        headers: option<list<header>>,
+    ) -> result<message, send-error>;
+}
+
+/// A component that handles messages and can send replies.
+world message-handler {
+    import sender;
+    export handler;
+}

@@ -20,5 +20,7 @@ pub mod types;
 mod composer;
 mod grpc;
 mod loader;
+#[cfg(feature = "messaging")]
+mod messaging;
 mod runtime;
 mod wit;
