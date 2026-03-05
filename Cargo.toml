@@ -66,5 +66,5 @@ cli = ["dep:tokio"]
 messaging = ["dep:tokio", "dep:tokio-util"]
 
 [[bin]]
-name = "composable-runtime"
+name = "composable"
 path = "src/main.rs"
