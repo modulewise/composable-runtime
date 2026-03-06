@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "grpc-feature",
+    "grpc-capability",
     "grpc-to-http",
     "guest",
     "host",

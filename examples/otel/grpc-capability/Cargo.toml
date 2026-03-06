@@ -1,8 +1,8 @@
 [package]
-name = "grpc-feature"
+name = "grpc-capability"
 version = "0.1.0"
 edition = "2024"
-description = "Example of a generic gRPC host feature for composable-runtime"
+description = "Example of a generic gRPC host capability for composable-runtime"
 
 [dependencies]
 anyhow = "1"

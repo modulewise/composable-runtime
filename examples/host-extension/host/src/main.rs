@@ -16,11 +16,11 @@ impl crate::example::greeting::host_greeting::Host for ComponentState {
     }
 }
 
-/// Host extension for the greeting feature
+/// Host extension for the greeting capability
 #[derive(Deserialize, Default)]
-struct GreetingFeature;
+struct GreetingCapability;
 
-impl HostExtension for GreetingFeature {
+impl HostExtension for GreetingCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["example:greeting/host-greeting".to_string()]
     }
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     let graph = ComponentGraph::builder().load_file(std::path::PathBuf::from("config.toml")).build()?;
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<GreetingFeature>("greeting")
+        .with_host_extension::<GreetingCapability>("greeting")
         .build()
         .await?;
 

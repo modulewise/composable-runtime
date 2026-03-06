@@ -4,13 +4,13 @@ This example demonstrates sending OpenTelemetry logs from a guest wasm component
 
 ## Flow
 
-There are two alternative configuration files. One includes a host-feature, and the other relies on a `grpc-to-http` adapter component.
+There are two alternative configuration files. One includes a host capability, and the other relies on a `grpc-to-http` adapter component.
 
-The host-feature path is:
+The capability-based path is:
 
 ```
-   guest   ->   otel-to-grpc   ->   grpc-feature   ->   OTLP collector
-(component)     (component)           (host)              (external)
+   guest   ->   otel-to-grpc   ->   grpc-capability   ->   OTLP collector
+(component)     (component)             (host)               (external)
 ```
 
 The component-based path is:
@@ -24,7 +24,7 @@ The common flow is:
 
 - **guest:** A user component that emits OpenTelemetry log records via `wasi:otel/logs`.
 - **otel-to-grpc:** A wasm component that converts `wasi:otel` log records into OTLP protobuf and sends through `modulewise:grpc/endpoint`.
-- **grpc endpoint:** Either `grpc-feature` or `grpc-to-http` delivers the serialized protobuf to a gRPC service. The two interchangeable implementations are described below.
+- **grpc endpoint:** Either `grpc-capability` or `grpc-to-http` delivers the serialized protobuf to a gRPC service. The two interchangeable implementations are described below.
 
 > [!NOTE]
 > The `guest` and `otel-to-grpc` components are identical in both configurations. Only the endpoint provider differs, and that is a config (not code) change.
@@ -41,7 +41,7 @@ interface endpoint {
 }
 ```
 
-The endpoint is generic gRPC (OTLP-agnostic, hence the `otel-to-grpc` component). It just sends raw bytes to a named path. Path keys like `logs` and `traces` map to gRPC service paths via config, either in the `host:grpc` feature definition, or the `grpc-to-http` component definition:
+The endpoint is generic gRPC (OTLP-agnostic, hence the `otel-to-grpc` component). It just sends raw bytes to a named path. Path keys like `logs` and `traces` map to gRPC service paths via config, either in the `host:grpc` capability definition, or the `grpc-to-http` component definition:
 
 ```toml
 config.url = "http://localhost:4317"
@@ -51,45 +51,41 @@ config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Expo
 
 ## Two Endpoint Options
 
-### Option 1: Host Feature (`grpc-feature`)
+### Option 1: Host Capability (`grpc-capability`)
 
-This endpoint is implemented as a [host extension](grpc-feature). The host maintains a persistent gRPC channel that is shared across component invocations. Batching support will also be added at this layer in a future update (it will eventually move from examples to a feature crate).
+This endpoint is implemented as a [host extension](grpc-capability). The host maintains a persistent gRPC channel that is shared across component invocations. Batching support will also be added at this layer in a future update (it will eventually move from examples to a feature crate).
 
 ```toml
-# config-with-host-feature.toml
+# config-with-host-capability.toml
 
-[guest]
+[component.guest]
 uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
-expects = ["otel"]
-exposed = true
+imports = ["otel"]
 
-[otel]
+[component.otel]
 uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
-expects = ["grpc", "wasip2"]
-enables = "exposed"
+imports = ["grpc", "wasip2"]
 
-[grpc]
+[capability.grpc]
 uri = "host:grpc"
-enables = "unexposed"
 config.url = "http://localhost:4317"
 config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
-[wasip2]
+[capability.wasip2]
 uri = "wasmtime:wasip2"
-enables = "unexposed"
 ```
 
-The "grpc" definition with `uri = "host:grpc"` creates an instance of the host feature, which the host binary has registered as an extension:
+The "grpc" definition with `uri = "host:grpc"` creates an instance of the host capability, which the host binary has registered as an extension:
 
 ```rust
 let runtime = Runtime::builder(&graph)
-    .with_host_extension::<GrpcFeature>("grpc")
+    .with_host_extension::<GrpcCapability>("grpc")
     .build()
     .await?;
 ```
 
-**Advantage:** The underlying channel persists across invocations. If the guest component is instantiated multiple times, all reuse the same connection. If other components rely on the same feature instance, they also share the connection.
+**Advantage:** The underlying channel persists across invocations. If the guest component is instantiated multiple times, all reuse the same connection. If other components rely on the same capability instance, they also share the connection.
 
 ### Option 2: Component as Adapter (`grpc-to-http`)
 
@@ -98,42 +94,36 @@ This endpoint is a wasm component that translates gRPC calls into `wasi:http` re
 ```toml
 # config-with-components.toml
 
-[guest]
+[component.guest]
 uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
-expects = ["otel"]
-exposed = true
+imports = ["otel"]
 
-[otel]
+[component.otel]
 uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
-expects = ["grpc", "wasip2"]
-enables = "exposed"
+imports = ["grpc", "wasip2"]
 
-[grpc]
+[component.grpc]
 uri = "./target/wasm32-unknown-unknown/release/grpc_to_http.wasm"
-expects = ["http", "io"]
-enables = "unexposed"
+imports = ["http", "io"]
 config.url = "http://localhost:4317"
 config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
-[http]
+[capability.http]
 uri = "wasmtime:http"
-enables = "unexposed"
 
-[io]
+[capability.io]
 uri = "wasmtime:io"
-enables = "unexposed"
 
-[wasip2]
+[capability.wasip2]
 uri = "wasmtime:wasip2"
-enables = "unexposed"
 ```
 
 The `grpc-to-http` component constructs a gRPC-framed request and sends it via `wasi:http/outgoing-handler`.
 
-**Advantage:** Pure wasm component model, bottoms out at `wasi:http`. No host-feature needed.
+**Advantage:** Pure wasm component model, bottoms out at `wasi:http`. No host capability needed.
 
-**Trade-off:** Each component invocation creates a new HTTP/2 connection. Under load, the host feature's connection reuse becomes significant.
+**Trade-off:** Each component invocation creates a new HTTP/2 connection. Under load, the host capability's connection reuse becomes significant.
 
 ## WIT Worlds
 
@@ -161,7 +151,7 @@ world grpc-to-http {
 }
 ```
 
-The composable-runtime composes these together based on the config graph: the guest's `import wasi:otel/logs` is satisfied by otel-to-grpc's `export wasi:otel/logs`, and otel-to-grpc's `import modulewise:grpc/endpoint` is satisfied by either the host feature or the grpc-to-http component.
+The composable-runtime composes these together based on the config graph: the guest's `import wasi:otel/logs` is satisfied by otel-to-grpc's `export wasi:otel/logs`, and otel-to-grpc's `import modulewise:grpc/endpoint` is satisfied by either the host capability or the grpc-to-http component.
 
 ## Building and Running
 
@@ -173,5 +163,5 @@ Prerequisite: an OTLP collector at localhost:4317
 ```
 
 At the collector, you should see two log entries with the following log-record bodies:
-- "testing config-with-host-feature.toml"
+- "testing config-with-host-capability.toml"
 - "testing config-with-components.toml"

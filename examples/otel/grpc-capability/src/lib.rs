@@ -1,4 +1,4 @@
-//! Example of a generic gRPC endpoint host feature for composable-runtime.
+//! Example of a generic gRPC endpoint host capability for composable-runtime.
 //!
 //! Implements `modulewise:grpc/endpoint`
 
@@ -34,9 +34,9 @@ impl EndpointState {
     }
 }
 
-/// Host feature that provides the `modulewise:grpc/endpoint` interface.
+/// Host capability that provides the `modulewise:grpc/endpoint` interface.
 #[derive(Deserialize)]
-pub struct GrpcFeature {
+pub struct GrpcCapability {
     #[serde(default = "default_url")]
     pub url: String,
 
@@ -51,7 +51,7 @@ fn default_url() -> String {
     "http://localhost:4317".to_string()
 }
 
-impl Default for GrpcFeature {
+impl Default for GrpcCapability {
     fn default() -> Self {
         Self {
             url: default_url(),
@@ -65,7 +65,7 @@ struct ComponentEndpointState {
     inner: Arc<EndpointState>,
 }
 
-impl HostExtension for GrpcFeature {
+impl HostExtension for GrpcCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:grpc/endpoint@0.1.0".to_string()]
     }

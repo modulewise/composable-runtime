@@ -1800,7 +1800,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "grpc-feature"
+name = "grpc-capability"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1944,7 +1944,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "composable-runtime",
- "grpc-feature",
+ "grpc-capability",
  "serde_json",
  "tokio",
  "tracing-subscriber",
