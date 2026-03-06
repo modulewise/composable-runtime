@@ -111,7 +111,7 @@ async fn test_multiple_interceptors() {
     );
 
     let provider_name =
-        if let composable_runtime::graph::Node::Component(def) = &graph[dependencies[0]] {
+        if let composable_runtime::composition::graph::Node::Component(def) = &graph[dependencies[0]] {
             &def.name
         } else {
             unreachable!()
@@ -133,12 +133,13 @@ async fn test_multiple_interceptors() {
         "The outer-interceptor should have one dependency"
     );
 
-    let outer_provider_name =
-        if let composable_runtime::graph::Node::Component(def) = &graph[outer_dependencies[0]] {
-            &def.name
-        } else {
-            unreachable!()
-        };
+    let outer_provider_name = if let composable_runtime::composition::graph::Node::Component(def) =
+        &graph[outer_dependencies[0]]
+    {
+        &def.name
+    } else {
+        unreachable!()
+    };
     assert_eq!(outer_provider_name, "inner-interceptor");
 
     // Assert inner-interceptor is connected to client
@@ -150,12 +151,13 @@ async fn test_multiple_interceptors() {
         "The inner-interceptor should have one dependency"
     );
 
-    let inner_provider_name =
-        if let composable_runtime::graph::Node::Component(def) = &graph[inner_dependencies[0]] {
-            &def.name
-        } else {
-            unreachable!()
-        };
+    let inner_provider_name = if let composable_runtime::composition::graph::Node::Component(def) =
+        &graph[inner_dependencies[0]]
+    {
+        &def.name
+    } else {
+        unreachable!()
+    };
     assert_eq!(inner_provider_name, "client");
 
     let (component_registry, _capability_registry) =

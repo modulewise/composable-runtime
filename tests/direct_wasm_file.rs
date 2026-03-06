@@ -1,4 +1,4 @@
-use composable_runtime::graph::Node;
+use composable_runtime::composition::graph::Node;
 
 mod common;
 

@@ -227,7 +227,7 @@ mod tests {
     use tempfile::{Builder, NamedTempFile};
 
     use super::*;
-    use crate::graph::ComponentGraph;
+    use crate::composition::graph::ComponentGraph;
     use crate::messaging::{Channel, LocalChannel, MessageBuilder};
 
     fn create_wasm_file(wat: &str) -> NamedTempFile {

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 use std::path::PathBuf;
 
-use crate::loader;
+use crate::config::loader;
 use crate::types::{CapabilityDefinition, ComponentDefinition};
 
 pub struct ComponentGraph {

@@ -7,10 +7,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use wasmtime::component::{HasData, Linker};
 
-use crate::composer::Composer;
-use crate::graph::{ComponentGraph, Node};
-use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState};
-use crate::wit::{ComponentMetadata, Parser};
+use super::composer::Composer;
+use super::graph::{ComponentGraph, Node};
+use super::wit::{ComponentMetadata, Parser};
+use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState, Function};
 
 /// Trait implemented by host extension instances.
 ///
@@ -122,7 +122,7 @@ pub struct ComponentSpec {
     pub imports: Vec<String>,
     pub exports: Vec<String>,
     pub capabilities: Vec<String>,
-    pub functions: HashMap<String, crate::wit::Function>,
+    pub functions: HashMap<String, Function>,
 }
 
 #[derive(Debug, Clone)]

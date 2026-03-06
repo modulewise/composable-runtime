@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use composable_runtime::ComponentGraph;
-use composable_runtime::graph::Node;
-use composable_runtime::registry::{CapabilityRegistry, ComponentRegistry, build_registries};
+use composable_runtime::composition::graph::Node;
+use composable_runtime::composition::registry::{CapabilityRegistry, ComponentRegistry, build_registries};
 use composable_runtime::types::{CapabilityDefinition, ComponentDefinition};
 use std::collections::HashMap;
 use std::io::Write;
