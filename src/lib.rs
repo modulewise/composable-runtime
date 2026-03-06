@@ -15,6 +15,6 @@ pub mod composition;
 pub mod types;
 
 mod config;
-mod runtime;
 #[cfg(feature = "messaging")]
 mod messaging;
+mod runtime;

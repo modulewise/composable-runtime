@@ -110,12 +110,13 @@ async fn test_multiple_interceptors() {
         "The handler should have one dependency"
     );
 
-    let provider_name =
-        if let composable_runtime::composition::graph::Node::Component(def) = &graph[dependencies[0]] {
-            &def.name
-        } else {
-            unreachable!()
-        };
+    let provider_name = if let composable_runtime::composition::graph::Node::Component(def) =
+        &graph[dependencies[0]]
+    {
+        &def.name
+    } else {
+        unreachable!()
+    };
 
     // Assert the lower precedence (higher number) interceptor is on the "outside"
     assert_eq!(
