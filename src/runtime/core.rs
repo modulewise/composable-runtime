@@ -16,13 +16,11 @@ use wasmtime_wasi_http::types::{
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
-use crate::graph::ComponentGraph;
-use crate::grpc;
-use crate::registry::{
+use crate::composition::graph::ComponentGraph;
+use crate::composition::registry::{
     CapabilityRegistry, ComponentRegistry, HostExtension, HostExtensionFactory, build_registries,
 };
-use crate::types::ComponentState;
-use crate::wit::Function;
+use crate::types::{ComponentState, Function};
 
 /// Wasm Component whose functions can be invoked
 #[derive(Debug, Clone)]
@@ -235,7 +233,7 @@ impl WasiHttpView for ComponentState {
                 tracing::error!("gRPC over TLS (https) is not yet supported");
                 return Err(ErrorCode::HttpProtocolError.into());
             }
-            Ok(grpc::send_grpc_request(request, config))
+            Ok(super::grpc::send_grpc_request(request, config))
         } else {
             Ok(default_send_request(request, config))
         }

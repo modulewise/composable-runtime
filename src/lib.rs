@@ -3,24 +3,18 @@
 //! A runtime for Wasm Components that supports
 //! composition, config, and capability management.
 
-pub use graph::{ComponentGraph, GraphBuilder};
-pub use registry::{ExtensionStateHasData, HostExtension};
+pub use composition::graph::{ComponentGraph, GraphBuilder};
+pub use composition::registry::{ExtensionStateHasData, HostExtension};
 pub use runtime::{Component, Runtime, RuntimeBuilder};
-pub use types::ComponentState;
-pub use wit::{Function, FunctionParam};
+pub use types::{ComponentState, Function, FunctionParam};
 
 // exposed for testing, hidden from docs
 #[doc(hidden)]
-pub mod graph;
-#[doc(hidden)]
-pub mod registry;
+pub mod composition;
 #[doc(hidden)]
 pub mod types;
 
-mod composer;
-mod grpc;
-mod loader;
+mod config;
 #[cfg(feature = "messaging")]
 mod messaging;
 mod runtime;
-mod wit;
