@@ -50,7 +50,6 @@ async fn test_imports_and_scope() {
         capability_registry.get_capability("infra").unwrap().uri,
         "wasmtime:some-infra"
     );
-    // All components are in the registry now
     assert_eq!(component_registry.get_components().count(), 2);
 
     let handler = component_registry.get_component("handler").unwrap();

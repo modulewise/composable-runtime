@@ -27,7 +27,7 @@ Builds the `greeter` Wasm Component.
 ./run.sh
 ```
 
-Invokes the `greeter` via `composable run`, passing "World".
+Invokes the `greeter` via `composable invoke`, passing "World".
 
 Output:
 ```
