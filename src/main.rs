@@ -1,90 +1,142 @@
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
-use composable_runtime::{ComponentGraph, Runtime};
+use clap::{Parser, Subcommand};
+use composable_runtime::{ComponentGraph, FunctionParam, Runtime};
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
 use std::path::PathBuf;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "composable-runtime")]
-#[command(about = "A runtime for Wasm Components")]
+#[command(name = "composable")]
+#[command(about = "An inversion of control runtime for wasm components")]
 struct Cli {
-    #[command(flatten)]
-    mode: ModeArgs,
-
-    /// Component definition files (.toml) and standalone .wasm files
-    #[arg(required = true)]
-    definitions: Vec<PathBuf>,
-}
-
-#[derive(Args)]
-#[group(required = true, multiple = false)]
-struct ModeArgs {
-    /// Perform a dry run, printing the dependency graph without building the registry
-    #[arg(long, short)]
-    dry_run: bool,
-
-    /// Export component graph to DOT file (graph.dot)
-    #[arg(long, short)]
-    export: bool,
-
-    /// Start interactive session for invoking component functions
-    #[arg(long, short)]
-    interactive: bool,
+    #[command(subcommand)]
+    command: Command,
 }
 
 #[derive(Subcommand)]
-enum Commands {
-    /// List available component functions
-    List,
-    /// Show details for a specific function
-    Describe {
-        /// The target function, e.g., component.function
-        target: String,
-    },
-    /// Call a function with arguments
+enum Command {
+    /// Call a component function
     Invoke {
-        /// The target function, e.g., component.function
-        target: String,
-        /// The arguments to pass to the function
-        #[arg()]
-        args: Vec<String>,
+        /// Component definition files (.toml) and standalone .wasm files
+        #[arg(required = true)]
+        definitions: Vec<PathBuf>,
+
+        /// Target and arguments, passed after --
+        #[arg(last = true)]
+        target_args: Vec<String>,
     },
+    /// Run as a long-lived process with gateway(s) and/or messaging
+    Run {
+        /// Component definition files (.toml) and standalone .wasm files
+        #[arg(required = true)]
+        definitions: Vec<PathBuf>,
+    },
+    /// Interactive shell for dev and debugging
+    Shell {
+        /// Component definition files (.toml) and standalone .wasm files
+        #[arg(required = true)]
+        definitions: Vec<PathBuf>,
+    },
+    /// Inspect the dependency graph
+    Graph {
+        /// Component definition files (.toml) and standalone .wasm files
+        #[arg(required = true)]
+        definitions: Vec<PathBuf>,
+
+        /// Export to DOT format (graph.dot)
+        #[arg(long)]
+        dot: bool,
+    },
+}
+
+enum ShellCommand {
+    List,
+    Describe { target: String },
+    Invoke { target: String, args: Vec<String> },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    println!("Loading definitions from: {:?}...", cli.definitions);
-    let mut builder = ComponentGraph::builder();
-    for path in &cli.definitions {
-        builder = builder.load_file(path);
-    }
-    let graph = builder.build()?;
-
-    if cli.mode.dry_run {
-        println!("--- Component Dependency Graph (Dry Run) ---");
-        println!("{graph:#?}");
-        println!("--------------------------------------------");
-    } else if cli.mode.export {
-        let filename = "graph.dot";
-        graph.write_dot_file(filename)?;
-        println!("Graph exported to {filename}");
-    } else if cli.mode.interactive {
-        run_interactive_session(&graph).await?;
+    match cli.command {
+        Command::Graph { definitions, dot } => {
+            let graph = build_graph(&definitions)?;
+            if dot {
+                graph.write_dot_file("graph.dot")?;
+                println!("Graph exported to graph.dot");
+            } else {
+                println!("{graph:#?}");
+            }
+        }
+        Command::Shell { definitions } => {
+            let graph = build_graph(&definitions)?;
+            run_shell(&graph).await?;
+        }
+        Command::Invoke {
+            definitions,
+            target_args,
+        } => {
+            let graph = build_graph(&definitions)?;
+            run_invoke(&graph, target_args).await?;
+        }
+        Command::Run { definitions: _ } => {
+            tracing_subscriber::fmt()
+                .with_env_filter(EnvFilter::from_default_env())
+                .init();
+            anyhow::bail!("nothing to run: enable a gateway or messaging features.");
+        }
     }
 
     Ok(())
 }
 
-async fn run_interactive_session(graph: &ComponentGraph) -> Result<()> {
-    println!("Building runtime...");
+fn build_graph(definitions: &[PathBuf]) -> Result<ComponentGraph> {
+    tracing::info!("Loading definitions from: {definitions:?}");
+    let mut builder = ComponentGraph::builder();
+    for path in definitions {
+        builder = builder.load_file(path);
+    }
+    builder.build()
+}
+
+async fn run_invoke(graph: &ComponentGraph, target_args: Vec<String>) -> Result<()> {
+    let runtime = Runtime::builder(graph).build().await?;
+
+    let (target, args) = target_args
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("missing target after --"))?;
+
+    let (component_name, func_name) = target
+        .split_once('.')
+        .ok_or_else(|| anyhow::anyhow!(
+            "invalid target '{target}'. Expected 'component.function' or 'component.interface.function'"
+        ))?;
+
+    let component = runtime
+        .get_component(component_name)
+        .ok_or_else(|| anyhow::anyhow!("component '{component_name}' not found"))?;
+    let function = component.functions.get(func_name).ok_or_else(|| {
+        anyhow::anyhow!("function '{func_name}' not found in component '{component_name}'")
+    })?;
+
+    let final_args =
+        parse_invoke_args(args, function.params()).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let result = runtime
+        .invoke(component_name, func_name, final_args)
+        .await?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+async fn run_shell(graph: &ComponentGraph) -> Result<()> {
     let runtime = Runtime::builder(graph).build().await?;
     let components = runtime.list_components();
     println!(
-        "Successfully built runtime with {} exposed components.",
+        "Successfully built runtime with {} components.",
         components.len()
     );
 
@@ -122,14 +174,14 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
 
     if let Some(command_str) = parts.first() {
         let command = match command_str.as_str() {
-            "list" => Some(Commands::List),
+            "list" => Some(ShellCommand::List),
             "describe" => parts.get(1).map_or_else(
                 || {
                     eprintln!("Usage: describe <target>");
                     None
                 },
                 |target| {
-                    Some(Commands::Describe {
+                    Some(ShellCommand::Describe {
                         target: target.to_string(),
                     })
                 },
@@ -140,7 +192,7 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                     None
                 },
                 |target| {
-                    Some(Commands::Invoke {
+                    Some(ShellCommand::Invoke {
                         target: target.to_string(),
                         args: parts
                             .get(2..)
@@ -171,7 +223,7 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
 
         if let Some(command) = command {
             match command {
-                Commands::List => {
+                ShellCommand::List => {
                     let mut targets = Vec::new();
                     for component in runtime.list_components() {
                         for func_name in component.functions.keys() {
@@ -183,7 +235,7 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                         println!("- {target}");
                     }
                 }
-                Commands::Describe { target } => {
+                ShellCommand::Describe { target } => {
                     if let Some((component_name, func_name)) = target.split_once('.') {
                         if let Some(component) = runtime.get_component(component_name) {
                             if let Some(function) = component.functions.get(func_name) {
@@ -221,77 +273,25 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                         eprintln!("Error: Invalid target format. Use 'component.function'.");
                     }
                 }
-                Commands::Invoke { target, args } => {
+                ShellCommand::Invoke { target, args } => {
                     if let Some((component_name, func_name)) = target.split_once('.') {
                         if let Some(component) = runtime.get_component(component_name) {
                             if let Some(function) = component.functions.get(func_name) {
-                                let params = function.params();
-                                let mut final_args: Vec<serde_json::Value> = Vec::new();
-
-                                if args.len() > params.len() {
-                                    eprintln!(
-                                        "Error: Too many arguments. Expected at most {}, got {}",
-                                        params.len(),
-                                        args.len()
-                                    );
-                                    return Ok(());
-                                }
-
-                                for (i, arg_str) in args.iter().enumerate() {
-                                    let trimmed = arg_str.trim();
-
-                                    // First, parse as any valid JSON value, falling back to a string.
-                                    let mut json_val = serde_json::from_str(trimmed)
-                                        .unwrap_or_else(|_| {
-                                            serde_json::Value::String(trimmed.to_string())
-                                        });
-
-                                    // Convert numbers/objects/arrays to strings if the parameter's schema expects a string.
-                                    if let Some(param) = params.get(i)
-                                        && let Some("string") =
-                                            param.json_schema.get("type").and_then(|v| v.as_str())
-                                    {
-                                        match &json_val {
-                                            serde_json::Value::Number(n) => {
-                                                json_val = serde_json::Value::String(n.to_string());
-                                            }
-                                            serde_json::Value::Object(_)
-                                            | serde_json::Value::Array(_) => {
-                                                json_val = serde_json::Value::String(
-                                                    serde_json::to_string(&json_val)
-                                                        .unwrap_or_else(|_| json_val.to_string()),
+                                match parse_invoke_args(&args, function.params()) {
+                                    Ok(final_args) => {
+                                        println!("Invoking {target}...");
+                                        match runtime
+                                            .invoke(component_name, func_name, final_args)
+                                            .await
+                                        {
+                                            Ok(result) => {
+                                                println!(
+                                                    "{}",
+                                                    serde_json::to_string_pretty(&result).unwrap()
                                                 );
                                             }
-                                            _ => {
-                                                // Already a string or other type, keep as is
-                                            }
+                                            Err(e) => eprintln!("Error: {e}"),
                                         }
-                                    }
-                                    final_args.push(json_val);
-                                }
-
-                                // Handle missing parameters: pad with nulls for optional, error for required
-                                for i in args.len()..params.len() {
-                                    if let Some(param) = params.get(i) {
-                                        if param.is_optional {
-                                            final_args.push(serde_json::Value::Null);
-                                        } else {
-                                            eprintln!(
-                                                "Error: Missing required parameter: {}",
-                                                param.name
-                                            );
-                                            return Ok(());
-                                        }
-                                    }
-                                }
-
-                                println!("Invoking {target}...");
-                                match runtime.invoke(component_name, func_name, final_args).await {
-                                    Ok(result) => {
-                                        println!(
-                                            "{}",
-                                            serde_json::to_string_pretty(&result).unwrap()
-                                        );
                                     }
                                     Err(e) => eprintln!("Error: {e}"),
                                 }
@@ -311,6 +311,58 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
         }
     }
     Ok(())
+}
+
+fn parse_invoke_args(
+    args: &[String],
+    params: &[FunctionParam],
+) -> Result<Vec<serde_json::Value>, String> {
+    if args.len() > params.len() {
+        return Err(format!(
+            "too many arguments. Expected at most {}, got {}",
+            params.len(),
+            args.len()
+        ));
+    }
+
+    let mut final_args: Vec<serde_json::Value> = Vec::new();
+
+    for (i, arg_str) in args.iter().enumerate() {
+        let trimmed = arg_str.trim();
+
+        // First, parse as any valid JSON value, falling back to a string.
+        let mut json_val = serde_json::from_str(trimmed)
+            .unwrap_or_else(|_| serde_json::Value::String(trimmed.to_string()));
+
+        // Convert numbers/objects/arrays to strings if the parameter's schema expects a string.
+        if let Some(param) = params.get(i)
+            && let Some("string") = param.json_schema.get("type").and_then(|v| v.as_str())
+        {
+            match &json_val {
+                serde_json::Value::Number(n) => {
+                    json_val = serde_json::Value::String(n.to_string());
+                }
+                serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                    json_val = serde_json::Value::String(
+                        serde_json::to_string(&json_val).unwrap_or_else(|_| json_val.to_string()),
+                    );
+                }
+                _ => {}
+            }
+        }
+        final_args.push(json_val);
+    }
+
+    // Handle missing parameters: pad with nulls for optional, error for required
+    for param in params.iter().skip(args.len()) {
+        if param.is_optional {
+            final_args.push(serde_json::Value::Null);
+        } else {
+            return Err(format!("missing required parameter: {}", param.name));
+        }
+    }
+
+    Ok(final_args)
 }
 
 fn parse_quoted_args(line: &str) -> Vec<String> {

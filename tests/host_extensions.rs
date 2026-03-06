@@ -43,14 +43,12 @@ async fn test_host_extension_provides_interface() {
 
     let toml_content = format!(
         r#"
-        [greeter]
+        [capability.greeter]
         uri = "host:greeter"
-        enables = "any"
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["greeter"]
-        exposed = true
+        imports = ["greeter"]
         "#,
         component_wasm.display()
     );
@@ -85,14 +83,12 @@ async fn test_missing_host_extension_panics() {
 
     let toml_content = format!(
         r#"
-        [missing]
+        [capability.missing]
         uri = "host:missing"
-        enables = "any"
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["missing"]
-        exposed = true
+        imports = ["missing"]
         "#,
         component_wasm.display()
     );
@@ -151,14 +147,12 @@ async fn test_host_extension_invoked() {
 
     let toml_content = format!(
         r#"
-        [value-provider]
+        [capability.value-provider]
         uri = "host:value-provider"
-        enables = "any"
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["value-provider"]
-        exposed = true
+        imports = ["value-provider"]
         "#,
         component_wasm.display()
     );
@@ -246,15 +240,13 @@ async fn test_host_extension_with_config() {
 
     let toml_content = format!(
         r#"
-        [multiplier]
+        [capability.multiplier]
         uri = "host:multiplier"
-        enables = "any"
         config.multiplier = 5
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["multiplier"]
-        exposed = true
+        imports = ["multiplier"]
         "#,
         component_wasm.display()
     );
@@ -284,14 +276,12 @@ async fn test_host_extension_with_default_config() {
     // No config.multiplier - should use default value of 1
     let toml_content = format!(
         r#"
-        [multiplier]
+        [capability.multiplier]
         uri = "host:multiplier"
-        enables = "any"
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["multiplier"]
-        exposed = true
+        imports = ["multiplier"]
         "#,
         component_wasm.display()
     );
@@ -379,14 +369,12 @@ async fn test_host_extension_with_state() {
 
     let toml_content = format!(
         r#"
-        [counter]
+        [capability.counter]
         uri = "host:counter"
-        enables = "any"
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["counter"]
-        exposed = true
+        imports = ["counter"]
         "#,
         component_wasm.display()
     );
@@ -415,14 +403,12 @@ async fn test_host_extension_state_isolated_per_instance() {
 
     let toml_content = format!(
         r#"
-        [counter]
+        [capability.counter]
         uri = "host:counter"
-        enables = "any"
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["counter"]
-        exposed = true
+        imports = ["counter"]
         "#,
         component_wasm.display()
     );
@@ -522,18 +508,15 @@ async fn test_duplicate_extension_state_type_fails() {
 
     let toml_content = format!(
         r#"
-        [first]
+        [capability.first]
         uri = "host:first"
-        enables = "any"
 
-        [second]
+        [capability.second]
         uri = "host:second"
-        enables = "any"
 
-        [guest]
+        [component.guest]
         uri = "{}"
-        expects = ["first", "second"]
-        exposed = true
+        imports = ["first", "second"]
         "#,
         component_wasm.display()
     );

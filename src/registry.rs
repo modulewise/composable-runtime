@@ -9,7 +9,7 @@ use wasmtime::component::{HasData, Linker};
 
 use crate::composer::Composer;
 use crate::graph::{ComponentGraph, Node};
-use crate::types::{ComponentDefinition, ComponentState, RuntimeFeatureDefinition};
+use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState};
 use crate::wit::{ComponentMetadata, Parser};
 
 /// Trait implemented by host extension instances.
@@ -90,20 +90,20 @@ macro_rules! create_state {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct RuntimeFeature {
+pub struct Capability {
     pub uri: String,
-    pub enables: String,
+    pub scope: String,
     pub interfaces: Vec<String>,
     /// The host extension instance (for `host:` URIs)
     #[serde(skip)]
     pub extension: Option<Box<dyn HostExtension>>,
 }
 
-impl std::fmt::Debug for RuntimeFeature {
+impl std::fmt::Debug for Capability {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RuntimeFeature")
+        f.debug_struct("Capability")
             .field("uri", &self.uri)
-            .field("enables", &self.enables)
+            .field("scope", &self.scope)
             .field("interfaces", &self.interfaces)
             .field(
                 "extension",
@@ -121,85 +121,53 @@ pub struct ComponentSpec {
     pub bytes: Arc<[u8]>,
     pub imports: Vec<String>,
     pub exports: Vec<String>,
-    pub runtime_features: Vec<String>,
-    pub functions: Option<HashMap<String, crate::wit::Function>>,
+    pub capabilities: Vec<String>,
+    pub functions: HashMap<String, crate::wit::Function>,
 }
 
 #[derive(Debug, Clone)]
-pub struct RuntimeFeatureRegistry {
-    pub runtime_features: Arc<HashMap<String, RuntimeFeature>>,
+pub struct CapabilityRegistry {
+    pub capabilities: Arc<HashMap<String, Capability>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ComponentRegistry {
     pub components: Arc<HashMap<String, ComponentSpec>>,
-    pub enabling_components: Arc<HashMap<String, EnablingComponent>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct EnablingComponent {
-    pub component: ComponentSpec,
-    pub exposed: bool,
-    pub enables: String,
-}
-
-impl RuntimeFeatureRegistry {
-    pub fn new(runtime_features: HashMap<String, RuntimeFeature>) -> Self {
+impl CapabilityRegistry {
+    pub fn new(capabilities: HashMap<String, Capability>) -> Self {
         Self {
-            runtime_features: Arc::new(runtime_features),
+            capabilities: Arc::new(capabilities),
         }
     }
 
-    pub fn get_runtime_feature(&self, name: &str) -> Option<&RuntimeFeature> {
-        self.runtime_features.get(name)
+    pub fn get_capability(&self, name: &str) -> Option<&Capability> {
+        self.capabilities.get(name)
     }
 
-    pub fn get_enabled_runtime_feature(
+    // TODO: replace hardcoded "any" with label selector evaluation
+    pub fn verify_importable(
         &self,
-        requesting_component: &ComponentDefinition,
-        feature_name: &str,
-    ) -> Option<&RuntimeFeature> {
-        if let Some(runtime_feature) = self.runtime_features.get(feature_name) {
-            match runtime_feature.enables.as_str() {
-                "none" => None,
-                "any" => Some(runtime_feature),
-                "exposed" => {
-                    if requesting_component.exposed {
-                        Some(runtime_feature)
-                    } else {
-                        None
-                    }
-                }
-                "unexposed" => {
-                    if !requesting_component.exposed {
-                        Some(runtime_feature)
-                    } else {
-                        None
-                    }
-                }
-                "package" => None,
-                "namespace" => None,
-                _ => None, // Unknown enables scope
-            }
-        } else {
-            None
+        candidate: &CapabilityDefinition,
+        requester: &ComponentDefinition,
+    ) -> Result<()> {
+        match candidate.scope.as_str() {
+            "any" => Ok(()),
+            scope => Err(anyhow::anyhow!(
+                "Component '{}' cannot import capability '{}' (scope: '{scope}')",
+                requester.name,
+                candidate.name
+            )),
         }
     }
 }
 
 impl ComponentRegistry {
-    fn new(
-        components: HashMap<String, ComponentSpec>,
-        enabling_components: HashMap<String, EnablingComponent>,
-    ) -> Self {
-        Self {
-            components: Arc::new(components),
-            enabling_components: Arc::new(enabling_components),
-        }
-    }
-
     pub fn empty() -> Self {
-        Self::new(HashMap::new(), HashMap::new())
+        Self {
+            components: Arc::new(HashMap::new()),
+        }
     }
 
     pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
@@ -210,56 +178,24 @@ impl ComponentRegistry {
         self.components.get(name)
     }
 
-    pub fn get_enabled_component_dependency(
+    // TODO: replace hardcoded "any" with label selector evaluation
+    pub fn get_required_import(
         &self,
-        requesting_component: &ComponentDefinition,
-        requesting_metadata: &ComponentMetadata,
-        dependency_name: &str,
-    ) -> Option<&ComponentSpec> {
-        if let Some(enabling_component) = self.enabling_components.get(dependency_name) {
-            match enabling_component.enables.as_str() {
-                "none" => None,
-                "any" => Some(&enabling_component.component),
-                "exposed" => {
-                    if requesting_component.exposed {
-                        Some(&enabling_component.component)
-                    } else {
-                        None
-                    }
-                }
-                "unexposed" => {
-                    if !requesting_component.exposed {
-                        Some(&enabling_component.component)
-                    } else {
-                        None
-                    }
-                }
-                "package" => {
-                    match (
-                        requesting_metadata.package.as_deref(),
-                        enabling_component.component.package.as_deref(),
-                    ) {
-                        (Some(req_pkg), Some(enable_pkg)) if req_pkg == enable_pkg => {
-                            Some(&enabling_component.component)
-                        }
-                        _ => None,
-                    }
-                }
-                "namespace" => {
-                    match (
-                        requesting_metadata.namespace.as_deref(),
-                        enabling_component.component.namespace.as_deref(),
-                    ) {
-                        (Some(req_ns), Some(enable_ns)) if req_ns == enable_ns => {
-                            Some(&enabling_component.component)
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            }
-        } else {
-            None
+        candidate: &ComponentDefinition,
+        requester: &ComponentDefinition,
+        _requester_metadata: &ComponentMetadata,
+    ) -> Result<&ComponentSpec> {
+        let component = self
+            .components
+            .get(&candidate.name)
+            .expect("component must exist in registry");
+        match candidate.scope.as_str() {
+            "any" => Ok(component),
+            scope => Err(anyhow::anyhow!(
+                "Component '{}' cannot import dependency '{}' (scope: '{scope}')",
+                requester.name,
+                candidate.name
+            )),
         }
     }
 }
@@ -274,79 +210,53 @@ impl Default for ComponentRegistry {
 pub async fn build_registries(
     component_graph: &ComponentGraph,
     factories: HashMap<&'static str, HostExtensionFactory>,
-) -> Result<(ComponentRegistry, RuntimeFeatureRegistry)> {
-    let mut runtime_feature_definitions = Vec::new();
+) -> Result<(ComponentRegistry, CapabilityRegistry)> {
+    let mut capability_definitions = Vec::new();
     for node in component_graph.nodes() {
-        if let Node::RuntimeFeature(def) = &node.weight {
-            runtime_feature_definitions.push(def.clone());
+        if let Node::Capability(def) = &node.weight {
+            capability_definitions.push(def.clone());
         }
     }
 
-    let runtime_feature_registry =
-        create_runtime_feature_registry(runtime_feature_definitions, factories)?;
+    let capability_registry = create_capability_registry(capability_definitions, factories)?;
 
     let sorted_indices = component_graph.get_build_order();
 
-    let mut exposed_components = HashMap::new();
     let mut built_components = HashMap::new();
-    let mut enabling_components = HashMap::new();
 
     for node_index in sorted_indices {
         if let Node::Component(definition) = &component_graph[node_index] {
             let temp_component_registry = ComponentRegistry {
                 components: Arc::new(built_components.clone()),
-                enabling_components: Arc::new(enabling_components.clone()),
             };
 
-            match process_component(
+            let component_spec = process_component(
                 node_index,
                 component_graph,
                 &temp_component_registry,
-                &runtime_feature_registry,
+                &capability_registry,
             )
-            .await
-            {
-                Ok(component_spec) => {
-                    built_components.insert(definition.name.clone(), component_spec.clone());
-                    if definition.exposed {
-                        exposed_components.insert(definition.name.clone(), component_spec.clone());
-                    }
-                    if definition.enables != "none" {
-                        let enabling = EnablingComponent {
-                            component: component_spec,
-                            exposed: definition.exposed,
-                            enables: definition.enables.clone(),
-                        };
-                        enabling_components.insert(definition.name.clone(), enabling);
-                    }
-                }
-                Err(e) => {
-                    if definition.exposed {
-                        tracing::warn!("Skipping exposed component '{}': {}", definition.name, e);
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
+            .await?;
+
+            built_components.insert(definition.name.clone(), component_spec);
         }
     }
 
     Ok((
         ComponentRegistry {
-            components: Arc::new(exposed_components),
-            enabling_components: Arc::new(enabling_components),
+            components: Arc::new(built_components),
         },
-        runtime_feature_registry,
+        capability_registry,
     ))
 }
 
-fn create_runtime_feature_registry(
-    runtime_feature_definitions: Vec<RuntimeFeatureDefinition>,
+fn create_capability_registry(
+    capability_definitions: Vec<CapabilityDefinition>,
     factories: HashMap<&'static str, HostExtensionFactory>,
-) -> Result<RuntimeFeatureRegistry> {
-    let mut runtime_features = HashMap::new();
+) -> Result<CapabilityRegistry> {
+    let mut capabilities = HashMap::new();
 
-    for def in runtime_feature_definitions {
+    for def in capability_definitions {
         let (interfaces, extension) = if let Some(feature_name) = def.uri.strip_prefix("host:") {
             let factory = factories.get(feature_name).ok_or_else(|| {
                 anyhow::anyhow!(
@@ -373,26 +283,26 @@ fn create_runtime_feature_registry(
             // wasmtime feature
             if !def.config.is_empty() {
                 tracing::warn!(
-                    "Config provided for runtime feature '{}' but only host extensions support config",
+                    "Config provided for capability '{}' but only host extensions support config",
                     def.name
                 );
             }
-            (get_interfaces_for_runtime_feature(&def.uri), None)
+            (get_interfaces_for_capability(&def.uri), None)
         };
 
-        let runtime_feature = RuntimeFeature {
+        let capability = Capability {
             uri: def.uri.clone(),
-            enables: def.enables.clone(),
+            scope: def.scope.clone(),
             interfaces,
             extension,
         };
-        runtime_features.insert(def.name, runtime_feature);
+        capabilities.insert(def.name, capability);
     }
 
-    Ok(RuntimeFeatureRegistry::new(runtime_features))
+    Ok(CapabilityRegistry::new(capabilities))
 }
 
-fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
+fn get_interfaces_for_capability(uri: &str) -> Vec<String> {
     match uri {
         "wasmtime:http" => vec![
             "wasi:http/outgoing-handler@0.2.6".to_string(),
@@ -448,22 +358,22 @@ fn get_interfaces_for_runtime_feature(uri: &str) -> Vec<String> {
             "wasi:sockets/udp-create-socket@0.2.6".to_string(),
         ],
         _ => {
-            tracing::warn!("Unknown runtime feature URI: {uri}");
+            tracing::warn!("Unknown capability URI: {uri}");
             vec![]
         }
     }
 }
 
-fn is_import_satisfied(import: &str, runtime_interfaces: &HashSet<String>) -> bool {
+fn is_import_satisfied(import: &str, capability_interfaces: &HashSet<String>) -> bool {
     // First try exact match for performance
-    if runtime_interfaces.contains(import) {
+    if capability_interfaces.contains(import) {
         return true;
     }
 
     if let Some((interface_name, requested_version)) = import.rsplit_once('@')
         && let Some(requested_semver) = parse_semver(requested_version)
     {
-        for available in runtime_interfaces {
+        for available in capability_interfaces {
             if let Some((available_name, available_version)) = available.rsplit_once('@')
                 && interface_name == available_name
                 && let Some(available_semver) = parse_semver(available_version)
@@ -499,7 +409,7 @@ async fn process_component(
     node_index: petgraph::graph::NodeIndex,
     component_graph: &ComponentGraph,
     component_registry: &ComponentRegistry,
-    runtime_feature_registry: &RuntimeFeatureRegistry,
+    capability_registry: &CapabilityRegistry,
 ) -> Result<ComponentSpec> {
     let definition = if let Node::Component(def) = &component_graph[node_index] {
         def
@@ -511,19 +421,15 @@ async fn process_component(
 
     let mut bytes = read_bytes(&definition.uri).await?;
 
-    let (metadata, mut imports, exports, functions) = Parser::parse(&bytes, definition.exposed)
-        .map_err(|e| anyhow::anyhow!("Failed to parse component: {e}"))?;
+    let (metadata, mut imports, exports, functions) =
+        Parser::parse(&bytes).map_err(|e| anyhow::anyhow!("Failed to parse component: {e}"))?;
 
     let imports_config = imports
         .iter()
         .any(|import| import.starts_with("wasi:config/store"));
 
     if imports_config {
-        let config_to_use = match &definition.config {
-            Some(c) => c,
-            None => &HashMap::new(),
-        };
-        bytes = Composer::compose_with_config(&bytes, config_to_use).map_err(|e| {
+        bytes = Composer::compose_with_config(&bytes, &definition.config).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to compose component '{}' with config: {}",
                 definition.name,
@@ -531,86 +437,68 @@ async fn process_component(
             )
         })?;
 
-        let config_keys: Vec<_> = config_to_use.keys().collect();
+        let config_keys: Vec<_> = definition.config.keys().collect();
         tracing::info!(
             "Composed component '{}' with config: {config_keys:?}",
             definition.name
         );
 
         imports.retain(|import| !import.starts_with("wasi:config/store"));
-    } else if definition.config.is_some() {
+    } else if !definition.config.is_empty() {
         tracing::warn!(
             "Config provided for component '{}' but component doesn't import wasi:config/store",
             definition.name
         );
     }
 
-    let mut all_runtime_features = HashSet::new();
+    let mut all_capabilities = HashSet::new();
 
     let dependencies = component_graph.get_dependencies(node_index);
     for dependency_node_index in dependencies {
         let dependency_node = &component_graph[dependency_node_index];
         match dependency_node {
             Node::Component(dependency_def) => {
-                if let Some(component_spec) = component_registry.get_enabled_component_dependency(
+                let component_spec = component_registry.get_required_import(
+                    dependency_def,
                     definition,
                     &metadata,
-                    &dependency_def.name,
-                ) {
-                    bytes = Composer::compose_components(&bytes, &component_spec.bytes).map_err(
-                        |e| {
-                            anyhow::anyhow!(
-                                "Failed composing '{}' with dependency '{}': {e}",
-                                definition.name,
-                                dependency_def.name
-                            )
-                        },
-                    )?;
-                    tracing::info!(
-                        "Composed component '{}' with dependency '{}'",
-                        definition.name,
-                        dependency_def.name
-                    );
+                )?;
+                bytes =
+                    Composer::compose_components(&bytes, &component_spec.bytes).map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed composing '{}' with dependency '{}': {e}",
+                            definition.name,
+                            dependency_def.name
+                        )
+                    })?;
+                tracing::info!(
+                    "Composed component '{}' with dependency '{}'",
+                    definition.name,
+                    dependency_def.name
+                );
 
-                    for export in &component_spec.exports {
-                        imports.retain(|import| import != export);
-                    }
-                    all_runtime_features.extend(component_spec.runtime_features.iter().cloned());
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Component '{}' requested dependency '{}', but access is not enabled",
-                        definition.name,
-                        dependency_def.name
-                    ));
+                for export in &component_spec.exports {
+                    imports.retain(|import| import != export);
                 }
+                all_capabilities.extend(component_spec.capabilities.iter().cloned());
             }
-            Node::RuntimeFeature(feature_def) => {
-                if runtime_feature_registry
-                    .get_enabled_runtime_feature(definition, &feature_def.name)
-                    .is_some()
-                {
-                    all_runtime_features.insert(feature_def.name.clone());
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Component '{}' requested runtime feature '{}', but access is not enabled",
-                        definition.name,
-                        feature_def.name
-                    ));
-                }
+            Node::Capability(capability_def) => {
+                capability_registry.verify_importable(capability_def, definition)?;
+                all_capabilities.insert(capability_def.name.clone());
             }
         }
     }
 
-    let runtime_interfaces: std::collections::HashSet<String> = all_runtime_features
+    let capability_interfaces: std::collections::HashSet<String> = all_capabilities
         .iter()
-        .filter_map(|name| runtime_feature_registry.get_runtime_feature(name))
-        .flat_map(|rf| rf.interfaces.iter().cloned())
+        .filter_map(|name| capability_registry.get_capability(name))
+        .flat_map(|cap| cap.interfaces.iter().cloned())
         .collect();
 
-    // Check for imports not satisfied by runtime features
+    // Check for imports not satisfied by capabilities
     let unsatisfied: Vec<_> = imports
         .iter()
-        .filter(|import| !is_import_satisfied(import, &runtime_interfaces))
+        .filter(|import| !is_import_satisfied(import, &capability_interfaces))
         .cloned()
         .collect();
 
@@ -629,7 +517,7 @@ async fn process_component(
         bytes: Arc::from(bytes),
         imports,
         exports,
-        runtime_features: all_runtime_features.into_iter().collect(),
+        capabilities: all_capabilities.into_iter().collect(),
         functions,
     })
 }

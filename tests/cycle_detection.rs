@@ -10,13 +10,13 @@ fn test_circular_dependency() {
 
     let toml_content = format!(
         r#"
-        [component-a]
+        [component.component-a]
         uri = "{}"
-        expects = ["component-b"]
+        imports = ["component-b"]
 
-        [component-b]
+        [component.component-b]
         uri = "{}"
-        expects = ["component-a"]
+        imports = ["component-a"]
         "#,
         a_wasm.display(),
         b_wasm.display()

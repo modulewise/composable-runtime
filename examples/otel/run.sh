@@ -13,6 +13,6 @@ if [ ! -f ./target/release/host ]; then
     fi
 fi
 
-./target/release/host config-with-host-feature.toml
+./target/release/host config-with-host-capability.toml
 
 ./target/release/host config-with-components.toml

@@ -2,6 +2,4 @@
 
 set -e
 
-cargo component build -p greeter --target wasm32-unknown-unknown --release
-
-cargo build -p host --release
+( cd greeter; cargo component build --target wasm32-unknown-unknown --release )

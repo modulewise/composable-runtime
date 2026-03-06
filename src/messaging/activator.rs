@@ -374,9 +374,8 @@ mod tests {
         let wasm = single_function_wasm();
         let toml_content = format!(
             r#"
-            [guest]
+            [component.guest]
             uri = "{}"
-            exposed = true
             "#,
             wasm.path().display()
         );
@@ -413,9 +412,8 @@ mod tests {
         let wasm = two_function_wasm();
         let toml_content = format!(
             r#"
-            [guest]
+            [component.guest]
             uri = "{}"
-            exposed = true
             "#,
             wasm.path().display()
         );
@@ -436,9 +434,8 @@ mod tests {
         let wasm = single_function_wasm();
         let toml_content = format!(
             r#"
-            [guest]
+            [component.guest]
             uri = "{}"
-            exposed = true
             "#,
             wasm.path().display()
         );
@@ -459,9 +456,8 @@ mod tests {
         let wasm = single_function_wasm();
         let toml_content = format!(
             r#"
-            [guest]
+            [component.guest]
             uri = "{}"
-            exposed = true
             "#,
             wasm.path().display()
         );
@@ -508,9 +504,8 @@ mod tests {
         let wasm = string_function_wasm();
         let toml_content = format!(
             r#"
-            [guest]
+            [component.guest]
             uri = "{}"
-            exposed = true
             "#,
             wasm.path().display()
         );
@@ -550,9 +545,8 @@ mod tests {
         let wasm = string_function_wasm();
         let toml_content = format!(
             r#"
-            [guest]
+            [component.guest]
             uri = "{}"
-            exposed = true
             "#,
             wasm.path().display()
         );

@@ -1,6 +1,6 @@
 # Hello World Example
 
-A simple greeter component invoked by a host application.
+A simple greeter component invoked via CLI.
 
 ## Structure
 
@@ -8,8 +8,6 @@ A simple greeter component invoked by a host application.
 hello-world/
 ├── greeter/          # Wasm Component
 │   └── src/lib.rs    # Implements the greet(name) function
-├── host/             # Host application using composable-runtime
-│   └── src/main.rs   # Loads and invokes the component
 ├── wit/              # WIT interface definitions
 │   └── greeter.wit   # Defines the greet(name) function
 └── config.toml       # Component configuration for the runtime
@@ -21,13 +19,15 @@ hello-world/
 ./build.sh
 ```
 
-Builds the `greeter` Wasm Component and the `host` binary.
+Builds the `greeter` Wasm Component.
 
 ## Run
 
 ```bash
 ./run.sh
 ```
+
+Invokes the `greeter` via `composable invoke`, passing "World".
 
 Output:
 ```
@@ -39,9 +39,8 @@ Result: "Hello, World!"
 Edit `config.toml` to customize the greeting:
 
 ```toml
-[greeter]
-uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
-exposed = true
+[component.greeter]
+uri = "./greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
 config.greeting = "Aloha"
 ```
 

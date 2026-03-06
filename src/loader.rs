@@ -4,13 +4,13 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::types::{
-    ComponentDefinition, ComponentDefinitionBase, DefinitionBase, RuntimeFeatureDefinition,
-    default_enables,
+    CapabilityDefinition, ComponentDefinition, ComponentDefinitionBase, DefinitionBase,
+    default_scope,
 };
 
 pub(crate) fn parse_definition_files(
     definition_files: &[PathBuf], // .toml and .wasm files
-) -> Result<(Vec<ComponentDefinition>, Vec<RuntimeFeatureDefinition>)> {
+) -> Result<(Vec<ComponentDefinition>, Vec<CapabilityDefinition>)> {
     let mut toml_files = Vec::new();
     let mut wasm_files = Vec::new();
 
@@ -39,30 +39,30 @@ pub(crate) fn parse_definition_files(
 fn build_definitions(
     toml_files: &[PathBuf],
     wasm_files: &[PathBuf],
-) -> Result<(Vec<ComponentDefinition>, Vec<RuntimeFeatureDefinition>)> {
+) -> Result<(Vec<ComponentDefinition>, Vec<CapabilityDefinition>)> {
     let mut component_definitions = Vec::new();
-    let mut runtime_feature_definitions = Vec::new();
+    let mut capability_definitions = Vec::new();
 
-    // Parse TOML files to extract both components and runtime features
+    // Parse TOML files to extract both components and capabilities
     for file in toml_files {
-        let (components, runtime_features) = parse_toml_file(file)?;
+        let (components, capabilities) = parse_toml_file(file)?;
         component_definitions.extend(components);
-        runtime_feature_definitions.extend(runtime_features);
+        capability_definitions.extend(capabilities);
     }
 
     // Add implicit component definitions from standalone .wasm files
     component_definitions.extend(create_implicit_component_definitions(wasm_files)?);
 
-    for def in &runtime_feature_definitions {
-        validate_runtime_feature_enables_scope(&def.enables, &def.name)?;
+    for def in &capability_definitions {
+        validate_capability_scope(&def.scope, &def.name)?;
     }
     for def in &component_definitions {
-        validate_component_enables_scope(&def.enables)?;
+        validate_component_scope(&def.scope)?;
     }
 
     // Collision detection - ensure unique names across all definitions
     let mut all_names = HashSet::new();
-    for def in &runtime_feature_definitions {
+    for def in &capability_definitions {
         if !all_names.insert(&def.name) {
             return Err(anyhow::anyhow!("Duplicate definition name: '{}'", def.name));
         }
@@ -73,102 +73,76 @@ fn build_definitions(
         }
     }
 
-    // Validate component expectations - different error handling based on exposed flag
+    // Validate component imports
     for def in &component_definitions {
-        for expected_name in &def.expects {
+        for expected_name in &def.imports {
             if !all_names.contains(expected_name) {
-                if def.exposed {
-                    continue;
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Component '{}' expects undefined definition '{}' - server cannot start",
-                        def.name,
-                        expected_name
-                    ));
-                }
+                return Err(anyhow::anyhow!(
+                    "Component '{}' imports undefined definition '{}'",
+                    def.name,
+                    expected_name
+                ));
             }
         }
     }
 
-    Ok((component_definitions, runtime_feature_definitions))
+    Ok((component_definitions, capability_definitions))
 }
 
-fn validate_runtime_feature_enables_scope(enables: &str, name: &str) -> Result<()> {
-    match enables {
-        "none" | "unexposed" | "exposed" | "any" => Ok(()),
+// TODO: replace with label selector validation
+fn validate_capability_scope(scope: &str, name: &str) -> Result<()> {
+    match scope {
+        "any" => Ok(()),
         "package" | "namespace" => Err(anyhow::anyhow!(
-            "RuntimeFeature '{name}' cannot use enables='{enables}' - only components support package/namespace scoping"
+            "Capability '{name}' cannot use scope='{scope}' - only components support package/namespace scoping"
         )),
-        _ => Err(anyhow::anyhow!(
-            "Invalid enables scope: '{enables}'. Must be one of: none, unexposed, exposed, any"
-        )),
+        _ => Err(anyhow::anyhow!("Invalid scope: '{scope}'. Must be: any")),
     }
 }
 
-fn validate_component_enables_scope(enables: &str) -> Result<()> {
-    match enables {
-        "none" | "package" | "namespace" | "unexposed" | "exposed" | "any" => Ok(()),
+// TODO: replace with label selector validation
+fn validate_component_scope(scope: &str) -> Result<()> {
+    match scope {
+        "any" | "package" | "namespace" => Ok(()),
         _ => Err(anyhow::anyhow!(
-            "Invalid enables scope: '{enables}'. Must be one of: none, package, namespace, unexposed, exposed, any"
+            "Invalid scope: '{scope}'. Must be one of: any, package, namespace"
         )),
     }
 }
 
 fn parse_toml_file(
     path: &PathBuf,
-) -> Result<(Vec<ComponentDefinition>, Vec<RuntimeFeatureDefinition>)> {
+) -> Result<(Vec<ComponentDefinition>, Vec<CapabilityDefinition>)> {
     let content = fs::read_to_string(path)?;
     let toml_doc: toml::Value = toml::from_str(&content)?;
 
     let mut components = Vec::new();
-    let mut runtime_features = Vec::new();
+    let mut capabilities = Vec::new();
 
     if let toml::Value::Table(table) = toml_doc {
-        for (name, value) in table {
-            if let toml::Value::Table(def_table) = value {
-                // Check if this is a runtime feature (wasmtime:* or host:*) or component
-                if let Some(uri) = def_table.get("uri").and_then(|v| v.as_str()) {
-                    let mut definition_value = def_table.clone();
-                    let config = if let Some(toml::Value::Table(config_table)) =
-                        definition_value.remove("config")
-                    {
-                        Some(convert_toml_table_to_json_map(&config_table)?)
-                    } else {
-                        None
-                    };
+        for (category, category_value) in table {
+            let toml::Value::Table(category_table) = category_value else {
+                return Err(anyhow::anyhow!("Category '{category}' must be a table"));
+            };
 
-                    if uri.starts_with("wasmtime:") || uri.starts_with("host:") {
-                        let definition_base: DefinitionBase = toml::Value::Table(definition_value)
-                            .try_into()
-                            .map_err(|e| {
-                                anyhow::anyhow!("Failed to parse runtime feature '{name}': {e}")
-                            })?;
-                        runtime_features.push(RuntimeFeatureDefinition {
-                            name: name.clone(),
-                            base: definition_base,
-                            config: config.unwrap_or_default(),
-                        });
-                    } else {
-                        let mut component_base: ComponentDefinitionBase =
-                            toml::Value::Table(definition_value)
-                                .try_into()
-                                .map_err(|e| {
-                                    anyhow::anyhow!("Failed to parse component '{name}': {e}")
-                                })?;
-
-                        component_base.config = config;
-                        components.push(ComponentDefinition {
-                            name: name.clone(),
-                            base: component_base,
-                        });
+            match category.as_str() {
+                "component" => {
+                    for (name, value) in category_table {
+                        let component = parse_component_definition(&name, value)?;
+                        components.push(component);
                     }
-                } else {
+                }
+                "capability" => {
+                    for (name, value) in category_table {
+                        let capability = parse_capability_definition(&name, value)?;
+                        capabilities.push(capability);
+                    }
+                }
+                _ => {
                     return Err(anyhow::anyhow!(
-                        "Definition '{name}' missing required 'uri' field"
+                        "Unknown category '{category}'. Must be 'component' or 'capability'"
                     ));
                 }
-            } else {
-                return Err(anyhow::anyhow!("Definition '{name}' must be a table"));
             }
         }
     } else {
@@ -176,7 +150,67 @@ fn parse_toml_file(
             "TOML file must contain a table at root level"
         ));
     }
-    Ok((components, runtime_features))
+    Ok((components, capabilities))
+}
+
+fn parse_component_definition(name: &str, value: toml::Value) -> Result<ComponentDefinition> {
+    let toml::Value::Table(mut def_table) = value else {
+        return Err(anyhow::anyhow!(
+            "Component definition '{name}' must be a table"
+        ));
+    };
+
+    if !def_table.contains_key("uri") {
+        return Err(anyhow::anyhow!(
+            "Component '{name}' missing required 'uri' field"
+        ));
+    }
+
+    let config = if let Some(toml::Value::Table(config_table)) = def_table.remove("config") {
+        convert_toml_table_to_json_map(&config_table)?
+    } else {
+        HashMap::new()
+    };
+
+    let mut component_base: ComponentDefinitionBase = toml::Value::Table(def_table)
+        .try_into()
+        .map_err(|e| anyhow::anyhow!("Failed to parse component '{name}': {e}"))?;
+
+    component_base.config = config;
+    Ok(ComponentDefinition {
+        name: name.to_string(),
+        base: component_base,
+    })
+}
+
+fn parse_capability_definition(name: &str, value: toml::Value) -> Result<CapabilityDefinition> {
+    let toml::Value::Table(mut def_table) = value else {
+        return Err(anyhow::anyhow!(
+            "Capability definition '{name}' must be a table"
+        ));
+    };
+
+    if !def_table.contains_key("uri") {
+        return Err(anyhow::anyhow!(
+            "Capability '{name}' missing required 'uri' field"
+        ));
+    }
+
+    let config = if let Some(toml::Value::Table(config_table)) = def_table.remove("config") {
+        Some(convert_toml_table_to_json_map(&config_table)?)
+    } else {
+        None
+    };
+
+    let definition_base: DefinitionBase = toml::Value::Table(def_table)
+        .try_into()
+        .map_err(|e| anyhow::anyhow!("Failed to parse capability '{name}': {e}"))?;
+
+    Ok(CapabilityDefinition {
+        name: name.to_string(),
+        base: definition_base,
+        config: config.unwrap_or_default(),
+    })
 }
 
 fn create_implicit_component_definitions(
@@ -209,19 +243,17 @@ fn create_implicit_component_definitions(
                 .to_string()
         };
 
-        // Implicit components from .wasm files are treated as exposed components
         let definition = ComponentDefinition {
             name,
             base: ComponentDefinitionBase {
                 base: DefinitionBase {
                     uri: path.to_string_lossy().to_string(),
-                    enables: default_enables(),
+                    scope: default_scope(),
                 },
-                expects: Vec::new(),
+                imports: Vec::new(),
                 intercepts: Vec::new(),
                 precedence: 0,
-                exposed: true,
-                config: None,
+                config: HashMap::new(),
             },
         };
         definitions.push(definition);

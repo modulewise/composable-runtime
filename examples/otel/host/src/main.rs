@@ -1,6 +1,6 @@
 use anyhow::Result;
 use composable_runtime::{ComponentGraph, Runtime};
-use grpc_feature::GrpcFeature;
+use grpc_capability::GrpcCapability;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -13,14 +13,14 @@ async fn main() -> Result<()> {
 
     let config_file = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "config-with-host-feature.toml".to_string());
+        .unwrap_or_else(|| "config-with-host-capability.toml".to_string());
 
     let graph = ComponentGraph::builder()
         .load_file(std::path::PathBuf::from(&config_file))
         .build()?;
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<GrpcFeature>("grpc")
+        .with_host_extension::<GrpcCapability>("grpc")
         .build()
         .await?;
 

@@ -1,29 +1,23 @@
-[guest]
+[component.guest]
 uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
-expects = ["otel"]
-exposed = true
+imports = ["otel"]
 
-[otel]
+[component.otel]
 uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
-expects = ["grpc", "wasip2"]
-enables = "exposed"
+imports = ["grpc", "wasip2"]
 
-[grpc]
+[component.grpc]
 uri = "./target/wasm32-unknown-unknown/release/grpc_to_http.wasm"
-expects = ["http", "io"]
-enables = "unexposed"
+imports = ["http", "io"]
 config.url = "http://localhost:4317"
 config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
-[http]
+[capability.http]
 uri = "wasmtime:http"
-enables = "unexposed"
 
-[io]
+[capability.io]
 uri = "wasmtime:io"
-enables = "unexposed"
 
-[wasip2]
+[capability.wasip2]
 uri = "wasmtime:wasip2"
-enables = "unexposed"
