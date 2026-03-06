@@ -146,6 +146,7 @@ impl CapabilityRegistry {
         self.capabilities.get(name)
     }
 
+    // TODO: replace hardcoded "any" with label selector evaluation
     pub fn verify_importable(
         &self,
         candidate: &CapabilityDefinition,
@@ -177,6 +178,7 @@ impl ComponentRegistry {
         self.components.get(name)
     }
 
+    // TODO: replace hardcoded "any" with label selector evaluation
     pub fn get_required_import(
         &self,
         candidate: &ComponentDefinition,

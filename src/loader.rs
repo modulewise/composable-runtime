@@ -89,6 +89,7 @@ fn build_definitions(
     Ok((component_definitions, capability_definitions))
 }
 
+// TODO: replace with label selector validation
 fn validate_capability_scope(scope: &str, name: &str) -> Result<()> {
     match scope {
         "any" => Ok(()),
@@ -99,6 +100,7 @@ fn validate_capability_scope(scope: &str, name: &str) -> Result<()> {
     }
 }
 
+// TODO: replace with label selector validation
 fn validate_component_scope(scope: &str) -> Result<()> {
     match scope {
         "any" | "package" | "namespace" => Ok(()),
