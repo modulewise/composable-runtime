@@ -53,7 +53,7 @@ config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Expo
 
 ### Option 1: Host Capability (`grpc-capability`)
 
-This endpoint is implemented as a [host extension](grpc-capability). The host maintains a persistent gRPC channel that is shared across component invocations. Batching support will also be added at this layer in a future update (it will eventually move from examples to a feature crate).
+This endpoint is implemented as a [host capability](grpc-capability). The host maintains a persistent gRPC channel that is shared across component invocations. Batching support will also be added at this layer in a future update (it will eventually move from examples to a feature-flagged capability sub-crate).
 
 ```toml
 # config-with-host-capability.toml
@@ -76,11 +76,11 @@ config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Expo
 uri = "wasmtime:wasip2"
 ```
 
-The "grpc" definition with `uri = "host:grpc"` creates an instance of the host capability, which the host binary has registered as an extension:
+The "grpc" definition with `uri = "host:grpc"` creates an instance of the host capability, which the host binary has registered when building the runtime:
 
 ```rust
 let runtime = Runtime::builder(&graph)
-    .with_host_extension::<GrpcCapability>("grpc")
+    .with_capability::<GrpcCapability>("grpc")
     .build()
     .await?;
 ```

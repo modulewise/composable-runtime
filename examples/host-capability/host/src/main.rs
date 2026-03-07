@@ -1,26 +1,26 @@
 use anyhow::Result;
-use composable_runtime::{ComponentGraph, ComponentState, HostExtension, Runtime};
+use composable_runtime::{ComponentGraph, ComponentState, HostCapability, Runtime};
 use serde::Deserialize;
 use wasmtime::component::{HasSelf, Linker};
 
-// Generate host-side bindings for the greeting interface
+// Generate host-side bindings for the greeting interface.
 wasmtime::component::bindgen!({
     path: "../wit/host-greeting.wit",
     world: "greeter",
 });
 
-// Implement the host greeting trait on ComponentState
+// Implement the host greeting trait on ComponentState.
 impl crate::example::greeting::host_greeting::Host for ComponentState {
     fn get_greeting(&mut self) -> String {
         "Hello".to_string()
     }
 }
 
-/// Host extension for the greeting capability
+// The host side greeting capability.
 #[derive(Deserialize, Default)]
 struct GreetingCapability;
 
-impl HostExtension for GreetingCapability {
+impl HostCapability for GreetingCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["example:greeting/host-greeting".to_string()]
     }
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     let graph = ComponentGraph::builder().load_file(std::path::PathBuf::from("config.toml")).build()?;
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<GreetingCapability>("greeting")
+        .with_capability::<GreetingCapability>("greeting")
         .build()
         .await?;
 

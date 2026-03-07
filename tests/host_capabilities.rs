@@ -1,16 +1,16 @@
 mod common;
 
 use anyhow::Result;
-use composable_runtime::{ComponentState, HostExtension, Runtime};
+use composable_runtime::{ComponentState, HostCapability, Runtime};
 use serde::Deserialize;
 use std::any::{Any, TypeId};
 use wasmtime::component::Linker;
 
-/// Test extension that provides a greeter interface
+// Host capability that provides a greeter interface
 #[derive(Deserialize, Default)]
-struct GreeterFeature;
+struct GreeterCapability;
 
-impl HostExtension for GreeterFeature {
+impl HostCapability for GreeterCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:test-host/greeter".to_string()]
     }
@@ -38,7 +38,7 @@ fn component_importing_host_interface() -> common::TestFile {
 }
 
 #[tokio::test]
-async fn test_host_extension_provides_interface() {
+async fn test_host_capability_provides_interface() {
     let component_wasm = component_importing_host_interface();
 
     let toml_content = format!(
@@ -56,9 +56,9 @@ async fn test_host_extension_provides_interface() {
     let toml_file = common::create_toml_test_file(&toml_content);
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    // Build runtime with the host extension
+    // Build runtime with the host capability
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<GreeterFeature>("greeter")
+        .with_capability::<GreeterCapability>("greeter")
         .build()
         .await;
 
@@ -77,8 +77,8 @@ async fn test_host_extension_provides_interface() {
 }
 
 #[tokio::test]
-#[should_panic(expected = "Host extension 'missing' (URI: 'host:missing') not registered")]
-async fn test_missing_host_extension_panics() {
+#[should_panic(expected = "Host capability 'missing' (URI: 'host:missing') not registered")]
+async fn test_missing_host_capability_panics() {
     let component_wasm = component_importing_host_interface();
 
     let toml_content = format!(
@@ -96,15 +96,15 @@ async fn test_missing_host_extension_panics() {
     let toml_file = common::create_toml_test_file(&toml_content);
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    // Build runtime without providing the host extension - should fail
+    // Build runtime without providing the host capability - should fail
     let _ = Runtime::builder(&graph).build().await.unwrap();
 }
 
-/// Test extension that provides a value-provider interface
+// Host capability that provides a value-provider interface
 #[derive(Deserialize, Default)]
-struct ValueProviderFeature;
+struct ValueProviderCapability;
 
-impl HostExtension for ValueProviderFeature {
+impl HostCapability for ValueProviderCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:test-host/value-provider".to_string()]
     }
@@ -142,7 +142,7 @@ fn component_calling_host_get_value() -> common::TestFile {
 }
 
 #[tokio::test]
-async fn test_host_extension_invoked() {
+async fn test_host_capability_invoked() {
     let component_wasm = component_calling_host_get_value();
 
     let toml_content = format!(
@@ -161,7 +161,7 @@ async fn test_host_extension_invoked() {
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<ValueProviderFeature>("value-provider")
+        .with_capability::<ValueProviderCapability>("value-provider")
         .build()
         .await
         .expect("Failed to create runtime");
@@ -176,9 +176,9 @@ async fn test_host_extension_invoked() {
 
 // --- Tests for TOML config ---
 
-/// Extension that reads config from TOML and uses it in host function
+// Host Capability that reads config from TOML and uses it in host function
 #[derive(Deserialize, Clone)]
-struct MultiplierFeature {
+struct MultiplierCapability {
     #[serde(default = "default_multiplier")]
     multiplier: u32,
 }
@@ -187,7 +187,7 @@ fn default_multiplier() -> u32 {
     1
 }
 
-impl Default for MultiplierFeature {
+impl Default for MultiplierCapability {
     fn default() -> Self {
         Self {
             multiplier: default_multiplier(),
@@ -195,7 +195,7 @@ impl Default for MultiplierFeature {
     }
 }
 
-impl HostExtension for MultiplierFeature {
+impl HostCapability for MultiplierCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:test-host/multiplier".to_string()]
     }
@@ -235,7 +235,7 @@ fn component_calling_multiply() -> common::TestFile {
 }
 
 #[tokio::test]
-async fn test_host_extension_with_config() {
+async fn test_host_capability_with_config() {
     let component_wasm = component_calling_multiply();
 
     let toml_content = format!(
@@ -255,7 +255,7 @@ async fn test_host_extension_with_config() {
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<MultiplierFeature>("multiplier")
+        .with_capability::<MultiplierCapability>("multiplier")
         .build()
         .await
         .expect("Failed to create runtime");
@@ -270,7 +270,7 @@ async fn test_host_extension_with_config() {
 }
 
 #[tokio::test]
-async fn test_host_extension_with_default_config() {
+async fn test_host_capability_with_default_config() {
     let component_wasm = component_calling_multiply();
 
     // No config.multiplier - should use default value of 1
@@ -290,7 +290,7 @@ async fn test_host_extension_with_default_config() {
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<MultiplierFeature>("multiplier")
+        .with_capability::<MultiplierCapability>("multiplier")
         .build()
         .await
         .expect("Failed to create runtime");
@@ -304,16 +304,16 @@ async fn test_host_extension_with_default_config() {
     assert_eq!(result, serde_json::json!(10));
 }
 
-// --- Tests for extension state ---
+// --- Tests for capability state ---
 
 struct CounterState {
     count: u32,
 }
 
 #[derive(Deserialize, Default)]
-struct CounterFeature;
+struct CounterCapability;
 
-impl HostExtension for CounterFeature {
+impl HostCapability for CounterCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:test-host/counter".to_string()]
     }
@@ -364,7 +364,7 @@ fn component_calling_increment_twice() -> common::TestFile {
 }
 
 #[tokio::test]
-async fn test_host_extension_with_state() {
+async fn test_host_capability_with_state() {
     let component_wasm = component_calling_increment_twice();
 
     let toml_content = format!(
@@ -383,7 +383,7 @@ async fn test_host_extension_with_state() {
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<CounterFeature>("counter")
+        .with_capability::<CounterCapability>("counter")
         .build()
         .await
         .expect("Failed to create runtime");
@@ -398,7 +398,7 @@ async fn test_host_extension_with_state() {
 }
 
 #[tokio::test]
-async fn test_host_extension_state_isolated_per_instance() {
+async fn test_host_capability_state_isolated_per_instance() {
     let component_wasm = component_calling_increment_twice();
 
     let toml_content = format!(
@@ -417,7 +417,7 @@ async fn test_host_extension_state_isolated_per_instance() {
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<CounterFeature>("counter")
+        .with_capability::<CounterCapability>("counter")
         .build()
         .await
         .expect("Failed to create runtime");
@@ -439,16 +439,16 @@ async fn test_host_extension_state_isolated_per_instance() {
 
 // --- Tests for duplicate state type detection ---
 
-// Shared state type used by two different extensions
+// Shared state type used by two different capabilities
 #[allow(dead_code)]
 struct SharedState {
     value: u32,
 }
 
 #[derive(Deserialize, Default)]
-struct FirstFeatureWithSharedState;
+struct FirstCapabilityWithSharedState;
 
-impl HostExtension for FirstFeatureWithSharedState {
+impl HostCapability for FirstCapabilityWithSharedState {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:test-host/first".to_string()]
     }
@@ -466,9 +466,9 @@ impl HostExtension for FirstFeatureWithSharedState {
 }
 
 #[derive(Deserialize, Default)]
-struct SecondFeatureWithSharedState;
+struct SecondCapabilityWithSharedState;
 
-impl HostExtension for SecondFeatureWithSharedState {
+impl HostCapability for SecondCapabilityWithSharedState {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:test-host/second".to_string()]
     }
@@ -478,7 +478,7 @@ impl HostExtension for SecondFeatureWithSharedState {
     }
 
     fn create_state_boxed(&self) -> Result<Option<(TypeId, Box<dyn Any + Send>)>> {
-        // Returns same TypeId as FirstFeatureWithSharedState - should cause error
+        // Returns same TypeId as FirstCapabilityWithSharedState - should cause error
         Ok(Some((
             TypeId::of::<SharedState>(),
             Box::new(SharedState { value: 2 }),
@@ -503,7 +503,7 @@ fn component_importing_two_host_interfaces() -> common::TestFile {
 }
 
 #[tokio::test]
-async fn test_duplicate_extension_state_type_fails() {
+async fn test_duplicate_capability_state_type_fails() {
     let component_wasm = component_importing_two_host_interfaces();
 
     let toml_content = format!(
@@ -525,8 +525,8 @@ async fn test_duplicate_extension_state_type_fails() {
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<FirstFeatureWithSharedState>("first")
-        .with_host_extension::<SecondFeatureWithSharedState>("second")
+        .with_capability::<FirstCapabilityWithSharedState>("first")
+        .with_capability::<SecondCapabilityWithSharedState>("second")
         .build()
         .await
         .expect("Failed to create runtime");
@@ -534,14 +534,14 @@ async fn test_duplicate_extension_state_type_fails() {
     // State is created during instantiation, not during build
     let result = runtime.instantiate("guest").await;
 
-    // Should fail because both extensions try to register SharedState
+    // Should fail because both capabilities try to register SharedState
     match result {
         Ok(_) => panic!("Expected error due to duplicate state type, but instantiation succeeded"),
         Err(e) => {
             let err = e.to_string();
             assert!(
-                err.contains("Duplicate extension state type"),
-                "Expected 'Duplicate extension state type' error, got: {}",
+                err.contains("Duplicate state type"),
+                "Expected 'Duplicate state type' error, got: {}",
                 err
             );
         }
