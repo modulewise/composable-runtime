@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
         .build()?;
 
     let runtime = Runtime::builder(&graph)
-        .with_host_extension::<GrpcCapability>("grpc")
+        .with_capability::<GrpcCapability>("grpc")
         .build()
         .await?;
 

@@ -18,7 +18,7 @@ use wasmtime_wasi_io::IoView;
 
 use crate::composition::graph::ComponentGraph;
 use crate::composition::registry::{
-    CapabilityRegistry, ComponentRegistry, HostExtension, HostExtensionFactory, build_registries,
+    CapabilityRegistry, ComponentRegistry, HostCapability, HostCapabilityFactory, build_registries,
 };
 use crate::types::{ComponentState, Function};
 
@@ -137,7 +137,7 @@ impl Runtime {
 /// Builder for configuring and creating a Runtime
 pub struct RuntimeBuilder<'a> {
     graph: &'a ComponentGraph,
-    factories: HashMap<&'static str, HostExtensionFactory>,
+    factories: HashMap<&'static str, HostCapabilityFactory>,
 }
 
 impl<'a> RuntimeBuilder<'a> {
@@ -148,20 +148,20 @@ impl<'a> RuntimeBuilder<'a> {
         }
     }
 
-    /// Register a host extension type for the given name.
+    /// Register a host capability type for the given name.
     ///
     /// The name corresponds to the suffix in `uri = "host:name"` in TOML.
     ///
     /// If the TOML block has an empty config and deserialization fails,
     /// falls back to `Default::default()`.
-    pub fn with_host_extension<T>(mut self, name: &'static str) -> Self
+    pub fn with_capability<T>(mut self, name: &'static str) -> Self
     where
-        T: HostExtension + DeserializeOwned + Default + 'static,
+        T: HostCapability + DeserializeOwned + Default + 'static,
     {
         self.factories.insert(
             name,
             Box::new(
-                |config: serde_json::Value| -> Result<Box<dyn HostExtension>> {
+                |config: serde_json::Value| -> Result<Box<dyn HostCapability>> {
                     match serde_json::from_value::<T>(config.clone()) {
                         Ok(instance) => Ok(Box::new(instance)),
                         Err(e) => {
@@ -270,8 +270,8 @@ impl Invoker {
         // Add WASI interfaces based on explicitly requested capabilities
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name) {
-                if let Some(wasmtime_feature) = capability.uri.strip_prefix("wasmtime:") {
-                    match wasmtime_feature {
+                if let Some(wasmtime_capability) = capability.uri.strip_prefix("wasmtime:") {
+                    match wasmtime_capability {
                         "wasip2" => {
                             // Comprehensive WASI Preview 2 support
                             wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
@@ -302,17 +302,17 @@ impl Invoker {
                         }
                         _ => {
                             tracing::warn!(
-                                "Unknown wasmtime feature for linker: {}",
+                                "Unknown wasmtime capability for linker: {}",
                                 capability.uri
                             );
                         }
                     }
                 } else if capability.uri.starts_with("host:") {
-                    if let Some(ext) = &capability.extension {
-                        ext.link(&mut linker)?;
+                    if let Some(cap) = &capability.instance {
+                        cap.link(&mut linker)?;
                     } else {
                         return Err(anyhow::anyhow!(
-                            "Host capability '{}' requested but no extension registered",
+                            "Host capability '{}' requested but no capability registered",
                             capability_name
                         ));
                     }
@@ -341,9 +341,9 @@ impl Invoker {
 
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name)
-                && let Some(wasmtime_feature) = capability.uri.strip_prefix("wasmtime:")
+                && let Some(wasmtime_capability) = capability.uri.strip_prefix("wasmtime:")
             {
-                match wasmtime_feature {
+                match wasmtime_capability {
                     "inherit-stdio" => {
                         wasi_builder.inherit_stdio();
                     }
@@ -366,22 +366,20 @@ impl Invoker {
                 == Some("http")
         });
 
-        // Collect extension states before creating ComponentState
+        // Collect capability states before creating ComponentState
         let mut extensions = HashMap::new();
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name)
                 && capability.uri.starts_with("host:")
-                && let Some(ext) = &capability.extension
-                && let Some((type_id, boxed_state)) = ext.create_state_boxed()?
+                && let Some(cap) = &capability.instance
+                && let Some((type_id, boxed_state)) = cap.create_state_boxed()?
             {
                 match extensions.entry(type_id) {
                     Entry::Vacant(e) => {
                         e.insert(boxed_state);
                     }
                     Entry::Occupied(_) => {
-                        anyhow::bail!(
-                            "Duplicate extension state type for capability '{capability_name}'"
-                        );
+                        anyhow::bail!("Duplicate state type for capability '{capability_name}'");
                     }
                 }
             }

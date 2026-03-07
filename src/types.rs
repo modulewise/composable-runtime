@@ -40,7 +40,7 @@ impl std::ops::Deref for ComponentDefinitionBase {
     }
 }
 
-/// Capability definition (host extensions and wasmtime features)
+/// Capability definition (host capabilities and wasmtime capabilities)
 #[derive(Deserialize, Serialize, Clone)]
 pub struct CapabilityDefinition {
     pub name: String,

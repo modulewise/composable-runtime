@@ -12,25 +12,25 @@ use super::graph::{ComponentGraph, Node};
 use super::wit::{ComponentMetadata, Parser};
 use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState, Function};
 
-/// Trait implemented by host extension instances.
+/// Trait implemented by host capability instances.
 ///
-/// An instance represents a configured feature (from one TOML block).
+/// An instance represents a configured capability (from one TOML block).
 /// Multiple TOML blocks with the same `uri = "host:X"` create multiple instances.
-pub trait HostExtension: Send + Sync {
-    /// Fully qualified interfaces this extension provides (namespace:package/interface@version)
+pub trait HostCapability: Send + Sync {
+    /// Fully qualified interfaces this capability provides (namespace:package/interface@version)
     fn interfaces(&self) -> Vec<String>;
 
     /// Add bindings to the linker. Called once per component instantiation.
     fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()>;
 
     /// Create per-component-instance state. Called once per component instantiation.
-    /// Returns None if extension needs no per-instance state.
+    /// Returns None if capability needs no per-instance state.
     fn create_state_boxed(&self) -> Result<Option<(TypeId, Box<dyn Any + Send>)>> {
         Ok(None)
     }
 }
 
-/// `HasData` implementation that projects `ComponentState` to an extension's state type.
+/// `HasData` implementation that projects `ComponentState` to a capability's state type.
 ///
 /// Use this in `link()` when adding bindings so host impls receive only their own state
 /// (the type created by `create_state_boxed`), not full `ComponentState`.
@@ -39,7 +39,7 @@ pub trait HostExtension: Send + Sync {
 ///
 /// ```ignore
 /// fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-///     my_feature::add_to_linker::<_, ExtensionStateHasData<MyState>>(
+///     my_capability::add_to_linker::<_, CapabilityStateHasData<MyState>>(
 ///         linker,
 ///         |state| state.get_extension_mut::<MyState>().expect("MyState not initialized"),
 ///     )?;
@@ -47,26 +47,26 @@ pub trait HostExtension: Send + Sync {
 /// }
 /// ```
 ///
-/// The host impl must then be `my_feature::Host for MyState` (not `ComponentState`).
-pub struct ExtensionStateHasData<T>(PhantomData<T>);
+/// The host impl must then be `my_capability::Host for MyState` (not `ComponentState`).
+pub struct CapabilityStateHasData<T>(PhantomData<T>);
 
-impl<T: Send + 'static> HasData for ExtensionStateHasData<T> {
+impl<T: Send + 'static> HasData for CapabilityStateHasData<T> {
     type Data<'a> = &'a mut T;
 }
 
-/// Factory function that creates a HostExtension instance from TOML config.
-pub(crate) type HostExtensionFactory =
-    Box<dyn Fn(serde_json::Value) -> Result<Box<dyn HostExtension>> + Send + Sync>;
+/// Factory function that creates a HostCapability instance from TOML config.
+pub(crate) type HostCapabilityFactory =
+    Box<dyn Fn(serde_json::Value) -> Result<Box<dyn HostCapability>> + Send + Sync>;
 
 /// Macro for implementing `create_state_boxed()` with automatic TypeId inference.
 ///
-/// The `$body` expression receives the extension instance via `$self` and can use `?`
+/// The `$body` expression receives the capability instance via `$self` and can use `?`
 /// for fallible operations.
 ///
 /// # Example
 ///
 /// ```ignore
-/// impl HostExtension for MyFeature {
+/// impl HostCapability for MyCapability {
 ///     // ...
 ///     create_state!(this, MyState, {
 ///         MyState {
@@ -94,9 +94,9 @@ pub struct Capability {
     pub uri: String,
     pub scope: String,
     pub interfaces: Vec<String>,
-    /// The host extension instance (for `host:` URIs)
+    /// The host capability instance (for `host:` URIs)
     #[serde(skip)]
-    pub extension: Option<Box<dyn HostExtension>>,
+    pub instance: Option<Box<dyn HostCapability>>,
 }
 
 impl std::fmt::Debug for Capability {
@@ -106,8 +106,8 @@ impl std::fmt::Debug for Capability {
             .field("scope", &self.scope)
             .field("interfaces", &self.interfaces)
             .field(
-                "extension",
-                &self.extension.as_ref().map(|_| "<dyn HostExtension>"),
+                "instance",
+                &self.instance.as_ref().map(|_| "<dyn HostCapability>"),
             )
             .finish()
     }
@@ -209,7 +209,7 @@ impl Default for ComponentRegistry {
 /// Build registries from definitions
 pub async fn build_registries(
     component_graph: &ComponentGraph,
-    factories: HashMap<&'static str, HostExtensionFactory>,
+    factories: HashMap<&'static str, HostCapabilityFactory>,
 ) -> Result<(ComponentRegistry, CapabilityRegistry)> {
     let mut capability_definitions = Vec::new();
     for node in component_graph.nodes() {
@@ -252,38 +252,40 @@ pub async fn build_registries(
 
 fn create_capability_registry(
     capability_definitions: Vec<CapabilityDefinition>,
-    factories: HashMap<&'static str, HostExtensionFactory>,
+    factories: HashMap<&'static str, HostCapabilityFactory>,
 ) -> Result<CapabilityRegistry> {
     let mut capabilities = HashMap::new();
 
     for def in capability_definitions {
-        let (interfaces, extension) = if let Some(feature_name) = def.uri.strip_prefix("host:") {
-            let factory = factories.get(feature_name).ok_or_else(|| {
+        let (interfaces, capability_instance) = if let Some(capability_name) =
+            def.uri.strip_prefix("host:")
+        {
+            let factory = factories.get(capability_name).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Host extension '{}' (URI: '{}') not registered. Use Runtime::builder().with_host_extension::<T>(\"{}\")",
-                    feature_name,
+                    "Host capability '{}' (URI: '{}') not registered. Use Runtime::builder().with_capability::<T>(\"{}\")",
+                    capability_name,
                     def.uri,
-                    feature_name
+                    capability_name
                 )
             })?;
 
-            // Deserialize config into extension instance
+            // Deserialize config into capability instance
             let config_value = serde_json::to_value(&def.config)?;
-            let ext = factory(config_value).map_err(|e| {
+            let cap = factory(config_value).map_err(|e| {
                 anyhow::anyhow!(
-                    "Failed to create host extension '{}' from TOML block '{}': {}",
-                    feature_name,
+                    "Failed to create host capability '{}' from TOML block '{}': {}",
+                    capability_name,
                     def.name,
                     e
                 )
             })?;
 
-            (ext.interfaces(), Some(ext))
+            (cap.interfaces(), Some(cap))
         } else {
-            // wasmtime feature
+            // wasmtime capability
             if !def.config.is_empty() {
                 tracing::warn!(
-                    "Config provided for capability '{}' but only host extensions support config",
+                    "Config provided for capability '{}' but only host capabilities support config",
                     def.name
                 );
             }
@@ -294,7 +296,7 @@ fn create_capability_registry(
             uri: def.uri.clone(),
             scope: def.scope.clone(),
             interfaces,
-            extension,
+            instance: capability_instance,
         };
         capabilities.insert(def.name, capability);
     }

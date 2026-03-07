@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use bytes::{Buf, BufMut};
-use composable_runtime::{ComponentState, HostExtension};
+use composable_runtime::{ComponentState, HostCapability};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -65,7 +65,7 @@ struct ComponentEndpointState {
     inner: Arc<EndpointState>,
 }
 
-impl HostExtension for GrpcCapability {
+impl HostCapability for GrpcCapability {
     fn interfaces(&self) -> Vec<String> {
         vec!["modulewise:grpc/endpoint@0.1.0".to_string()]
     }
