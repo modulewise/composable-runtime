@@ -46,12 +46,17 @@ impl ConfigHandler for ComponentConfigHandler<'_> {
                 "ComponentConfigHandler received unexpected category '{category}'"
             ));
         }
-        let uri = take_required_string(&mut properties, "uri", "component", name)?;
-        let scope = take_optional_string(&mut properties, "scope").unwrap_or_else(default_scope);
-        let imports = take_string_array(&mut properties, "imports");
-        let intercepts = take_string_array(&mut properties, "intercepts");
-        let precedence = take_optional_i32(&mut properties, "precedence").unwrap_or(0);
-        let config = take_object(&mut properties, "config");
+        let ctx = |e: PropertyError| e.with_context("component", name);
+        let uri = take_required_string(&mut properties, "uri").map_err(ctx)?;
+        let scope = take_optional_string(&mut properties, "scope")
+            .map_err(ctx)?
+            .unwrap_or_else(default_scope);
+        let imports = take_string_array(&mut properties, "imports").map_err(ctx)?;
+        let intercepts = take_string_array(&mut properties, "intercepts").map_err(ctx)?;
+        let precedence = take_optional_i32(&mut properties, "precedence")
+            .map_err(ctx)?
+            .unwrap_or(0);
+        let config = take_object(&mut properties, "config").map_err(ctx)?;
 
         if !properties.is_empty() {
             let unknown: Vec<_> = properties.keys().collect();
@@ -104,9 +109,12 @@ impl ConfigHandler for CapabilityConfigHandler<'_> {
                 "CapabilityConfigHandler received unexpected category '{category}'"
             ));
         }
-        let uri = take_required_string(&mut properties, "uri", "capability", name)?;
-        let scope = take_optional_string(&mut properties, "scope").unwrap_or_else(default_scope);
-        let config = take_object(&mut properties, "config");
+        let ctx = |e: PropertyError| e.with_context("capability", name);
+        let uri = take_required_string(&mut properties, "uri").map_err(ctx)?;
+        let scope = take_optional_string(&mut properties, "scope")
+            .map_err(ctx)?
+            .unwrap_or_else(default_scope);
+        let config = take_object(&mut properties, "config").map_err(ctx)?;
 
         if !properties.is_empty() {
             let unknown: Vec<_> = properties.keys().collect();
@@ -127,53 +135,120 @@ impl ConfigHandler for CapabilityConfigHandler<'_> {
 
 // --- Property extractors ---
 
-fn take_required_string(
-    properties: &mut PropertyMap,
-    key: &str,
-    category: &str,
-    name: &str,
-) -> Result<String> {
+enum PropertyError {
+    Missing {
+        key: String,
+    },
+    TypeMismatch {
+        key: String,
+        expected: &'static str,
+        got: serde_json::Value,
+    },
+}
+
+impl PropertyError {
+    fn with_context(self, category: &str, name: &str) -> anyhow::Error {
+        match self {
+            PropertyError::Missing { key } => {
+                anyhow::anyhow!("{category} '{name}' missing required '{key}' field")
+            }
+            PropertyError::TypeMismatch { key, expected, got } => {
+                anyhow::anyhow!("{category} '{name}': '{key}' must be {expected}, got {got}")
+            }
+        }
+    }
+}
+
+fn take_required_string(properties: &mut PropertyMap, key: &str) -> Result<String, PropertyError> {
     match properties.remove(key) {
         Some(serde_json::Value::String(s)) => Ok(s),
-        Some(other) => Err(anyhow::anyhow!(
-            "{category} '{name}': '{key}' must be a string, got {other}"
-        )),
-        None => Err(anyhow::anyhow!(
-            "{category} '{name}' missing required '{key}' field"
-        )),
+        Some(got) => Err(PropertyError::TypeMismatch {
+            key: key.into(),
+            expected: "a string",
+            got,
+        }),
+        None => Err(PropertyError::Missing { key: key.into() }),
     }
 }
 
-fn take_optional_string(properties: &mut PropertyMap, key: &str) -> Option<String> {
+fn take_optional_string(
+    properties: &mut PropertyMap,
+    key: &str,
+) -> Result<Option<String>, PropertyError> {
     match properties.remove(key) {
-        Some(serde_json::Value::String(s)) => Some(s),
-        _ => None,
+        Some(serde_json::Value::String(s)) => Ok(Some(s)),
+        Some(got) => Err(PropertyError::TypeMismatch {
+            key: key.into(),
+            expected: "a string",
+            got,
+        }),
+        None => Ok(None),
     }
 }
 
-fn take_string_array(properties: &mut PropertyMap, key: &str) -> Vec<String> {
+fn take_string_array(
+    properties: &mut PropertyMap,
+    key: &str,
+) -> Result<Vec<String>, PropertyError> {
     match properties.remove(key) {
-        Some(serde_json::Value::Array(arr)) => arr
-            .into_iter()
-            .filter_map(|v| match v {
-                serde_json::Value::String(s) => Some(s),
-                _ => None,
-            })
-            .collect(),
-        _ => Vec::new(),
+        Some(serde_json::Value::Array(arr)) => {
+            let mut result = Vec::with_capacity(arr.len());
+            for item in arr {
+                match item {
+                    serde_json::Value::String(s) => result.push(s),
+                    got => {
+                        return Err(PropertyError::TypeMismatch {
+                            key: key.into(),
+                            expected: "an array of strings",
+                            got,
+                        });
+                    }
+                }
+            }
+            Ok(result)
+        }
+        Some(got) => Err(PropertyError::TypeMismatch {
+            key: key.into(),
+            expected: "an array",
+            got,
+        }),
+        None => Ok(Vec::new()),
     }
 }
 
-fn take_optional_i32(properties: &mut PropertyMap, key: &str) -> Option<i32> {
+fn take_optional_i32(
+    properties: &mut PropertyMap,
+    key: &str,
+) -> Result<Option<i32>, PropertyError> {
     match properties.remove(key) {
-        Some(serde_json::Value::Number(n)) => n.as_i64().map(|i| i as i32),
-        _ => None,
+        Some(serde_json::Value::Number(n)) => match n.as_i64() {
+            Some(i) => Ok(Some(i as i32)),
+            None => Err(PropertyError::TypeMismatch {
+                key: key.into(),
+                expected: "an integer",
+                got: serde_json::Value::Number(n),
+            }),
+        },
+        Some(got) => Err(PropertyError::TypeMismatch {
+            key: key.into(),
+            expected: "a number",
+            got,
+        }),
+        None => Ok(None),
     }
 }
 
-fn take_object(properties: &mut PropertyMap, key: &str) -> HashMap<String, serde_json::Value> {
+fn take_object(
+    properties: &mut PropertyMap,
+    key: &str,
+) -> Result<HashMap<String, serde_json::Value>, PropertyError> {
     match properties.remove(key) {
-        Some(serde_json::Value::Object(map)) => map.into_iter().collect(),
-        _ => HashMap::new(),
+        Some(serde_json::Value::Object(map)) => Ok(map.into_iter().collect()),
+        Some(got) => Err(PropertyError::TypeMismatch {
+            key: key.into(),
+            expected: "an object/table",
+            got,
+        }),
+        None => Ok(HashMap::new()),
     }
 }
