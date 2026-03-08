@@ -1,0 +1,10 @@
+[greeting.default]
+message = "Howdy"
+
+[capability.greeting]
+uri = "host:greeting"
+config.uppercase = true
+
+[component.greeter]
+uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
+imports = ["greeting"]

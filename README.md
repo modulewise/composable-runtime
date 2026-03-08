@@ -7,6 +7,7 @@ An Inversion of Control Runtime for Wasm Components
 - [hello-world](examples/hello-world): A simple greeter component invoked by a host application
 - [host-capability](examples/host-capability): A greeter component calls a host-provided function to get its greeting
 - [otel](examples/otel): A guest component uses wasi:otel backed by either a host-capability or an adapter component
+- [runtime-service](examples/runtime-service): A custom RuntimeService provides a ConfigHandler, HostCapability, and its own lifecycle
 
 This project also provides a foundation for the
 [Modulewise Toolbelt](https://github.com/modulewise/toolbelt).
