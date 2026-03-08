@@ -227,7 +227,6 @@ mod tests {
     use tempfile::{Builder, NamedTempFile};
 
     use super::*;
-    use crate::composition::graph::ComponentGraph;
     use crate::messaging::{Channel, LocalChannel, MessageBuilder};
 
     fn create_wasm_file(wat: &str) -> NamedTempFile {
@@ -244,12 +243,7 @@ mod tests {
     }
 
     async fn build_runtime(paths: &[PathBuf]) -> Runtime {
-        let mut builder = ComponentGraph::builder();
-        for path in paths {
-            builder = builder.load_file(path);
-        }
-        let graph = builder.build().unwrap();
-        Runtime::builder(&graph).build().await.unwrap()
+        Runtime::builder().from_paths(paths).build().await.unwrap()
     }
 
     // Component that exports a single bare function: double(value: u32) -> u32

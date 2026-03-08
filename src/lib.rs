@@ -14,7 +14,7 @@ pub mod composition;
 #[doc(hidden)]
 pub mod types;
 
-mod config;
+pub(crate) mod config;
 #[cfg(feature = "messaging")]
 mod messaging;
 mod runtime;

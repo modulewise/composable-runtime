@@ -54,10 +54,10 @@ async fn test_host_capability_provides_interface() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     // Build runtime with the host capability
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(&*toml_file)
         .with_capability::<GreeterCapability>("greeter")
         .build()
         .await;
@@ -94,10 +94,13 @@ async fn test_missing_host_capability_panics() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     // Build runtime without providing the host capability - should fail
-    let _ = Runtime::builder(&graph).build().await.unwrap();
+    let _ = Runtime::builder()
+        .from_path(&*toml_file)
+        .build()
+        .await
+        .unwrap();
 }
 
 // Host capability that provides a value-provider interface
@@ -158,9 +161,9 @@ async fn test_host_capability_invoked() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(&*toml_file)
         .with_capability::<ValueProviderCapability>("value-provider")
         .build()
         .await
@@ -252,9 +255,9 @@ async fn test_host_capability_with_config() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(&*toml_file)
         .with_capability::<MultiplierCapability>("multiplier")
         .build()
         .await
@@ -287,9 +290,9 @@ async fn test_host_capability_with_default_config() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(&*toml_file)
         .with_capability::<MultiplierCapability>("multiplier")
         .build()
         .await
@@ -380,9 +383,9 @@ async fn test_host_capability_with_state() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(&*toml_file)
         .with_capability::<CounterCapability>("counter")
         .build()
         .await
@@ -414,9 +417,9 @@ async fn test_host_capability_state_isolated_per_instance() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(&*toml_file)
         .with_capability::<CounterCapability>("counter")
         .build()
         .await
@@ -522,9 +525,9 @@ async fn test_duplicate_capability_state_type_fails() {
     );
 
     let toml_file = common::create_toml_test_file(&toml_content);
-    let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(&*toml_file)
         .with_capability::<FirstCapabilityWithSharedState>("first")
         .with_capability::<SecondCapabilityWithSharedState>("second")
         .build()

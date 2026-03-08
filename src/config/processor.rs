@@ -23,7 +23,6 @@ impl ConfigProcessor {
         self.loaders.push(loader);
     }
 
-    #[allow(dead_code)]
     pub fn add_handler(&mut self, handler: Box<dyn ConfigHandler>) {
         self.handlers.push(handler);
     }

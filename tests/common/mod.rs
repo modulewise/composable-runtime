@@ -147,11 +147,7 @@ pub async fn build_registries_and_assert_ok(
 }
 
 pub fn load_graph_and_assert_ok(paths: &[PathBuf]) -> ComponentGraph {
-    let mut builder = ComponentGraph::builder();
-    for path in paths {
-        builder = builder.load_file(path);
-    }
-    let graph_result = builder.build();
+    let graph_result = ComponentGraph::builder().from_paths(paths).build();
     assert!(
         graph_result.is_ok(),
         "ComponentGraph::builder().build() failed with: {:?}",

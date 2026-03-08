@@ -1,5 +1,5 @@
 use anyhow::Result;
-use composable_runtime::{ComponentGraph, Runtime};
+use composable_runtime::Runtime;
 use grpc_capability::GrpcCapability;
 use tracing_subscriber::EnvFilter;
 
@@ -15,11 +15,8 @@ async fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "config-with-host-capability.toml".to_string());
 
-    let graph = ComponentGraph::builder()
-        .load_file(std::path::PathBuf::from(&config_file))
-        .build()?;
-
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(std::path::PathBuf::from(&config_file))
         .with_capability::<GrpcCapability>("grpc")
         .build()
         .await?;
