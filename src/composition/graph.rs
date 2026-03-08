@@ -323,24 +323,62 @@ pub enum Edge {
 /// Builder for constructing a ComponentGraph
 pub struct GraphBuilder {
     paths: Vec<PathBuf>,
+    loaders: Vec<Box<dyn crate::config::types::DefinitionLoader>>,
+    handlers: Vec<Box<dyn crate::config::types::ConfigHandler>>,
+    use_default_loaders: bool,
 }
 
 impl GraphBuilder {
     fn new() -> Self {
-        Self { paths: Vec::new() }
+        Self {
+            paths: Vec::new(),
+            loaders: Vec::new(),
+            handlers: Vec::new(),
+            use_default_loaders: true,
+        }
     }
 
-    /// Load definitions from a file (.toml or .wasm)
-    pub fn load_file(mut self, path: impl Into<PathBuf>) -> Self {
+    /// Add a definition source path (.toml, .wasm, oci://, etc.)
+    pub fn from_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.paths.push(path.into());
+        self
+    }
+
+    /// Add multiple definition source paths
+    pub fn from_paths(mut self, paths: &[PathBuf]) -> Self {
+        self.paths.extend_from_slice(paths);
+        self
+    }
+
+    pub fn add_loader(mut self, loader: Box<dyn crate::config::types::DefinitionLoader>) -> Self {
+        self.loaders.push(loader);
+        self
+    }
+
+    pub fn add_handler(mut self, handler: Box<dyn crate::config::types::ConfigHandler>) -> Self {
+        self.handlers.push(handler);
+        self
+    }
+
+    pub fn no_default_loaders(mut self) -> Self {
+        self.use_default_loaders = false;
         self
     }
 
     /// Build the ComponentGraph from all loaded definitions
     pub fn build(self) -> Result<ComponentGraph> {
         let mut processor = ConfigProcessor::new();
-        processor.add_loader(Box::new(TomlLoader::new()));
-        processor.add_loader(Box::new(WasmLoader::new()));
+
+        if self.use_default_loaders {
+            processor.add_loader(Box::new(TomlLoader::new()));
+            processor.add_loader(Box::new(WasmLoader::new()));
+        }
+        for loader in self.loaders {
+            processor.add_loader(loader);
+        }
+        for handler in self.handlers {
+            processor.add_handler(handler);
+        }
 
         let (component_definitions, capability_definitions) = processor.process(&self.paths)?;
         ComponentGraph::build(&component_definitions, &capability_definitions)

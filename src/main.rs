@@ -72,21 +72,26 @@ async fn main() -> Result<()> {
             }
         }
         Command::Shell { definitions } => {
-            let graph = build_graph(&definitions)?;
-            run_shell(&graph).await?;
+            let runtime = Runtime::builder().from_paths(&definitions).build().await?;
+            runtime.start()?;
+            run_shell(&runtime).await?;
+            runtime.stop();
         }
         Command::Invoke {
             definitions,
             target_args,
         } => {
-            let graph = build_graph(&definitions)?;
-            run_invoke(&graph, target_args).await?;
+            let runtime = Runtime::builder().from_paths(&definitions).build().await?;
+            runtime.start()?;
+            run_invoke(&runtime, target_args).await?;
+            runtime.stop();
         }
-        Command::Run { definitions: _ } => {
+        Command::Run { definitions } => {
             tracing_subscriber::fmt()
                 .with_env_filter(EnvFilter::from_default_env())
                 .init();
-            anyhow::bail!("nothing to run: enable a gateway or messaging features.");
+            let runtime = Runtime::builder().from_paths(&definitions).build().await?;
+            runtime.run().await?;
         }
     }
 
@@ -95,16 +100,10 @@ async fn main() -> Result<()> {
 
 fn build_graph(definitions: &[PathBuf]) -> Result<ComponentGraph> {
     tracing::info!("Loading definitions from: {definitions:?}");
-    let mut builder = ComponentGraph::builder();
-    for path in definitions {
-        builder = builder.load_file(path);
-    }
-    builder.build()
+    ComponentGraph::builder().from_paths(definitions).build()
 }
 
-async fn run_invoke(graph: &ComponentGraph, target_args: Vec<String>) -> Result<()> {
-    let runtime = Runtime::builder(graph).build().await?;
-
+async fn run_invoke(runtime: &Runtime, target_args: Vec<String>) -> Result<()> {
     let (target, args) = target_args
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("missing target after --"))?;
@@ -132,8 +131,7 @@ async fn run_invoke(graph: &ComponentGraph, target_args: Vec<String>) -> Result<
     Ok(())
 }
 
-async fn run_shell(graph: &ComponentGraph) -> Result<()> {
-    let runtime = Runtime::builder(graph).build().await?;
+async fn run_shell(runtime: &Runtime) -> Result<()> {
     let components = runtime.list_components();
     println!(
         "Successfully built runtime with {} components.",
@@ -147,7 +145,7 @@ async fn run_shell(graph: &ComponentGraph) -> Result<()> {
         match readline {
             Ok(line) => {
                 let _ = rl.add_history_entry(line.as_str());
-                if handle_command(line, &runtime).await.is_err() {
+                if handle_command(line, runtime).await.is_err() {
                     break;
                 }
             }

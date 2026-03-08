@@ -24,7 +24,7 @@ fn test_circular_dependency() {
 
     let toml_file = common::create_toml_test_file(&toml_content);
     ComponentGraph::builder()
-        .load_file(toml_file.to_path_buf())
+        .from_path(toml_file.to_path_buf())
         .build()
         .unwrap();
 }

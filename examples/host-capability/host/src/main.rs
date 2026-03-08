@@ -1,5 +1,5 @@
 use anyhow::Result;
-use composable_runtime::{ComponentGraph, ComponentState, HostCapability, Runtime};
+use composable_runtime::{ComponentState, HostCapability, Runtime};
 use serde::Deserialize;
 use wasmtime::component::{HasSelf, Linker};
 
@@ -26,18 +26,16 @@ impl HostCapability for GreetingCapability {
     }
 
     fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        crate::example::greeting::host_greeting::add_to_linker::<_, HasSelf<_>>(
-            linker,
-            |state| state,
-        )
+        crate::example::greeting::host_greeting::add_to_linker::<_, HasSelf<_>>(linker, |state| {
+            state
+        })
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let graph = ComponentGraph::builder().load_file(std::path::PathBuf::from("config.toml")).build()?;
-
-    let runtime = Runtime::builder(&graph)
+    let runtime = Runtime::builder()
+        .from_path(std::path::PathBuf::from("config.toml"))
         .with_capability::<GreetingCapability>("greeting")
         .build()
         .await?;
