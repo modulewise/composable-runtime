@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 use std::path::PathBuf;
 
-use crate::config::loader;
+use crate::config::loaders::{TomlLoader, WasmLoader};
+use crate::config::processor::ConfigProcessor;
 use crate::types::{CapabilityDefinition, ComponentDefinition};
 
 pub struct ComponentGraph {
@@ -337,8 +338,11 @@ impl GraphBuilder {
 
     /// Build the ComponentGraph from all loaded definitions
     pub fn build(self) -> Result<ComponentGraph> {
-        let (component_definitions, capability_definitions) =
-            loader::parse_definition_files(&self.paths)?;
+        let mut processor = ConfigProcessor::new();
+        processor.add_loader(Box::new(TomlLoader::new()));
+        processor.add_loader(Box::new(WasmLoader::new()));
+
+        let (component_definitions, capability_definitions) = processor.process(&self.paths)?;
         ComponentGraph::build(&component_definitions, &capability_definitions)
     }
 }
