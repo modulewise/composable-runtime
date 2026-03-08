@@ -20,10 +20,48 @@ pub struct Component {
     pub functions: HashMap<String, Function>,
 }
 
+/// Lifecycle-managed service that participates in config parsing and runtime.
+///
+/// A service optionally provides a `ConfigHandler` for parsing its own config
+/// categories during the build phase, `HostCapability` implementations for
+/// component linking, and `start`/`stop` lifecycle hooks.
+///
+/// The `config_handler()` method returns a separate handler object that can
+/// write parsed config into shared state (e.g. `Arc<Mutex<...>>`). After
+/// config processing, the handler is dropped and the service can read the
+/// accumulated state in its `capabilities()` and `start()` implementations.
+pub trait RuntimeService: Send + Sync {
+    /// Provide a config handler for parsing this service's config categories.
+    /// Returns `None` if the service has no config (default).
+    fn config_handler(&self) -> Option<Box<dyn ConfigHandler>> {
+        None
+    }
+
+    /// Provide any HostCapability factories to register (default is empty).
+    /// Called after config parsing and before registry build.
+    /// Each factory creates capability instances from `config.*` values,
+    /// closing over any service-internal state needed by the capability.
+    fn capabilities(&self) -> Vec<(&'static str, HostCapabilityFactory)> {
+        vec![]
+    }
+
+    /// Start the service. Called after all registries are built.
+    /// Implementations should spawn background tasks and return immediately.
+    fn start(&self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Signal the service to shut down gracefully.
+    /// Implementations should cancel background tasks spawned by `start()`.
+    fn stop(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// Composable Runtime for invoking Wasm Components
-#[derive(Clone)]
 pub struct Runtime {
     host: ComponentHost,
+    services: Vec<Box<dyn RuntimeService>>,
 }
 
 impl Runtime {
@@ -101,6 +139,34 @@ impl Runtime {
     )> {
         self.host.instantiate(component_name, env_vars).await
     }
+
+    /// Start the runtime (services, in registration order).
+    pub fn start(&self) -> Result<()> {
+        for service in &self.services {
+            service.start()?;
+        }
+        Ok(())
+    }
+
+    /// Stop the runtime (services, in reverse registration order).
+    pub fn stop(&self) {
+        for service in self.services.iter().rev() {
+            if let Err(e) = service.stop() {
+                tracing::error!("Error stopping service: {e}");
+            }
+        }
+    }
+
+    /// Start the runtime and block until a shutdown signal (SIGINT/SIGTERM).
+    ///
+    /// Intended for long-lived processes (`composable run`).
+    /// For one-off invocations, use `start()` / `stop()` directly.
+    pub async fn run(&self) -> Result<()> {
+        self.start()?;
+        wait_for_shutdown().await?;
+        self.stop();
+        Ok(())
+    }
 }
 
 /// Builder for configuring and creating a Runtime
@@ -108,6 +174,7 @@ pub struct RuntimeBuilder {
     paths: Vec<PathBuf>,
     loaders: Vec<Box<dyn DefinitionLoader>>,
     handlers: Vec<Box<dyn ConfigHandler>>,
+    services: Vec<Box<dyn RuntimeService>>,
     factories: HashMap<&'static str, HostCapabilityFactory>,
     use_default_loaders: bool,
 }
@@ -118,6 +185,7 @@ impl RuntimeBuilder {
             paths: Vec::new(),
             loaders: Vec::new(),
             handlers: Vec::new(),
+            services: Vec::new(),
             factories: HashMap::new(),
             use_default_loaders: true,
         }
@@ -150,6 +218,16 @@ impl RuntimeBuilder {
     /// Opt out of the default TomlLoader + WasmLoader
     pub fn no_default_loaders(mut self) -> Self {
         self.use_default_loaders = false;
+        self
+    }
+
+    /// Register a lifecycle-managed service.
+    ///
+    /// The service's config handler (if any) participates in config parsing.
+    /// Its capabilities are registered after config parsing. Its `start()`
+    /// and `stop()` are called during the runtime lifecycle.
+    pub fn with_service<T: RuntimeService + Default + 'static>(mut self) -> Self {
+        self.services.push(Box::new(T::default()));
         self
     }
 
@@ -195,15 +273,50 @@ impl RuntimeBuilder {
         for handler in self.handlers {
             graph_builder = graph_builder.add_handler(handler);
         }
+        // Add config handlers from registered services
+        for service in &self.services {
+            if let Some(handler) = service.config_handler() {
+                graph_builder = graph_builder.add_handler(handler);
+            }
+        }
         let graph = graph_builder.build()?;
 
+        // Collect capability factories from both with_capability and service registrations
+        let mut factories = self.factories;
+        for service in &self.services {
+            for (name, factory) in service.capabilities() {
+                factories.insert(name, factory);
+            }
+        }
+
         // Build registries from graph
-        let (component_registry, capability_registry) =
-            build_registries(&graph, self.factories).await?;
+        let (component_registry, capability_registry) = build_registries(&graph, factories).await?;
 
         // Create component host
         let host = ComponentHost::new(component_registry, capability_registry)?;
 
-        Ok(Runtime { host })
+        Ok(Runtime {
+            host,
+            services: self.services,
+        })
     }
+}
+
+async fn wait_for_shutdown() -> Result<()> {
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = ctrl_c => result?,
+            _ = sigterm.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    ctrl_c.await?;
+
+    Ok(())
 }

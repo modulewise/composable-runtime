@@ -1,11 +1,12 @@
 //! Modulewise Composable Runtime
 //!
-//! A runtime for Wasm Components that supports
-//! composition, config, and capability management.
+//! An inversion of control runtime for Wasm Components.
+//! Supports composition, config, and capability management.
 
 pub use composition::graph::{ComponentGraph, GraphBuilder};
-pub use composition::registry::{CapabilityStateHasData, HostCapability};
-pub use runtime::{Component, Runtime, RuntimeBuilder};
+pub use composition::registry::{CapabilityStateHasData, HostCapability, HostCapabilityFactory};
+pub use config::types::{ConfigHandler, DefinitionLoader, PropertyMap};
+pub use runtime::{Component, Runtime, RuntimeBuilder, RuntimeService};
 pub use types::{ComponentState, Function, FunctionParam};
 
 // exposed for testing, hidden from docs

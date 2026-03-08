@@ -73,20 +73,25 @@ async fn main() -> Result<()> {
         }
         Command::Shell { definitions } => {
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
+            runtime.start()?;
             run_shell(&runtime).await?;
+            runtime.stop();
         }
         Command::Invoke {
             definitions,
             target_args,
         } => {
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
+            runtime.start()?;
             run_invoke(&runtime, target_args).await?;
+            runtime.stop();
         }
-        Command::Run { definitions: _ } => {
+        Command::Run { definitions } => {
             tracing_subscriber::fmt()
                 .with_env_filter(EnvFilter::from_default_env())
                 .init();
-            anyhow::bail!("nothing to run: enable a gateway or messaging features.");
+            let runtime = Runtime::builder().from_paths(&definitions).build().await?;
+            runtime.run().await?;
         }
     }
 

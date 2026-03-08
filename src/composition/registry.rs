@@ -55,7 +55,7 @@ impl<T: Send + 'static> HasData for CapabilityStateHasData<T> {
 }
 
 /// Factory function that creates a HostCapability instance from TOML config.
-pub(crate) type HostCapabilityFactory =
+pub type HostCapabilityFactory =
     Box<dyn Fn(serde_json::Value) -> Result<Box<dyn HostCapability>> + Send + Sync>;
 
 /// Macro for implementing `create_state_boxed()` with automatic TypeId inference.
@@ -86,6 +86,46 @@ macro_rules! create_state {
             let state: $type = $body;
             Ok(Some((std::any::TypeId::of::<$type>(), Box::new(state))))
         }
+    };
+}
+
+/// Macro for creating a `(&str, HostCapabilityFactory)` tuple with reduced boilerplate.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Without config — capability is constructed directly
+/// create_capability!("greeting", GreetingCapability {
+///     message: self.message.clone(),
+/// })
+///
+/// // With config — closure receives the capability's config value
+/// create_capability!("greeting", |config| {
+///     let suffix = config.get("suffix").and_then(|v| v.as_str()).unwrap_or("!");
+///     GreetingCapability { message: self.message.clone(), suffix: suffix.to_string() }
+/// })
+/// ```
+#[macro_export]
+macro_rules! create_capability {
+    ($name:expr, |$config:ident| $body:expr) => {
+        (
+            $name,
+            Box::new(
+                move |$config: serde_json::Value| -> anyhow::Result<Box<dyn $crate::HostCapability>> {
+                    Ok(Box::new($body))
+                },
+            ) as $crate::HostCapabilityFactory,
+        )
+    };
+    ($name:expr, $body:expr) => {
+        (
+            $name,
+            Box::new(
+                move |_config: serde_json::Value| -> anyhow::Result<Box<dyn $crate::HostCapability>> {
+                    Ok(Box::new($body))
+                },
+            ) as $crate::HostCapabilityFactory,
+        )
     };
 }
 

@@ -79,7 +79,8 @@ uri = "wasmtime:wasip2"
 The "grpc" definition with `uri = "host:grpc"` creates an instance of the host capability, which the host binary has registered when building the runtime:
 
 ```rust
-let runtime = Runtime::builder(&graph)
+let runtime = Runtime::builder()
+    .from_path(std::path::PathBuf::from(&config_file))
     .with_capability::<GrpcCapability>("grpc")
     .build()
     .await?;
