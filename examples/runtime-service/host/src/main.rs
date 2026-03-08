@@ -115,7 +115,8 @@ impl RuntimeService for GreetingService {
         let message = Arc::new(message);
 
         vec![create_capability!("greeting", |config| {
-            let uppercase = config.get("uppercase")
+            let uppercase = config
+                .get("uppercase")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             GreetingCapability {
