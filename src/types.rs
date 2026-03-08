@@ -1,107 +1,33 @@
 //! Core type definitions shared across the crate.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;
-
-/// Base definition with URI and scope
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct DefinitionBase {
-    pub uri: String,
-    #[serde(default = "default_scope")]
-    pub scope: String, // "any"|"package"|"namespace"
-}
 
 pub fn default_scope() -> String {
     "any".to_string()
 }
 
-/// Component definition base with additional fields
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ComponentDefinitionBase {
-    #[serde(flatten)]
-    pub base: DefinitionBase,
-    #[serde(default)]
-    pub imports: Vec<String>, // Named components this imports
-    #[serde(default)]
-    pub intercepts: Vec<String>, // Components this intercepts
-    #[serde(default)]
-    pub precedence: i32, // Lower values have higher precedence
-    #[serde(default)]
-    pub config: HashMap<String, serde_json::Value>,
-}
-
-impl std::ops::Deref for ComponentDefinitionBase {
-    type Target = DefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
 /// Capability definition (host capabilities and wasmtime capabilities)
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct CapabilityDefinition {
     pub name: String,
-    #[serde(flatten)]
-    pub base: DefinitionBase,
-    /// Configuration from `config.[key]` entries in TOML
-    #[serde(default)]
+    pub uri: String,
+    pub scope: String,
     pub config: HashMap<String, serde_json::Value>,
-}
-
-impl std::ops::Deref for CapabilityDefinition {
-    type Target = DefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-impl std::fmt::Debug for CapabilityDefinition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CapabilityDefinition")
-            .field("name", &self.name)
-            .field("uri", &self.uri)
-            .field("scope", &self.scope)
-            .field("config", &self.config)
-            .finish()
-    }
 }
 
 /// Component definition
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct ComponentDefinition {
     pub name: String,
-    #[serde(flatten)]
-    pub base: ComponentDefinitionBase,
-}
-
-impl std::ops::Deref for ComponentDefinition {
-    type Target = ComponentDefinitionBase;
-    fn deref(&self) -> &Self::Target {
-        &self.base
-    }
-}
-
-impl std::fmt::Debug for ComponentDefinition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ComponentDefinition")
-            .field("name", &self.name)
-            .field("uri", &self.uri)
-            .field("scope", &self.scope)
-            .field("imports", &self.imports)
-            .field("intercepts", &self.intercepts)
-            .field("precedence", &self.precedence)
-            .field("config", &self.config)
-            .finish()
-    }
-}
-
-impl AsRef<DefinitionBase> for ComponentDefinition {
-    fn as_ref(&self) -> &DefinitionBase {
-        &self.base.base
-    }
+    pub uri: String,
+    pub scope: String,
+    pub imports: Vec<String>,
+    pub intercepts: Vec<String>,
+    pub precedence: i32,
+    pub config: HashMap<String, serde_json::Value>,
 }
 
 /// State passed to Wasm components during execution.
