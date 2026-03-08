@@ -2,10 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 use super::types::{ConfigHandler, PropertyMap};
-use crate::types::{
-    CapabilityDefinition, ComponentDefinition, ComponentDefinitionBase, DefinitionBase,
-    default_scope,
-};
+use crate::types::{CapabilityDefinition, ComponentDefinition, default_scope};
 
 /// Handles `[component.*]` definitions.
 pub struct ComponentConfigHandler<'a> {
@@ -65,13 +62,12 @@ impl ConfigHandler for ComponentConfigHandler<'_> {
 
         self.definitions.push(ComponentDefinition {
             name: name.to_string(),
-            base: ComponentDefinitionBase {
-                base: DefinitionBase { uri, scope },
-                imports,
-                intercepts,
-                precedence,
-                config,
-            },
+            uri,
+            scope,
+            imports,
+            intercepts,
+            precedence,
+            config,
         });
         Ok(())
     }
@@ -121,7 +117,8 @@ impl ConfigHandler for CapabilityConfigHandler<'_> {
 
         self.definitions.push(CapabilityDefinition {
             name: name.to_string(),
-            base: DefinitionBase { uri, scope },
+            uri,
+            scope,
             config,
         });
         Ok(())

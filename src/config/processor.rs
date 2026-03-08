@@ -178,7 +178,7 @@ fn split_properties(
 
 fn resolve_placeholders_in_components(definitions: &mut [ComponentDefinition]) -> Result<()> {
     for def in definitions {
-        resolve_placeholders_in_map(&mut def.base.config)?;
+        resolve_placeholders_in_map(&mut def.config)?;
     }
     Ok(())
 }
