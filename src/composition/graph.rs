@@ -34,110 +34,139 @@ impl ComponentGraph {
             node_map.insert(definition.name.clone(), index);
         }
 
+        // Determine which components are used only as interceptor templates.
+        // These don't get their own graph node — only synthetic clones do.
+        let interceptor_names: std::collections::HashSet<&str> = component_definitions
+            .iter()
+            .flat_map(|d| d.interceptors.iter().map(|s| s.as_str()))
+            .collect();
+        let imported_names: std::collections::HashSet<&str> = component_definitions
+            .iter()
+            .flat_map(|d| d.imports.iter().map(|s| s.as_str()))
+            .collect();
+
         for definition in component_definitions {
+            let is_template_only = interceptor_names.contains(definition.name.as_str())
+                && !imported_names.contains(definition.name.as_str());
+            if is_template_only {
+                continue;
+            }
             let index = graph.add_node(Node::Component(definition.clone()));
             node_map.insert(definition.name.clone(), index);
         }
 
+        // Build interceptor chains with name takeover.
+        //
+        // Interceptors wrap a component's exports, not its imports. The
+        // component's own imports connect directly to its own node.
+        //
+        // List order is call order (outer-to-inner), reversed here to
+        // build the chain outward from the component.
+        //
+        // Given: [component.client] interceptors = ["auth", "logger"]
+        //   _client$0 (original) -> _client$1 (logger) -> client (auth, outermost)
+        //
+        // The outermost interceptor takes over the original name so that
+        // importers and public APIs see the intercepted version transparently.
+        // Internal nodes use _name$N naming (reserved, validated at config time).
+        //
+        // This pattern is reusable: future [interceptor.*] support will
+        // apply the same rename-and-replace on top of the existing chain.
+        let mut interceptor_clones = std::collections::HashSet::<NodeIndex>::new();
+
         for definition in component_definitions {
-            let source_index = *node_map.get(&definition.name).unwrap();
-            let mut imports = definition.imports.clone();
-            // `intercepts` implies `imports` because the interceptor component
-            // must be composed with the component it intercepts.
-            for target_name in &definition.intercepts {
-                if !imports.contains(target_name) {
-                    imports.push(target_name.clone());
-                }
+            if definition.interceptors.is_empty() {
+                continue;
             }
 
-            for target_name in &imports {
-                if let Some(target_index) = node_map.get(target_name) {
-                    graph.update_edge(*target_index, source_index, Edge::Dependency);
+            let original_name = &definition.name;
+            let internal_name = format!("_{original_name}$0");
+
+            // Rename the original component node to its internal name.
+            let component_index = node_map.remove(original_name).unwrap();
+            if let Node::Component(ref mut def) = graph[component_index] {
+                def.name = internal_name.clone();
+            }
+            node_map.insert(internal_name, component_index);
+
+            let mut current = component_index;
+            let interceptor_count = definition.interceptors.len();
+
+            for (position, interceptor_name) in definition.interceptors.iter().rev().enumerate() {
+                let interceptor_def = component_definitions
+                    .iter()
+                    .find(|d| d.name == *interceptor_name)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Component '{}' references interceptor '{}', which is not defined.",
+                            definition.name,
+                            interceptor_name,
+                        )
+                    })?;
+
+                let is_outermost = position == interceptor_count - 1;
+                let synthetic_name = if is_outermost {
+                    original_name.clone()
+                } else {
+                    format!("_{original_name}${}", position + 1)
+                };
+
+                let mut cloned_def = interceptor_def.clone();
+                cloned_def.name = synthetic_name.clone();
+
+                let cloned_index = graph.add_node(Node::Component(cloned_def));
+                node_map.insert(synthetic_name, cloned_index);
+                interceptor_clones.insert(cloned_index);
+
+                graph.update_edge(current, cloned_index, Edge::Interceptor(position as i32));
+                current = cloned_index;
+            }
+        }
+
+        // Add dependency edges for original component definitions.
+        // For intercepted components, the node was renamed to _name$0.
+        for definition in component_definitions {
+            let lookup_name = if definition.interceptors.is_empty() {
+                definition.name.clone()
+            } else {
+                format!("_{}$0", definition.name)
+            };
+
+            let Some(importer_index) = node_map.get(&lookup_name).copied() else {
+                continue; // Template-only interceptor, not in the graph.
+            };
+
+            for exporter_name in &definition.imports {
+                if let Some(exporter_index) = node_map.get(exporter_name).copied() {
+                    graph.update_edge(exporter_index, importer_index, Edge::Dependency);
                 } else {
                     tracing::warn!(
                         "Component '{}' imports '{}', which is not defined.",
                         definition.name,
-                        target_name
+                        exporter_name
                     );
                 }
             }
         }
 
-        // Process interceptors to redirect edges
-        let mut edges_to_add = Vec::new();
-        let mut edges_to_remove = Vec::new();
-
-        for edge_ref in graph.edge_references() {
-            let source_node_index = edge_ref.source();
-            let target_node_index = edge_ref.target();
-
-            let provider_name = match &graph[source_node_index] {
-                Node::Component(def) => &def.name,
-                Node::Capability(def) => &def.name,
+        // Add dependency edges for interceptor clones' own imports.
+        for clone_index in &interceptor_clones {
+            let Node::Component(def) = &graph[*clone_index] else {
+                continue;
             };
-
-            // Capabilities can be providers, but not consumers.
-            let Node::Component(consumer_def) = &graph[target_node_index] else {
-                unreachable!()
-            };
-
-            // Iterate all components defined to intercept this provider,
-            // but filter out any that do not enable this specific consumer.
-            let mut interceptors: Vec<_> = component_definitions
-                .iter()
-                .filter(|def| def.intercepts.contains(provider_name))
-                .filter(|def| {
-                    let enabled = is_interceptor_enabled(def, consumer_def);
-                    if !enabled && def.name != consumer_def.name {
-                        tracing::debug!(
-                            "Interceptor '{}' skipped for consumer '{}' (scope='{}')",
-                            def.name,
-                            consumer_def.name,
-                            def.scope
-                        );
-                    }
-                    enabled
-                })
-                .collect();
-
-            if !interceptors.is_empty() {
-                // Don't redirect dependencies for consumers that are interceptors.
-                // Interceptor routing is configured when processing non-interceptor consumers.
-                if interceptors.iter().any(|i| i.name == consumer_def.name) {
-                    continue;
+            let clone_name = def.name.clone();
+            let imports = def.imports.clone();
+            for exporter_name in &imports {
+                if let Some(exporter_index) = node_map.get(exporter_name).copied() {
+                    graph.update_edge(exporter_index, *clone_index, Edge::Dependency);
+                } else {
+                    tracing::warn!(
+                        "Interceptor '{}' imports '{}', which is not defined.",
+                        clone_name,
+                        exporter_name
+                    );
                 }
-
-                interceptors.sort_by_key(|a| a.precedence);
-
-                // Remove direct dependency edges for interceptors other than the first one.
-                for interceptor in &interceptors[1..] {
-                    let interceptor_index = *node_map.get(&interceptor.name).unwrap();
-                    if let Some(edge_id) = graph.find_edge(source_node_index, interceptor_index) {
-                        edges_to_remove.push(edge_id);
-                    }
-                }
-
-                // Original edge will be replaced by interceptor routing.
-                edges_to_remove.push(edge_ref.id());
-
-                let mut current_provider_index = source_node_index;
-                for interceptor in &interceptors {
-                    let interceptor_index = *node_map.get(&interceptor.name).unwrap();
-                    edges_to_add.push((
-                        current_provider_index,
-                        interceptor_index,
-                        Edge::Interceptor(interceptor.precedence),
-                    ));
-                    current_provider_index = interceptor_index;
-                }
-                edges_to_add.push((current_provider_index, target_node_index, Edge::Dependency));
             }
-        }
-
-        graph.retain_edges(|_, edge| !edges_to_remove.contains(&edge));
-
-        for (source, target, data) in edges_to_add {
-            graph.update_edge(source, target, data);
         }
 
         // Validate the graph for cycles
@@ -174,9 +203,10 @@ impl ComponentGraph {
         self.node_map.get(name).copied()
     }
 
-    pub fn get_dependencies(&self, index: NodeIndex) -> petgraph::graph::Neighbors<'_, Edge> {
+    pub fn get_dependencies(&self, index: NodeIndex) -> impl Iterator<Item = (NodeIndex, &Edge)> {
         self.graph
-            .neighbors_directed(index, petgraph::Direction::Incoming)
+            .edges_directed(index, petgraph::Direction::Incoming)
+            .map(|edge_ref| (edge_ref.source(), edge_ref.weight()))
     }
 
     fn dot(&self) -> String {
@@ -189,18 +219,11 @@ impl ComponentGraph {
             let node = &self.graph[node_index];
             let node_attrs = match node {
                 Node::Component(def) => {
-                    let color = if def.intercepts.is_empty() {
-                        "lightblue"
-                    } else {
-                        "yellow"
-                    };
-                    let label = if def.intercepts.is_empty() {
-                        def.name.to_string()
-                    } else {
-                        format!("{}\\n(intercepts: {})", def.name, def.intercepts.join(", "))
-                    };
+                    let is_internal = def.name.starts_with('_');
+                    let color = if is_internal { "yellow" } else { "lightblue" };
                     format!(
-                        "[label=\"{label}\", shape=box, fillcolor={color}, style=\"rounded,filled\"]"
+                        "[label=\"{}\", shape=box, fillcolor={color}, style=\"rounded,filled\"]",
+                        def.name
                     )
                 }
                 Node::Capability(def) => {
@@ -216,8 +239,8 @@ impl ComponentGraph {
         for edge_ref in self.graph.edge_references() {
             let edge_attrs = match edge_ref.weight() {
                 Edge::Dependency => "[color=blue, style=solid]".to_string(),
-                Edge::Interceptor(precedence) => {
-                    format!("[color=red, style=dashed, label=\"precedence: {precedence}\"]")
+                Edge::Interceptor(position) => {
+                    format!("[color=red, style=dashed, label=\"interceptor: {position}\"]")
                 }
             };
             output.push_str(&format!(
@@ -291,22 +314,6 @@ impl IndexMut<NodeIndex> for ComponentGraph {
     }
 }
 
-fn is_interceptor_enabled(
-    interceptor: &ComponentDefinition,
-    _consumer: &ComponentDefinition,
-) -> bool {
-    match interceptor.scope.as_str() {
-        "any" => true,
-        // TODO: The graph builder does not have access to component metadata, so we
-        // cannot evaluate these scopes here. The final check is performed in the
-        // registry builder, which does have the metadata. Accepting here means it could
-        // fail later, rather than be skipped.
-        "package" => true,
-        "namespace" => true,
-        _ => false, // Unknown scope, default to false.
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Node {
     Component(ComponentDefinition),
@@ -317,7 +324,7 @@ pub enum Node {
 #[allow(dead_code)]
 pub enum Edge {
     Dependency,
-    Interceptor(i32), // Precedence
+    Interceptor(i32), // Position in chain (0 = innermost)
 }
 
 /// Builder for constructing a ComponentGraph

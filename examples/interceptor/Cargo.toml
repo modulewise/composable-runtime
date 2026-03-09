@@ -1,0 +1,6 @@
+[workspace]
+members = ["greeter", "logger"]
+resolver = "3"
+
+[workspace.dependencies]
+wit-bindgen = "0.52"

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use wasmtime::component::{HasData, Linker};
 
 use super::composer::Composer;
-use super::graph::{ComponentGraph, Node};
+use super::graph::{ComponentGraph, Edge, Node};
 use super::wit::{ComponentMetadata, Parser};
 use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState, Function};
 
@@ -211,10 +211,15 @@ impl ComponentRegistry {
     }
 
     pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
-        self.components.values()
+        self.components
+            .values()
+            .filter(|spec| !spec.name.starts_with('_'))
     }
 
     pub fn get_component(&self, name: &str) -> Option<&ComponentSpec> {
+        if name.starts_with('_') {
+            return None;
+        }
         self.components.get(name)
     }
 
@@ -463,7 +468,7 @@ async fn process_component(
 
     let mut bytes = read_bytes(&definition.uri).await?;
 
-    let (metadata, mut imports, exports, functions) =
+    let (metadata, mut imports, mut exports, mut functions) =
         Parser::parse(&bytes).map_err(|e| anyhow::anyhow!("Failed to parse component: {e}"))?;
 
     let imports_config = imports
@@ -495,9 +500,9 @@ async fn process_component(
 
     let mut all_capabilities = HashSet::new();
 
-    let dependencies = component_graph.get_dependencies(node_index);
-    for dependency_node_index in dependencies {
-        let dependency_node = &component_graph[dependency_node_index];
+    let dependencies: Vec<_> = component_graph.get_dependencies(node_index).collect();
+    for (dependency_node_index, edge) in &dependencies {
+        let dependency_node = &component_graph[*dependency_node_index];
         match dependency_node {
             Node::Component(dependency_def) => {
                 let component_spec = component_registry.get_required_import(
@@ -505,19 +510,64 @@ async fn process_component(
                     definition,
                     &metadata,
                 )?;
-                bytes =
-                    Composer::compose_components(&bytes, &component_spec.bytes).map_err(|e| {
+
+                if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&exports) {
+                    // Current component is advice; the dependency is the target.
+                    // Generate a wrapper from the target, plug in advice + target.
+                    let wrapper_bytes = composable_runtime_interceptor::create_from_component(
+                        &component_spec.bytes,
+                        &[],
+                    )
+                    .map_err(|e| {
                         anyhow::anyhow!(
-                            "Failed composing '{}' with dependency '{}': {e}",
+                            "Failed to generate interceptor wrapper for '{}' targeting '{}': {e}",
                             definition.name,
-                            dependency_def.name
+                            dependency_def.name,
                         )
                     })?;
-                tracing::info!(
-                    "Composed component '{}' with dependency '{}'",
-                    definition.name,
-                    dependency_def.name
-                );
+                    let composed_wrapper = Composer::compose_components(&wrapper_bytes, &bytes)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed composing interceptor wrapper with advice '{}': {e}",
+                                definition.name,
+                            )
+                        })?;
+                    bytes = Composer::compose_components(&composed_wrapper, &component_spec.bytes)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed composing '{}' with target '{}': {e}",
+                                definition.name,
+                                dependency_def.name,
+                            )
+                        })?;
+
+                    // The composed result should be functionally equivalent to
+                    // the target: same exports/functions and remaining imports
+                    imports = component_spec.imports.clone();
+                    exports = component_spec.exports.clone();
+                    functions = component_spec.functions.clone();
+
+                    tracing::info!(
+                        "Composed advice '{}' with target '{}'",
+                        definition.name,
+                        dependency_def.name
+                    );
+                } else {
+                    bytes = Composer::compose_components(&bytes, &component_spec.bytes).map_err(
+                        |e| {
+                            anyhow::anyhow!(
+                                "Failed composing '{}' with dependency '{}': {e}",
+                                definition.name,
+                                dependency_def.name
+                            )
+                        },
+                    )?;
+                    tracing::info!(
+                        "Composed component '{}' with dependency '{}'",
+                        definition.name,
+                        dependency_def.name
+                    );
+                }
 
                 for export in &component_spec.exports {
                     imports.retain(|import| import != export);
@@ -562,6 +612,12 @@ async fn process_component(
         capabilities: all_capabilities.into_iter().collect(),
         functions,
     })
+}
+
+fn is_advice_component(exports: &[String]) -> bool {
+    exports
+        .iter()
+        .any(|e| e.starts_with("modulewise:interceptor/advice"))
 }
 
 async fn read_bytes(uri: &str) -> Result<Vec<u8>> {

@@ -25,8 +25,7 @@ pub struct ComponentDefinition {
     pub uri: String,
     pub scope: String,
     pub imports: Vec<String>,
-    pub intercepts: Vec<String>,
-    pub precedence: i32,
+    pub interceptors: Vec<String>,
     pub config: HashMap<String, serde_json::Value>,
 }
 
