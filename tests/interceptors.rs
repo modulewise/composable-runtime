@@ -10,10 +10,10 @@ async fn test_simple_interceptor() {
         r#"
         [component.client]
         uri = "{}"
+        interceptors = ["interceptor"]
 
         [component.interceptor]
         uri = "{}"
-        intercepts = ["client"]
 
         [component.handler]
         uri = "{}"
@@ -27,28 +27,43 @@ async fn test_simple_interceptor() {
     let toml_file = common::create_toml_test_file(&toml_content);
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
-    let client_def = common::get_component_definition(&graph, "client");
-    assert_eq!(client_def.uri, client_wasm.to_path_buf().to_string_lossy());
-    assert_eq!(client_def.imports.len(), 0);
+    // The original client is renamed to _client$0.
+    let original_def = common::get_component_definition(&graph, "_client$0");
+    assert_eq!(
+        original_def.uri,
+        client_wasm.to_path_buf().to_string_lossy()
+    );
 
-    let interceptor_def = common::get_component_definition(&graph, "interceptor");
+    // The outermost (only) interceptor takes over the "client" name.
+    let interceptor_def = common::get_component_definition(&graph, "client");
     assert_eq!(
         interceptor_def.uri,
         interceptor_wasm.to_path_buf().to_string_lossy()
     );
-    assert_eq!(interceptor_def.imports.len(), 0);
 
     let handler_def = common::get_component_definition(&graph, "handler");
-    assert_eq!(
-        handler_def.uri,
-        handler_wasm.to_path_buf().to_string_lossy()
-    );
     assert_eq!(handler_def.imports, vec!["client"]);
+
+    // Handler's dependency resolves to the outermost interceptor (named "client").
+    let handler_index = graph.get_node_index("handler").unwrap();
+    let dependencies: Vec<_> = graph.get_dependencies(handler_index).collect();
+    assert_eq!(dependencies.len(), 1);
+
+    let dep_name = if let composable_runtime::composition::graph::Node::Component(def) =
+        &graph[dependencies[0]]
+    {
+        &def.name
+    } else {
+        unreachable!()
+    };
+    assert_eq!(dep_name, "client");
 
     let (component_registry, _capability_registry) =
         common::build_registries_and_assert_ok(&graph).await;
 
-    assert_eq!(component_registry.get_components().count(), 3);
+    // Public components: client (outermost interceptor), handler.
+    // _client$0 is internal, interceptor template is excluded.
+    assert_eq!(component_registry.get_components().count(), 2);
     let handler = component_registry.get_component("handler").unwrap();
     assert_eq!(handler.name, "handler");
     assert_eq!(handler.imports.len(), 0);
@@ -74,20 +89,18 @@ async fn test_multiple_interceptors() {
     let interceptor_wasm = common::interceptor_wasm();
     let handler_wasm = common::handler_wasm();
 
+    // Call order: outer first, inner second (inner wraps client directly).
     let toml_content = format!(
         r#"
         [component.client]
         uri = "{}"
+        interceptors = ["outer-interceptor", "inner-interceptor"]
 
         [component.outer-interceptor]
         uri = "{}"
-        intercepts = ["client"]
-        precedence = 99
 
         [component.inner-interceptor]
         uri = "{}"
-        intercepts = ["client"]
-        precedence = 1
 
         [component.handler]
         uri = "{}"
@@ -101,6 +114,7 @@ async fn test_multiple_interceptors() {
     let toml_file = common::create_toml_test_file(&toml_content);
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
+    // Handler depends on the outermost interceptor, which has taken over "client".
     let handler_index = graph.get_node_index("handler").unwrap();
     let dependencies: Vec<_> = graph.get_dependencies(handler_index).collect();
 
@@ -118,50 +132,43 @@ async fn test_multiple_interceptors() {
         unreachable!()
     };
 
-    // Assert the lower precedence (higher number) interceptor is on the "outside"
     assert_eq!(
-        provider_name, "outer-interceptor",
-        "Handler should be connected to 'outer-interceptor', but was connected to '{}'",
+        provider_name, "client",
+        "Handler should be connected to 'client' (outermost interceptor), but was connected to '{}'",
         provider_name
     );
 
-    // Assert outer-interceptor is connected to inner-interceptor
-    let outer_interceptor_index = graph.get_node_index("outer-interceptor").unwrap();
-    let outer_dependencies: Vec<_> = graph.get_dependencies(outer_interceptor_index).collect();
-    assert_eq!(
-        outer_dependencies.len(),
-        1,
-        "The outer-interceptor should have one dependency"
-    );
+    // Outermost interceptor ("client") depends on inner interceptor ("_client$1").
+    let outer_index = graph.get_node_index("client").unwrap();
+    let outer_deps: Vec<_> = graph.get_dependencies(outer_index).collect();
+    assert_eq!(outer_deps.len(), 1);
 
-    let outer_provider_name = if let composable_runtime::composition::graph::Node::Component(def) =
-        &graph[outer_dependencies[0]]
+    let outer_dep_name = if let composable_runtime::composition::graph::Node::Component(def) =
+        &graph[outer_deps[0]]
     {
         &def.name
     } else {
         unreachable!()
     };
-    assert_eq!(outer_provider_name, "inner-interceptor");
+    assert_eq!(outer_dep_name, "_client$1");
 
-    // Assert inner-interceptor is connected to client
-    let inner_interceptor_index = graph.get_node_index("inner-interceptor").unwrap();
-    let inner_dependencies: Vec<_> = graph.get_dependencies(inner_interceptor_index).collect();
-    assert_eq!(
-        inner_dependencies.len(),
-        1,
-        "The inner-interceptor should have one dependency"
-    );
+    // Inner interceptor ("_client$1") depends on original ("_client$0").
+    let inner_index = graph.get_node_index("_client$1").unwrap();
+    let inner_deps: Vec<_> = graph.get_dependencies(inner_index).collect();
+    assert_eq!(inner_deps.len(), 1);
 
-    let inner_provider_name = if let composable_runtime::composition::graph::Node::Component(def) =
-        &graph[inner_dependencies[0]]
+    let inner_dep_name = if let composable_runtime::composition::graph::Node::Component(def) =
+        &graph[inner_deps[0]]
     {
         &def.name
     } else {
         unreachable!()
     };
-    assert_eq!(inner_provider_name, "client");
+    assert_eq!(inner_dep_name, "_client$0");
 
     let (component_registry, _capability_registry) =
         common::build_registries_and_assert_ok(&graph).await;
-    assert_eq!(component_registry.get_components().count(), 4);
+    // Public components: client (outermost interceptor), handler.
+    // _client$0 and _client$1 are internal, two templates excluded.
+    assert_eq!(component_registry.get_components().count(), 2);
 }

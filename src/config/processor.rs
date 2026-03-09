@@ -286,14 +286,25 @@ fn validate_names(
 ) -> Result<()> {
     let mut all_names = HashSet::new();
     for def in capabilities {
+        validate_name_chars(&def.name)?;
         if !all_names.insert(&def.name) {
             return Err(anyhow::anyhow!("Duplicate definition name: '{}'", def.name));
         }
     }
     for def in components {
+        validate_name_chars(&def.name)?;
         if !all_names.insert(&def.name) {
             return Err(anyhow::anyhow!("Duplicate definition name: '{}'", def.name));
         }
+    }
+    Ok(())
+}
+
+fn validate_name_chars(name: &str) -> Result<()> {
+    if name.starts_with('_') || name.contains('$') {
+        return Err(anyhow::anyhow!(
+            "Definition name '{name}' is invalid: names cannot start with '_' or contain '$' (reserved for internal use)"
+        ));
     }
     Ok(())
 }

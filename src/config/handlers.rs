@@ -23,15 +23,7 @@ impl ConfigHandler for ComponentConfigHandler<'_> {
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
         HashMap::from([(
             "component",
-            [
-                "uri",
-                "scope",
-                "imports",
-                "intercepts",
-                "precedence",
-                "config",
-            ]
-            .as_slice(),
+            ["uri", "scope", "imports", "interceptors", "config"].as_slice(),
         )])
     }
 
@@ -52,10 +44,7 @@ impl ConfigHandler for ComponentConfigHandler<'_> {
             .map_err(ctx)?
             .unwrap_or_else(default_scope);
         let imports = take_string_array(&mut properties, "imports").map_err(ctx)?;
-        let intercepts = take_string_array(&mut properties, "intercepts").map_err(ctx)?;
-        let precedence = take_optional_i32(&mut properties, "precedence")
-            .map_err(ctx)?
-            .unwrap_or(0);
+        let interceptors = take_string_array(&mut properties, "interceptors").map_err(ctx)?;
         let config = take_object(&mut properties, "config").map_err(ctx)?;
 
         if !properties.is_empty() {
@@ -70,8 +59,7 @@ impl ConfigHandler for ComponentConfigHandler<'_> {
             uri,
             scope,
             imports,
-            intercepts,
-            precedence,
+            interceptors,
             config,
         });
         Ok(())
@@ -213,28 +201,6 @@ fn take_string_array(
             got,
         }),
         None => Ok(Vec::new()),
-    }
-}
-
-fn take_optional_i32(
-    properties: &mut PropertyMap,
-    key: &str,
-) -> Result<Option<i32>, PropertyError> {
-    match properties.remove(key) {
-        Some(serde_json::Value::Number(n)) => match n.as_i64() {
-            Some(i) => Ok(Some(i as i32)),
-            None => Err(PropertyError::TypeMismatch {
-                key: key.into(),
-                expected: "an integer",
-                got: serde_json::Value::Number(n),
-            }),
-        },
-        Some(got) => Err(PropertyError::TypeMismatch {
-            key: key.into(),
-            expected: "a number",
-            got,
-        }),
-        None => Ok(None),
     }
 }
 

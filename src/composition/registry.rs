@@ -211,10 +211,15 @@ impl ComponentRegistry {
     }
 
     pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
-        self.components.values()
+        self.components
+            .values()
+            .filter(|spec| !spec.name.starts_with('_'))
     }
 
     pub fn get_component(&self, name: &str) -> Option<&ComponentSpec> {
+        if name.starts_with('_') {
+            return None;
+        }
         self.components.get(name)
     }
 
