@@ -8,7 +8,7 @@ use std::sync::Arc;
 use wasmtime::component::{HasData, Linker};
 
 use super::composer::Composer;
-use super::graph::{ComponentGraph, Node};
+use super::graph::{ComponentGraph, Edge, Node};
 use super::wit::{ComponentMetadata, Parser};
 use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState, Function};
 
@@ -500,9 +500,9 @@ async fn process_component(
 
     let mut all_capabilities = HashSet::new();
 
-    let dependencies = component_graph.get_dependencies(node_index);
-    for dependency_node_index in dependencies {
-        let dependency_node = &component_graph[dependency_node_index];
+    let dependencies: Vec<_> = component_graph.get_dependencies(node_index).collect();
+    for (dependency_node_index, edge) in &dependencies {
+        let dependency_node = &component_graph[*dependency_node_index];
         match dependency_node {
             Node::Component(dependency_def) => {
                 let component_spec = component_registry.get_required_import(
@@ -510,19 +510,58 @@ async fn process_component(
                     definition,
                     &metadata,
                 )?;
-                bytes =
-                    Composer::compose_components(&bytes, &component_spec.bytes).map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed composing '{}' with dependency '{}': {e}",
-                            definition.name,
-                            dependency_def.name
-                        )
-                    })?;
-                tracing::info!(
-                    "Composed component '{}' with dependency '{}'",
-                    definition.name,
-                    dependency_def.name
-                );
+
+                if matches!(edge, Edge::Interceptor(_))
+                    && is_advice_component(&component_spec.exports)
+                {
+                    // Generate a wrapper interceptor from the target's current bytes,
+                    // then compose the wrapper with the advice, then replace target bytes.
+                    let wrapper_bytes =
+                        composable_runtime_interceptor::create_from_component(&bytes, &[])
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to generate interceptor wrapper for '{}' targeting '{}': {e}",
+                                    dependency_def.name,
+                                    definition.name,
+                                )
+                            })?;
+                    let composed_wrapper =
+                        Composer::compose_components(&wrapper_bytes, &component_spec.bytes)
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed composing interceptor wrapper with advice '{}': {e}",
+                                    dependency_def.name,
+                                )
+                            })?;
+                    bytes =
+                        Composer::compose_components(&composed_wrapper, &bytes).map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed composing '{}' with interceptor '{}': {e}",
+                                definition.name,
+                                dependency_def.name,
+                            )
+                        })?;
+                    tracing::info!(
+                        "Composed component '{}' with advice interceptor '{}'",
+                        definition.name,
+                        dependency_def.name
+                    );
+                } else {
+                    bytes = Composer::compose_components(&bytes, &component_spec.bytes).map_err(
+                        |e| {
+                            anyhow::anyhow!(
+                                "Failed composing '{}' with dependency '{}': {e}",
+                                definition.name,
+                                dependency_def.name
+                            )
+                        },
+                    )?;
+                    tracing::info!(
+                        "Composed component '{}' with dependency '{}'",
+                        definition.name,
+                        dependency_def.name
+                    );
+                }
 
                 for export in &component_spec.exports {
                     imports.retain(|import| import != export);
@@ -567,6 +606,12 @@ async fn process_component(
         capabilities: all_capabilities.into_iter().collect(),
         functions,
     })
+}
+
+fn is_advice_component(exports: &[String]) -> bool {
+    exports
+        .iter()
+        .any(|e| e.starts_with("modulewise:interceptor/advice"))
 }
 
 async fn read_bytes(uri: &str) -> Result<Vec<u8>> {

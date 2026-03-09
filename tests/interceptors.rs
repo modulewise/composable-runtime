@@ -49,13 +49,13 @@ async fn test_simple_interceptor() {
     let dependencies: Vec<_> = graph.get_dependencies(handler_index).collect();
     assert_eq!(dependencies.len(), 1);
 
-    let dep_name = if let composable_runtime::composition::graph::Node::Component(def) =
-        &graph[dependencies[0]]
-    {
-        &def.name
-    } else {
-        unreachable!()
-    };
+    let (dep_index, _) = dependencies[0];
+    let dep_name =
+        if let composable_runtime::composition::graph::Node::Component(def) = &graph[dep_index] {
+            &def.name
+        } else {
+            unreachable!()
+        };
     assert_eq!(dep_name, "client");
 
     let (component_registry, _capability_registry) =
@@ -124,13 +124,13 @@ async fn test_multiple_interceptors() {
         "The handler should have one dependency"
     );
 
-    let provider_name = if let composable_runtime::composition::graph::Node::Component(def) =
-        &graph[dependencies[0]]
-    {
-        &def.name
-    } else {
-        unreachable!()
-    };
+    let (dep_index, _) = dependencies[0];
+    let provider_name =
+        if let composable_runtime::composition::graph::Node::Component(def) = &graph[dep_index] {
+            &def.name
+        } else {
+            unreachable!()
+        };
 
     assert_eq!(
         provider_name, "client",
@@ -143,8 +143,9 @@ async fn test_multiple_interceptors() {
     let outer_deps: Vec<_> = graph.get_dependencies(outer_index).collect();
     assert_eq!(outer_deps.len(), 1);
 
+    let (outer_dep_index, _) = outer_deps[0];
     let outer_dep_name = if let composable_runtime::composition::graph::Node::Component(def) =
-        &graph[outer_deps[0]]
+        &graph[outer_dep_index]
     {
         &def.name
     } else {
@@ -157,8 +158,9 @@ async fn test_multiple_interceptors() {
     let inner_deps: Vec<_> = graph.get_dependencies(inner_index).collect();
     assert_eq!(inner_deps.len(), 1);
 
+    let (inner_dep_index, _) = inner_deps[0];
     let inner_dep_name = if let composable_runtime::composition::graph::Node::Component(def) =
-        &graph[inner_deps[0]]
+        &graph[inner_dep_index]
     {
         &def.name
     } else {
