@@ -203,10 +203,7 @@ impl ComponentGraph {
         self.node_map.get(name).copied()
     }
 
-    pub fn get_dependencies(
-        &self,
-        index: NodeIndex,
-    ) -> impl Iterator<Item = (NodeIndex, &Edge)> {
+    pub fn get_dependencies(&self, index: NodeIndex) -> impl Iterator<Item = (NodeIndex, &Edge)> {
         self.graph
             .edges_directed(index, petgraph::Direction::Incoming)
             .map(|edge_ref| (edge_ref.source(), edge_ref.weight()))

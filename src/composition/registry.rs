@@ -511,25 +511,22 @@ async fn process_component(
                     &metadata,
                 )?;
 
-                if matches!(edge, Edge::Interceptor(_))
-                    && is_advice_component(&exports)
-                {
+                if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&exports) {
                     // Current component is advice; the dependency is the target.
                     // Generate a wrapper from the target, plug in advice + target.
-                    let wrapper_bytes =
-                        composable_runtime_interceptor::create_from_component(
-                            &component_spec.bytes,
-                            &[],
+                    let wrapper_bytes = composable_runtime_interceptor::create_from_component(
+                        &component_spec.bytes,
+                        &[],
+                    )
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to generate interceptor wrapper for '{}' targeting '{}': {e}",
+                            definition.name,
+                            dependency_def.name,
                         )
+                    })?;
+                    let composed_wrapper = Composer::compose_components(&wrapper_bytes, &bytes)
                         .map_err(|e| {
-                            anyhow::anyhow!(
-                                "Failed to generate interceptor wrapper for '{}' targeting '{}': {e}",
-                                definition.name,
-                                dependency_def.name,
-                            )
-                        })?;
-                    let composed_wrapper =
-                        Composer::compose_components(&wrapper_bytes, &bytes).map_err(|e| {
                             anyhow::anyhow!(
                                 "Failed composing interceptor wrapper with advice '{}': {e}",
                                 definition.name,
@@ -546,8 +543,8 @@ async fn process_component(
 
                     // Re-parse: the composed result has the target's exports,
                     // not the advice's.
-                    let (_m, new_imports, new_exports, new_functions) =
-                        Parser::parse(&bytes).map_err(|e| {
+                    let (_m, new_imports, new_exports, new_functions) = Parser::parse(&bytes)
+                        .map_err(|e| {
                             anyhow::anyhow!("Failed to re-parse after advice composition: {e}")
                         })?;
                     imports = new_imports;
