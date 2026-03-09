@@ -541,15 +541,11 @@ async fn process_component(
                             )
                         })?;
 
-                    // Re-parse: the composed result has the target's exports,
-                    // not the advice's.
-                    let (_m, new_imports, new_exports, new_functions) = Parser::parse(&bytes)
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to re-parse after advice composition: {e}")
-                        })?;
-                    imports = new_imports;
-                    exports = new_exports;
-                    functions = new_functions;
+                    // The composed result should be functionally equivalent to
+                    // the target: same exports/functions and remaining imports
+                    imports = component_spec.imports.clone();
+                    exports = component_spec.exports.clone();
+                    functions = component_spec.functions.clone();
 
                     tracing::info!(
                         "Composed advice '{}' with target '{}'",

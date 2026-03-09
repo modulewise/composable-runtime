@@ -1,16 +1,19 @@
 [component.greeter]
 uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
-interceptors = ["logger"]
+interceptors = ["logging-advice"]
 
-[component.logger]
-uri = "./logger.wasm"
-imports = ["clocks", "io", "stdio"]
+[component.logging-advice]
+uri = "./target/wasm32-unknown-unknown/release/logger.wasm"
+imports = ["stdout-logger"]
+
+[component.stdout-logger]
+uri = "./wasi-logging-to-stdout.wasm"
+# could use this instead of pulling in the build script:
+# uri = "oci://ghcr.io/componentized/logging/to-stdout:v0.2.1"
+imports = ["clocks", "stdio"]
 
 [capability.clocks]
 uri = "wasmtime:wasip2"
-
-[capability.io]
-uri = "wasmtime:io"
 
 [capability.stdio]
 uri = "wasmtime:inherit-stdio"
