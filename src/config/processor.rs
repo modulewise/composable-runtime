@@ -321,6 +321,8 @@ fn validate_imports(
 
     for def in components {
         for import_name in &def.imports {
+            validate_name_chars(import_name)
+                .map_err(|e| anyhow::anyhow!("Invalid import for '{}': {e}", def.name))?;
             if !all_names.contains(import_name.as_str()) {
                 return Err(anyhow::anyhow!(
                     "Component '{}' imports undefined definition '{}'",
