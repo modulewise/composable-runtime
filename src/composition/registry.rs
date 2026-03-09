@@ -468,7 +468,7 @@ async fn process_component(
 
     let mut bytes = read_bytes(&definition.uri).await?;
 
-    let (metadata, mut imports, exports, functions) =
+    let (metadata, mut imports, mut exports, mut functions) =
         Parser::parse(&bytes).map_err(|e| anyhow::anyhow!("Failed to parse component: {e}"))?;
 
     let imports_config = imports
@@ -512,37 +512,50 @@ async fn process_component(
                 )?;
 
                 if matches!(edge, Edge::Interceptor(_))
-                    && is_advice_component(&component_spec.exports)
+                    && is_advice_component(&exports)
                 {
-                    // Generate a wrapper interceptor from the target's current bytes,
-                    // then compose the wrapper with the advice, then replace target bytes.
+                    // Current component is advice; the dependency is the target.
+                    // Generate a wrapper from the target, plug in advice + target.
                     let wrapper_bytes =
-                        composable_runtime_interceptor::create_from_component(&bytes, &[])
-                            .map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed to generate interceptor wrapper for '{}' targeting '{}': {e}",
-                                    dependency_def.name,
-                                    definition.name,
-                                )
-                            })?;
-                    let composed_wrapper =
-                        Composer::compose_components(&wrapper_bytes, &component_spec.bytes)
-                            .map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed composing interceptor wrapper with advice '{}': {e}",
-                                    dependency_def.name,
-                                )
-                            })?;
-                    bytes =
-                        Composer::compose_components(&composed_wrapper, &bytes).map_err(|e| {
+                        composable_runtime_interceptor::create_from_component(
+                            &component_spec.bytes,
+                            &[],
+                        )
+                        .map_err(|e| {
                             anyhow::anyhow!(
-                                "Failed composing '{}' with interceptor '{}': {e}",
+                                "Failed to generate interceptor wrapper for '{}' targeting '{}': {e}",
                                 definition.name,
                                 dependency_def.name,
                             )
                         })?;
+                    let composed_wrapper =
+                        Composer::compose_components(&wrapper_bytes, &bytes).map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed composing interceptor wrapper with advice '{}': {e}",
+                                definition.name,
+                            )
+                        })?;
+                    bytes = Composer::compose_components(&composed_wrapper, &component_spec.bytes)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed composing '{}' with target '{}': {e}",
+                                definition.name,
+                                dependency_def.name,
+                            )
+                        })?;
+
+                    // Re-parse: the composed result has the target's exports,
+                    // not the advice's.
+                    let (_m, new_imports, new_exports, new_functions) =
+                        Parser::parse(&bytes).map_err(|e| {
+                            anyhow::anyhow!("Failed to re-parse after advice composition: {e}")
+                        })?;
+                    imports = new_imports;
+                    exports = new_exports;
+                    functions = new_functions;
+
                     tracing::info!(
-                        "Composed component '{}' with advice interceptor '{}'",
+                        "Composed advice '{}' with target '{}'",
                         definition.name,
                         dependency_def.name
                     );

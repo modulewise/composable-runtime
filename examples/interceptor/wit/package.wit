@@ -1,0 +1,14 @@
+package example:interceptor@0.1.0;
+
+interface greeter {
+  greet: func(name: string) -> string;
+}
+
+world greeter-world {
+  export greeter;
+}
+
+world logger-world {
+  export modulewise:interceptor/advice@0.1.0;
+  import wasi:logging/logging@0.1.0-draft;
+}
