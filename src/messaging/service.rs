@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use crate::config::types::{ConfigHandler, PropertyMap};
-use crate::runtime::RuntimeService;
+use crate::service::Service;
 use crate::types::{ComponentInvoker, MessagePublisher};
 
 use super::bus::{Bus, LocalBus, LocalChannelFactory, SubscriptionConfig};
@@ -77,7 +77,7 @@ impl MessagingService {
     }
 }
 
-impl RuntimeService for MessagingService {
+impl Service for MessagingService {
     fn config_handler(&self) -> Option<Box<dyn ConfigHandler>> {
         Some(Box::new(MessagingConfigHandler {
             subscriptions: Arc::clone(&self.subscriptions),

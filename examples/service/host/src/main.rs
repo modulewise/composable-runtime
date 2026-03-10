@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use composable_runtime::{
     ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
-    PropertyMap, Runtime, RuntimeService, create_capability, create_state,
+    PropertyMap, Runtime, Service, create_capability, create_state,
 };
 use wasmtime::component::{HasSelf, Linker};
 
@@ -90,7 +90,7 @@ impl ConfigHandler for GreetingConfigHandler {
     }
 }
 
-// RuntimeService: owns a [greeting] config category, provides a greeting capability.
+// Service: owns a [greeting] config category, provides a greeting capability.
 struct GreetingService {
     config: Arc<Mutex<Option<GreetingConfig>>>,
 }
@@ -103,7 +103,7 @@ impl Default for GreetingService {
     }
 }
 
-impl RuntimeService for GreetingService {
+impl Service for GreetingService {
     fn config_handler(&self) -> Option<Box<dyn ConfigHandler>> {
         Some(Box::new(GreetingConfigHandler {
             config: Arc::clone(&self.config),

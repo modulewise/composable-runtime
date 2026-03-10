@@ -1,14 +1,13 @@
 use anyhow::Result;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::composition::graph::ComponentGraph;
 use crate::composition::registry::{HostCapability, HostCapabilityFactory, build_registries};
 use crate::config::types::{ConfigHandler, DefinitionLoader};
+use crate::service::Service;
 #[cfg(feature = "messaging")]
 use crate::types::MessagePublisher;
 use crate::types::{Component, ComponentInvoker};
@@ -18,59 +17,10 @@ pub(crate) mod host;
 
 use host::ComponentHost;
 
-/// Lifecycle-managed service that participates in config parsing and runtime.
-///
-/// A service optionally provides a `ConfigHandler` for parsing its own config
-/// categories during the build phase, `HostCapability` implementations for
-/// component linking, and `start`/`shutdown` lifecycle hooks.
-///
-/// The `config_handler()` method returns a separate handler object that can
-/// write parsed config into shared state (e.g. `Arc<Mutex<...>>`). After
-/// config processing, the handler is dropped and the service can read the
-/// accumulated state in its `capabilities()` and `start()` implementations.
-///
-/// Dependencies are injected via `set_*` methods before `start()` is called.
-/// Override only the ones your service needs; all have default no-ops.
-pub trait RuntimeService: Send + Sync {
-    /// Provide a config handler for parsing this service's config categories.
-    /// Returns `None` if the service has no config (default).
-    fn config_handler(&self) -> Option<Box<dyn ConfigHandler>> {
-        None
-    }
-
-    /// Provide any HostCapability factories to register (default is empty).
-    /// Called after config parsing and before registry build.
-    /// Each factory creates capability instances from `config.*` values,
-    /// closing over any service-internal state needed by the capability.
-    fn capabilities(&self) -> Vec<(&'static str, HostCapabilityFactory)> {
-        vec![]
-    }
-
-    /// Inject the component invoker. Called before `start()`.
-    /// Override to stash the invoker for use during the service lifecycle.
-    fn set_invoker(&self, _invoker: Arc<dyn ComponentInvoker>) {}
-
-    /// Inject the message publisher. Called before `start()`.
-    /// Override to stash the publisher for use during the service lifecycle.
-    #[cfg(feature = "messaging")]
-    fn set_publisher(&self, _publisher: Arc<dyn MessagePublisher>) {}
-
-    /// Start the service. Called after all dependencies are injected.
-    /// Implementations should spawn background tasks and return immediately.
-    fn start(&self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Shutdown the service, cancelling background tasks.
-    fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async {})
-    }
-}
-
 /// Composable Runtime for invoking Wasm Components
 pub struct Runtime {
     host: ComponentHost,
-    services: Vec<Box<dyn RuntimeService>>,
+    services: Vec<Box<dyn Service>>,
     #[cfg(feature = "messaging")]
     publisher: Arc<dyn MessagePublisher>,
 }
@@ -194,7 +144,7 @@ pub struct RuntimeBuilder {
     paths: Vec<PathBuf>,
     loaders: Vec<Box<dyn DefinitionLoader>>,
     handlers: Vec<Box<dyn ConfigHandler>>,
-    services: Vec<Box<dyn RuntimeService>>,
+    services: Vec<Box<dyn Service>>,
     factories: HashMap<&'static str, HostCapabilityFactory>,
     use_default_loaders: bool,
 }
@@ -246,7 +196,7 @@ impl RuntimeBuilder {
     /// The service's config handler (if any) participates in config parsing.
     /// Its capabilities are registered after config parsing. Its `start()`
     /// and `shutdown()` are called during the runtime lifecycle.
-    pub fn with_service<T: RuntimeService + Default + 'static>(mut self) -> Self {
+    pub fn with_service<T: Service + Default + 'static>(mut self) -> Self {
         self.services.push(Box::new(T::default()));
         self
     }

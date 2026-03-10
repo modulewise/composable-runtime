@@ -6,7 +6,8 @@
 pub use composition::graph::{ComponentGraph, GraphBuilder};
 pub use composition::registry::{CapabilityStateHasData, HostCapability, HostCapabilityFactory};
 pub use config::types::{ConfigHandler, DefinitionLoader, PropertyMap};
-pub use runtime::{Runtime, RuntimeBuilder, RuntimeService};
+pub use runtime::{Runtime, RuntimeBuilder};
+pub use service::Service;
 pub use types::{
     Component, ComponentInvoker, ComponentState, Function, FunctionParam, MessagePublisher,
 };
@@ -21,6 +22,7 @@ pub(crate) mod config;
 #[cfg(feature = "messaging")]
 mod messaging;
 mod runtime;
+pub(crate) mod service;
 
 #[cfg(feature = "messaging")]
 pub use messaging::{Channel, Message, MessageBuilder, header};
