@@ -1,8 +1,10 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use composable_runtime::{
-    ComponentInvoker, ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
+    ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
     PropertyMap, Runtime, RuntimeService, create_capability, create_state,
 };
 use wasmtime::component::{HasSelf, Linker};
@@ -126,14 +128,14 @@ impl RuntimeService for GreetingService {
         })]
     }
 
-    fn start(&self, invoker: Arc<dyn ComponentInvoker>) -> Result<()> {
+    fn start(&self) -> Result<()> {
         println!("[GreetingService] started");
         Ok(())
     }
 
-    fn stop(&self) -> Result<()> {
-        println!("[GreetingService] stopped");
-        Ok(())
+    fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        println!("[GreetingService] shutdown");
+        Box::pin(async {})
     }
 }
 
@@ -153,7 +155,7 @@ async fn main() -> Result<()> {
 
     println!("Result: {result}");
 
-    runtime.stop();
+    runtime.shutdown().await;
 
     Ok(())
 }

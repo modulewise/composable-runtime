@@ -164,61 +164,55 @@ impl Activator {
 }
 
 impl Handler for Activator {
-    fn handle(&self, msg: Message) -> impl Future<Output = Result<(), String>> + Send {
-        async move {
-            match &self.mode {
-                InvocationMode::Direct => {
-                    Err("direct handler mode not yet implemented".to_string())
-                }
-                InvocationMode::Mapped { mapper } => {
-                    let invocation = mapper.map(&msg)?;
-                    let result = self
-                        .invoker
-                        .invoke(
-                            &self.component_name,
-                            &invocation.function_key,
-                            invocation.args,
-                        )
-                        .await
-                        .map_err(|e| e.to_string())?;
+    async fn handle(&self, msg: Message) -> Result<(), String> {
+        match &self.mode {
+            InvocationMode::Direct => Err("direct handler mode not yet implemented".to_string()),
+            InvocationMode::Mapped { mapper } => {
+                let invocation = mapper.map(&msg)?;
+                let result = self
+                    .invoker
+                    .invoke(
+                        &self.component_name,
+                        &invocation.function_key,
+                        invocation.args,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-                    if let Some(reply_to) = msg.headers().reply_to() {
-                        let publisher = self.reply_publisher.as_ref().ok_or_else(|| {
-                            format!(
-                                "reply-to '{reply_to}' requested but no reply publisher available"
-                            )
-                        })?;
-                        let content_type = msg.headers().content_type();
-                        let body = match content_type {
-                            Some("text/plain") => match &result {
-                                serde_json::Value::String(s) => s.as_bytes().to_vec(),
-                                other => other.to_string().into_bytes(),
-                            },
-                            _ => serde_json::to_vec(&result)
-                                .map_err(|e| format!("failed to serialize reply: {e}"))?,
-                        };
-                        let mut builder = MessageBuilder::new(body);
-                        if let Some(corr_id) = msg.headers().correlation_id() {
-                            builder = builder.header(header::CORRELATION_ID, corr_id);
-                        }
-                        if let Some(ct) = content_type {
-                            builder = builder.header(header::CONTENT_TYPE, ct);
-                        }
-                        publisher
-                            .publish(reply_to, builder.build())
-                            .await
-                            .map_err(|e| format!("failed to publish reply: {e}"))?;
-                    } else {
-                        tracing::info!(
-                            component = %self.component_name,
-                            function = %invocation.function_key,
-                            result = %result,
-                            "invocation complete"
-                        );
+                if let Some(reply_to) = msg.headers().reply_to() {
+                    let publisher = self.reply_publisher.as_ref().ok_or_else(|| {
+                        format!("reply-to '{reply_to}' requested but no reply publisher available")
+                    })?;
+                    let content_type = msg.headers().content_type();
+                    let body = match content_type {
+                        Some("text/plain") => match &result {
+                            serde_json::Value::String(s) => s.as_bytes().to_vec(),
+                            other => other.to_string().into_bytes(),
+                        },
+                        _ => serde_json::to_vec(&result)
+                            .map_err(|e| format!("failed to serialize reply: {e}"))?,
+                    };
+                    let mut builder = MessageBuilder::new(body);
+                    if let Some(corr_id) = msg.headers().correlation_id() {
+                        builder = builder.header(header::CORRELATION_ID, corr_id);
                     }
-
-                    Ok(())
+                    if let Some(ct) = content_type {
+                        builder = builder.header(header::CONTENT_TYPE, ct);
+                    }
+                    publisher
+                        .publish(reply_to, builder.build())
+                        .await
+                        .map_err(|e| format!("failed to publish reply: {e}"))?;
+                } else {
+                    tracing::info!(
+                        component = %self.component_name,
+                        function = %invocation.function_key,
+                        result = %result,
+                        "invocation complete"
+                    );
                 }
+
+                Ok(())
             }
         }
     }

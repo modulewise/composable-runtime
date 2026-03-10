@@ -95,7 +95,7 @@ impl Runtime {
 
     /// Get a specific component by name
     pub fn get_component(&self, name: &str) -> Option<Component> {
-        ComponentInvoker::get_component(&self.host, name)
+        self.host.get_component(name)
     }
 
     /// Invoke a component function
