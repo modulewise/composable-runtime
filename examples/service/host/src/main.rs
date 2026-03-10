@@ -1,9 +1,11 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use composable_runtime::{
-    ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory, PropertyMap, Runtime,
-    RuntimeService, create_capability, create_state,
+    ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
+    PropertyMap, Runtime, Service, create_capability, create_state,
 };
 use wasmtime::component::{HasSelf, Linker};
 
@@ -88,7 +90,7 @@ impl ConfigHandler for GreetingConfigHandler {
     }
 }
 
-// RuntimeService: owns a [greeting] config category, provides a greeting capability.
+// Service: owns a [greeting] config category, provides a greeting capability.
 struct GreetingService {
     config: Arc<Mutex<Option<GreetingConfig>>>,
 }
@@ -101,7 +103,7 @@ impl Default for GreetingService {
     }
 }
 
-impl RuntimeService for GreetingService {
+impl Service for GreetingService {
     fn config_handler(&self) -> Option<Box<dyn ConfigHandler>> {
         Some(Box::new(GreetingConfigHandler {
             config: Arc::clone(&self.config),
@@ -131,9 +133,9 @@ impl RuntimeService for GreetingService {
         Ok(())
     }
 
-    fn stop(&self) -> Result<()> {
-        println!("[GreetingService] stopped");
-        Ok(())
+    fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        println!("[GreetingService] shutdown");
+        Box::pin(async {})
     }
 }
 
@@ -153,7 +155,7 @@ async fn main() -> Result<()> {
 
     println!("Result: {result}");
 
-    runtime.stop();
+    runtime.shutdown().await;
 
     Ok(())
 }

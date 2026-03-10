@@ -1,13 +1,13 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio::time;
 
-use std::future::Future;
-
-use super::Message;
+use super::message::Message;
 
 // Default channel capacity.
 const DEFAULT_CAPACITY: usize = 256;
@@ -61,6 +61,7 @@ impl std::error::Error for ConsumeError {}
 
 /// Receipt operation (ack or nack) failed.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ReceiptError {
     /// The provider connection was lost or the receipt is invalid.
     Failed(String),
@@ -87,6 +88,7 @@ pub trait ConsumeReceipt: Send {
 /// Receipt from a `publish()` call, so a publisher may optionally wait for
 /// broker confirmation that the message was persisted. Behavior is specific to
 /// each channel implementation. Each receipt is single-use (consumes `self`).
+#[allow(dead_code)]
 pub trait PublishReceipt: Send {
     fn confirm(self) -> impl Future<Output = Result<(), PublishError>> + Send;
 }
@@ -112,6 +114,7 @@ pub enum Overflow {
     /// Publisher blocks until space is available (or timeout/close).
     Block,
     /// Oldest message is dropped to make room.
+    #[allow(dead_code)]
     DropOldest,
 }
 
@@ -197,6 +200,33 @@ impl LocalChannel {
             publish_timeout_ms,
             consume_timeout_ms,
             inner,
+        }
+    }
+
+    // Pre-register a consumer group so that messages published after this
+    // call are delivered to the group. Called by LocalChannelFactory::init()
+    pub(crate) fn init_group(&self, group: &str) {
+        match &self.inner {
+            ChannelInner::Block { senders, receivers } => {
+                let mut receiver_map = receivers.lock().unwrap();
+                if receiver_map.contains_key(group) {
+                    return;
+                }
+                let (tx, rx) = mpsc::channel(self.capacity);
+                let arc = Arc::new(tokio::sync::Mutex::new(rx));
+                receiver_map.insert(group.to_string(), arc);
+                drop(receiver_map);
+                let mut sender_map = senders.lock().unwrap();
+                sender_map.insert(group.to_string(), tx);
+            }
+            ChannelInner::DropOldest { sender, receivers } => {
+                let mut map = receivers.lock().unwrap();
+                if map.contains_key(group) {
+                    return;
+                }
+                let arc = Arc::new(tokio::sync::Mutex::new(sender.subscribe()));
+                map.insert(group.to_string(), arc);
+            }
         }
     }
 
@@ -391,6 +421,31 @@ impl Channel for LocalChannel {
     }
 }
 
+// Publish to a channel by name. Used by the activator with reply-to.
+pub(crate) trait ReplyPublisher: Send + Sync {
+    fn publish<'a>(
+        &'a self,
+        channel: &'a str,
+        msg: Message,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send + 'a>>;
+}
+
+impl<C: Channel + 'static> ReplyPublisher for ChannelRegistry<C> {
+    fn publish<'a>(
+        &'a self,
+        channel: &'a str,
+        msg: Message,
+    ) -> Pin<Box<dyn Future<Output = Result<(), PublishError>> + Send + 'a>> {
+        Box::pin(async move {
+            let ch = self
+                .lookup(channel)
+                .ok_or_else(|| PublishError::Closed(format!("channel '{channel}' not found")))?;
+            ch.publish(msg).await?;
+            Ok(())
+        })
+    }
+}
+
 /// Registry for channels that can be accessed by name.
 pub struct ChannelRegistry<C: Channel> {
     channels: RwLock<HashMap<String, Arc<C>>>,
@@ -412,6 +467,7 @@ impl<C: Channel> ChannelRegistry<C> {
     }
 
     /// Remove a channel by name.
+    #[allow(dead_code)]
     pub fn remove(&self, name: &str) -> Option<Arc<C>> {
         self.channels
             .write()
@@ -434,7 +490,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::messaging::MessageBuilder;
+    use crate::messaging::message::MessageBuilder;
 
     #[tokio::test]
     async fn publish_no_consumers_returns_error() {

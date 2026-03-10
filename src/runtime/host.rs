@@ -16,7 +16,7 @@ use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::composition::registry::{CapabilityRegistry, ComponentRegistry};
-use crate::types::{ComponentState, Function};
+use crate::types::{Component, ComponentInvoker, ComponentState, Function};
 
 // Component host: wasmtime engine + registries, provides instantiation + invocation.
 #[derive(Clone)]
@@ -85,6 +85,28 @@ impl ComponentHost {
                 env_vars,
             )
             .await
+    }
+}
+
+impl ComponentInvoker for ComponentHost {
+    fn get_component(&self, name: &str) -> Option<Component> {
+        self.component_registry
+            .get_component(name)
+            .map(|spec| Component {
+                name: spec.name.clone(),
+                functions: spec.functions.clone(),
+            })
+    }
+
+    fn invoke<'a>(
+        &'a self,
+        component_name: &'a str,
+        function_name: &'a str,
+        args: Vec<serde_json::Value>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send + 'a>,
+    > {
+        Box::pin(self.invoke(component_name, function_name, args, &[]))
     }
 }
 

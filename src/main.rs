@@ -39,6 +39,24 @@ enum Command {
         #[arg(required = true)]
         definitions: Vec<PathBuf>,
     },
+    /// Publish a message to a channel
+    Publish {
+        /// Component definition files (.toml) and standalone .wasm files
+        #[arg(required = true)]
+        definitions: Vec<PathBuf>,
+
+        /// Channel name to publish to
+        #[arg(long)]
+        channel: String,
+
+        /// Message body
+        #[arg(long)]
+        body: String,
+
+        /// Content type
+        #[arg(long, default_value = "text/plain")]
+        content_type: String,
+    },
     /// Inspect the dependency graph
     Graph {
         /// Component definition files (.toml) and standalone .wasm files
@@ -75,7 +93,7 @@ async fn main() -> Result<()> {
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
             runtime.start()?;
             run_shell(&runtime).await?;
-            runtime.stop();
+            runtime.shutdown().await;
         }
         Command::Invoke {
             definitions,
@@ -84,7 +102,32 @@ async fn main() -> Result<()> {
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
             runtime.start()?;
             run_invoke(&runtime, target_args).await?;
-            runtime.stop();
+            runtime.shutdown().await;
+        }
+        Command::Publish {
+            definitions,
+            channel,
+            body,
+            content_type,
+        } => {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    EnvFilter::from_default_env()
+                        .add_directive("composable_runtime::messaging=info".parse().unwrap()),
+                )
+                .init();
+
+            let runtime = Runtime::builder().from_paths(&definitions).build().await?;
+            runtime.start()?;
+
+            let publisher = runtime.publisher();
+            let headers =
+                std::collections::HashMap::from([("content-type".to_string(), content_type)]);
+            publisher
+                .publish(&channel, body.into_bytes(), headers)
+                .await?;
+
+            runtime.shutdown().await;
         }
         Command::Run { definitions } => {
             tracing_subscriber::fmt()
