@@ -102,7 +102,6 @@ impl RuntimeService for MessagingService {
 }
 
 // Implements MessagePublisher by delegating to the bus.
-// Converts raw body + headers into a Message, then publishes.
 struct BusPublisher {
     bus: Arc<dyn Bus>,
 }

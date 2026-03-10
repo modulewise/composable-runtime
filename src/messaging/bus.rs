@@ -112,10 +112,12 @@ where
         let subscriptions: Vec<_> = self.subscriptions.lock().unwrap().drain(..).collect();
 
         for sub in subscriptions {
-            let channel = self.factory.create(&sub.channel_name);
+            let channel = self.registry.lookup(&sub.channel_name).unwrap_or_else(|| {
+                let ch = self.factory.create(&sub.channel_name);
+                self.registry.register(&sub.channel_name, Arc::clone(&ch));
+                ch
+            });
             self.factory.init(&channel, &sub.component_name);
-            self.registry
-                .register(&sub.channel_name, Arc::clone(&channel));
 
             let activator = Activator::new(
                 Arc::clone(&invoker),
