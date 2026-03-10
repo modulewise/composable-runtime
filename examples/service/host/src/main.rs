@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use composable_runtime::{
-    ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
+    CategoryClaim, ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
     PropertyMap, Runtime, Service, create_capability, create_state,
 };
 use wasmtime::component::{HasSelf, Linker};
@@ -69,8 +69,8 @@ struct GreetingConfigHandler {
 }
 
 impl ConfigHandler for GreetingConfigHandler {
-    fn claimed_categories(&self) -> &[&str] {
-        &["greeting"]
+    fn claimed_categories(&self) -> Vec<CategoryClaim> {
+        vec![CategoryClaim::all("greeting")]
     }
 
     fn handle_category(

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
-use super::types::{ConfigHandler, PropertyMap};
+use super::types::{CategoryClaim, ConfigHandler, PropertyMap};
 use crate::types::{CapabilityDefinition, ComponentDefinition, default_scope};
 
 /// Handles `[component.*]` definitions.
@@ -16,8 +16,8 @@ impl<'a> ComponentConfigHandler<'a> {
 }
 
 impl ConfigHandler for ComponentConfigHandler<'_> {
-    fn claimed_categories(&self) -> &[&str] {
-        &["component"]
+    fn claimed_categories(&self) -> Vec<CategoryClaim> {
+        vec![CategoryClaim::all("component")]
     }
 
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
@@ -78,8 +78,8 @@ impl<'a> CapabilityConfigHandler<'a> {
 }
 
 impl ConfigHandler for CapabilityConfigHandler<'_> {
-    fn claimed_categories(&self) -> &[&str] {
-        &["capability"]
+    fn claimed_categories(&self) -> Vec<CategoryClaim> {
+        vec![CategoryClaim::all("capability")]
     }
 
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {

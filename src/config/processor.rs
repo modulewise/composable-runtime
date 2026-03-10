@@ -92,22 +92,40 @@ impl ConfigProcessor {
     }
 }
 
+use super::types::CategoryClaim;
+
+// A category claim registered by a handler, with its handler index.
+struct RegisteredClaim {
+    handler_idx: usize,
+    claim: CategoryClaim,
+}
+
 fn dispatch(
     definitions: &mut Vec<GenericDefinition>,
     handlers: &mut [Box<dyn ConfigHandler + '_>],
 ) -> Result<()> {
-    // Build category => handler index map
-    let mut category_owners: HashMap<String, usize> = HashMap::new();
+    // Build category => list of claims (handler index + optional selector).
+    // Validate: if any claim on a category has no selector, it must be the only claim.
+    let mut category_claims: HashMap<String, Vec<RegisteredClaim>> = HashMap::new();
     for (idx, handler) in handlers.iter().enumerate() {
-        for cat in handler.claimed_categories() {
-            if let Some(&existing_idx) = category_owners.get(*cat)
-                && existing_idx != idx
-            {
+        for claim in handler.claimed_categories() {
+            category_claims
+                .entry(claim.category.to_string())
+                .or_default()
+                .push(RegisteredClaim {
+                    handler_idx: idx,
+                    claim,
+                });
+        }
+    }
+    for (category, claims) in &category_claims {
+        if claims.len() > 1 {
+            let has_unselected = claims.iter().any(|c| c.claim.selector.is_none());
+            if has_unselected {
                 return Err(anyhow::anyhow!(
-                    "Category '{cat}' claimed by multiple handlers"
+                    "Category '{category}' claimed exclusivesly (without a selector) and by other handlers"
                 ));
             }
-            category_owners.insert(cat.to_string(), idx);
         }
     }
 
@@ -130,13 +148,15 @@ fn dispatch(
     }
 
     for def in definitions.drain(..) {
-        let &owner_idx = category_owners.get(&def.category).ok_or_else(|| {
+        let claims = category_claims.get(&def.category).ok_or_else(|| {
             anyhow::anyhow!(
                 "Unknown category '{}'. Known categories: {:?}",
                 def.category,
-                category_owners.keys().collect::<Vec<_>>()
+                category_claims.keys().collect::<Vec<_>>()
             )
         })?;
+
+        let owner_idx = resolve_owner(claims, &def)?;
 
         let (core_properties, claimed_by_handler) =
             split_properties(def.properties, &def.category, owner_idx, &property_claims);
@@ -149,6 +169,81 @@ fn dispatch(
     }
 
     Ok(())
+}
+
+// Find the single handler that owns a definition.
+// Returns an error if not exactly one match.
+fn resolve_owner(claims: &[RegisteredClaim], def: &GenericDefinition) -> Result<usize> {
+    // Single claim with no selector => unconditional category owner
+    if claims.len() == 1 && claims[0].claim.selector.is_none() {
+        return Ok(claims[0].handler_idx);
+    }
+
+    // Flatten properties to string-to-string for selector matching
+    let flat = flatten_for_selector(&def.properties);
+
+    let mut matched = Vec::new();
+    for rc in claims {
+        let matches = rc.claim.selector.as_ref().is_none_or(|s| s.matches(&flat));
+        if matches {
+            matched.push(rc.handler_idx);
+        }
+    }
+
+    match matched.len() {
+        0 => Err(anyhow::anyhow!(
+            "No handler matched definition '{}' in category '{}'",
+            def.name,
+            def.category
+        )),
+        1 => Ok(matched[0]),
+        _ => Err(anyhow::anyhow!(
+            "Multiple handlers matched definition '{}' in category '{}'",
+            def.name,
+            def.category
+        )),
+    }
+}
+
+// Flatten a PropertyMap for selector matching. Scalar values become
+// Some(string), arrays and null become None (key present but no scalar value).
+// Nested objects use dot-delimited keys.
+fn flatten_for_selector(properties: &PropertyMap) -> HashMap<String, Option<String>> {
+    let mut result = HashMap::new();
+    flatten_recursive(properties, "", &mut result);
+    result
+}
+
+fn flatten_recursive(
+    map: &PropertyMap,
+    prefix: &str,
+    result: &mut HashMap<String, Option<String>>,
+) {
+    for (key, value) in map {
+        let full_key = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        match value {
+            serde_json::Value::String(s) => {
+                result.insert(full_key, Some(s.clone()));
+            }
+            serde_json::Value::Bool(b) => {
+                result.insert(full_key, Some(b.to_string()));
+            }
+            serde_json::Value::Number(n) => {
+                result.insert(full_key, Some(n.to_string()));
+            }
+            serde_json::Value::Object(obj) => {
+                let nested: PropertyMap = obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                flatten_recursive(&nested, &full_key, result);
+            }
+            serde_json::Value::Array(_) | serde_json::Value::Null => {
+                result.insert(full_key, None);
+            }
+        }
+    }
 }
 
 fn split_properties(
