@@ -1,35 +1,36 @@
 use anyhow::Result;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::composition::graph::ComponentGraph;
 use crate::composition::registry::{HostCapability, HostCapabilityFactory, build_registries};
 use crate::config::types::{ConfigHandler, DefinitionLoader};
-use crate::types::Function;
+#[cfg(feature = "messaging")]
+use crate::types::MessagePublisher;
+use crate::types::{Component, ComponentInvoker};
 
 mod grpc;
 pub(crate) mod host;
 
 use host::ComponentHost;
 
-/// Wasm Component whose functions can be invoked
-#[derive(Debug, Clone)]
-pub struct Component {
-    pub name: String,
-    pub functions: HashMap<String, Function>,
-}
-
 /// Lifecycle-managed service that participates in config parsing and runtime.
 ///
 /// A service optionally provides a `ConfigHandler` for parsing its own config
 /// categories during the build phase, `HostCapability` implementations for
-/// component linking, and `start`/`stop` lifecycle hooks.
+/// component linking, and `start`/`shutdown` lifecycle hooks.
 ///
 /// The `config_handler()` method returns a separate handler object that can
 /// write parsed config into shared state (e.g. `Arc<Mutex<...>>`). After
 /// config processing, the handler is dropped and the service can read the
 /// accumulated state in its `capabilities()` and `start()` implementations.
+///
+/// Dependencies are injected via `set_*` methods before `start()` is called.
+/// Override only the ones your service needs; all have default no-ops.
 pub trait RuntimeService: Send + Sync {
     /// Provide a config handler for parsing this service's config categories.
     /// Returns `None` if the service has no config (default).
@@ -45,16 +46,24 @@ pub trait RuntimeService: Send + Sync {
         vec![]
     }
 
-    /// Start the service. Called after all registries are built.
+    /// Inject the component invoker. Called before `start()`.
+    /// Override to stash the invoker for use during the service lifecycle.
+    fn set_invoker(&self, _invoker: Arc<dyn ComponentInvoker>) {}
+
+    /// Inject the message publisher. Called before `start()`.
+    /// Override to stash the publisher for use during the service lifecycle.
+    #[cfg(feature = "messaging")]
+    fn set_publisher(&self, _publisher: Arc<dyn MessagePublisher>) {}
+
+    /// Start the service. Called after all dependencies are injected.
     /// Implementations should spawn background tasks and return immediately.
     fn start(&self) -> Result<()> {
         Ok(())
     }
 
-    /// Signal the service to shut down gracefully.
-    /// Implementations should cancel background tasks spawned by `start()`.
-    fn stop(&self) -> Result<()> {
-        Ok(())
+    /// Shutdown the service, cancelling background tasks.
+    fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async {})
     }
 }
 
@@ -62,6 +71,8 @@ pub trait RuntimeService: Send + Sync {
 pub struct Runtime {
     host: ComponentHost,
     services: Vec<Box<dyn RuntimeService>>,
+    #[cfg(feature = "messaging")]
+    publisher: Arc<dyn MessagePublisher>,
 }
 
 impl Runtime {
@@ -84,13 +95,7 @@ impl Runtime {
 
     /// Get a specific component by name
     pub fn get_component(&self, name: &str) -> Option<Component> {
-        self.host
-            .component_registry
-            .get_component(name)
-            .map(|spec| Component {
-                name: spec.name.clone(),
-                functions: spec.functions.clone(),
-            })
+        ComponentInvoker::get_component(&self.host, name)
     }
 
     /// Invoke a component function
@@ -100,8 +105,7 @@ impl Runtime {
         function_name: &str,
         args: Vec<serde_json::Value>,
     ) -> Result<serde_json::Value> {
-        self.invoke_with_env(component_name, function_name, args, &[])
-            .await
+        ComponentInvoker::invoke(&self.host, component_name, function_name, args).await
     }
 
     /// Invoke a component function with environment variables
@@ -140,31 +144,47 @@ impl Runtime {
         self.host.instantiate(component_name, env_vars).await
     }
 
+    /// Get a component invoker for this runtime.
+    pub fn invoker(&self) -> Arc<dyn ComponentInvoker> {
+        Arc::new(self.host.clone())
+    }
+
+    /// Get a message publisher for this runtime (messaging feature only).
+    #[cfg(feature = "messaging")]
+    pub fn publisher(&self) -> Arc<dyn MessagePublisher> {
+        Arc::clone(&self.publisher)
+    }
+
     /// Start the runtime (services, in registration order).
+    ///
+    /// Injects dependencies (`set_invoker`, `set_publisher`) into each
+    /// service before calling `start()`.
     pub fn start(&self) -> Result<()> {
+        let invoker: Arc<dyn ComponentInvoker> = Arc::new(self.host.clone());
         for service in &self.services {
+            service.set_invoker(invoker.clone());
+            #[cfg(feature = "messaging")]
+            service.set_publisher(Arc::clone(&self.publisher));
             service.start()?;
         }
         Ok(())
     }
 
-    /// Stop the runtime (services, in reverse registration order).
-    pub fn stop(&self) {
+    /// Shutdown all services in reverse registration order.
+    pub async fn shutdown(&self) {
         for service in self.services.iter().rev() {
-            if let Err(e) = service.stop() {
-                tracing::error!("Error stopping service: {e}");
-            }
+            service.shutdown().await;
         }
     }
 
     /// Start the runtime and block until a shutdown signal (SIGINT/SIGTERM).
     ///
     /// Intended for long-lived processes (`composable run`).
-    /// For one-off invocations, use `start()` / `stop()` directly.
+    /// For one-off invocations, use `start()` / `shutdown().await` directly.
     pub async fn run(&self) -> Result<()> {
         self.start()?;
         wait_for_shutdown().await?;
-        self.stop();
+        self.shutdown().await;
         Ok(())
     }
 }
@@ -225,7 +245,7 @@ impl RuntimeBuilder {
     ///
     /// The service's config handler (if any) participates in config parsing.
     /// Its capabilities are registered after config parsing. Its `start()`
-    /// and `stop()` are called during the runtime lifecycle.
+    /// and `shutdown()` are called during the runtime lifecycle.
     pub fn with_service<T: RuntimeService + Default + 'static>(mut self) -> Self {
         self.services.push(Box::new(T::default()));
         self
@@ -262,7 +282,17 @@ impl RuntimeBuilder {
     }
 
     /// Build the Runtime: load config, build graph, build registries, create component host
-    pub async fn build(self) -> Result<Runtime> {
+    #[allow(unused_mut)]
+    pub async fn build(mut self) -> Result<Runtime> {
+        // Auto-register MessagingService when feature is enabled
+        #[cfg(feature = "messaging")]
+        let messaging_publisher: Arc<dyn MessagePublisher> = {
+            let svc = crate::messaging::MessagingService::new();
+            let publisher = svc.publisher();
+            self.services.push(Box::new(svc));
+            publisher
+        };
+
         let mut graph_builder = ComponentGraph::builder().from_paths(&self.paths);
         if !self.use_default_loaders {
             graph_builder = graph_builder.no_default_loaders();
@@ -298,6 +328,8 @@ impl RuntimeBuilder {
         Ok(Runtime {
             host,
             services: self.services,
+            #[cfg(feature = "messaging")]
+            publisher: messaging_publisher,
         })
     }
 }

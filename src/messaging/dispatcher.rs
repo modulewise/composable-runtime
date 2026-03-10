@@ -4,7 +4,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::activator::Handler;
-use super::channel::{Channel, ConsumeError, ConsumeReceipt, PublishReceipt};
+use super::channel::{Channel, ConsumeError, ConsumeReceipt};
 
 /// Per-subscription consumer that connects a channel to a handler.
 ///
@@ -54,22 +54,7 @@ where
                 result = self.channel.consume(&self.group) => {
                     match result {
                         Ok((msg, receipt)) => {
-                            let handler = Arc::clone(&self.handler);
-                            tasks.spawn(async move {
-                                match handler.handle(msg).await {
-                                    Ok(()) => {
-                                        if let Err(e) = receipt.ack().await {
-                                            tracing::error!(error = %e, "ack failed");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::error!(error = %e, "handler error");
-                                        if let Err(e) = receipt.nack().await {
-                                            tracing::error!(error = %e, "nack failed");
-                                        }
-                                    }
-                                }
-                            });
+                            self.dispatch_message(&mut tasks, msg, receipt);
                         }
                         Err(ConsumeError::Timeout(_)) => {
                             tracing::debug!(group = %self.group, "no message, looping");
@@ -87,6 +72,30 @@ where
         // Drain remaining in-flight tasks.
         while tasks.join_next().await.is_some() {}
     }
+
+    fn dispatch_message(
+        &self,
+        tasks: &mut JoinSet<()>,
+        msg: super::Message,
+        receipt: C::ConsumeReceipt,
+    ) {
+        let handler = Arc::clone(&self.handler);
+        tasks.spawn(async move {
+            match handler.handle(msg).await {
+                Ok(()) => {
+                    if let Err(e) = receipt.ack().await {
+                        tracing::error!(error = %e, "ack failed");
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "handler error");
+                    if let Err(e) = receipt.nack().await {
+                        tracing::error!(error = %e, "nack failed");
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -97,9 +106,10 @@ mod tests {
     use tokio::sync::Semaphore;
 
     use super::*;
-    use crate::messaging::{
-        ConsumeError, LocalChannel, Message, MessageBuilder, Overflow, PublishError, ReceiptError,
+    use crate::messaging::channel::{
+        ConsumeError, LocalChannel, Overflow, PublishError, ReceiptError,
     };
+    use crate::messaging::message::{Message, MessageBuilder};
 
     fn init_tracing() {
         let _ = tracing_subscriber::fmt()

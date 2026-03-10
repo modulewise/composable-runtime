@@ -615,6 +615,7 @@ version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap",
+ "composable-runtime-interceptor",
  "http-body-util",
  "hyper",
  "oci-client",
@@ -637,6 +638,20 @@ dependencies = [
  "wasmtime-wasi-http",
  "wasmtime-wasi-io",
  "wit-component 0.244.0",
+ "wit-parser 0.244.0",
+]
+
+[[package]]
+name = "composable-runtime-interceptor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "tracing",
+ "tracing-subscriber",
+ "wasm-encoder 0.244.0",
+ "wasmparser 0.244.0",
+ "wat",
  "wit-parser 0.244.0",
 ]
 

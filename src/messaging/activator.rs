@@ -1,9 +1,9 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::runtime::{Component, Runtime};
+use crate::types::{Component, ComponentInvoker};
 
-use super::channel::{Channel, ChannelRegistry, LocalChannel};
+use super::channel::ReplyPublisher;
 use super::message::{Message, MessageBuilder, header};
 
 /// Handler for messages, used by dispatcher.
@@ -110,10 +110,10 @@ impl Mapper for DefaultMapper {
 /// message into a function call. For components exporting the WIT `handler`
 /// interface (direct mode), bypasses the mapper entirely.
 pub struct Activator {
-    runtime: Runtime,
+    invoker: Arc<dyn ComponentInvoker>,
     component_name: String,
     mode: InvocationMode,
-    registry: Option<Arc<ChannelRegistry<LocalChannel>>>,
+    reply_publisher: Option<Arc<dyn ReplyPublisher>>,
 }
 
 enum InvocationMode {
@@ -128,12 +128,12 @@ impl Activator {
     /// component to export exactly one function. The default mapper also
     /// currently requires the target function to have 0 or 1 parameters.
     pub fn new(
-        runtime: Runtime,
+        invoker: Arc<dyn ComponentInvoker>,
         component_name: &str,
         mapper: Option<Box<dyn Mapper>>,
-        registry: Option<Arc<ChannelRegistry<LocalChannel>>>,
+        reply_publisher: Option<Arc<dyn ReplyPublisher>>,
     ) -> Result<Self, String> {
-        let component = runtime
+        let component = invoker
             .get_component(component_name)
             .ok_or_else(|| format!("component '{component_name}' not found"))?;
 
@@ -148,10 +148,10 @@ impl Activator {
         };
 
         Ok(Self {
-            runtime,
+            invoker,
             component_name: component_name.to_string(),
             mode,
-            registry,
+            reply_publisher,
         })
     }
 
@@ -173,7 +173,7 @@ impl Handler for Activator {
                 InvocationMode::Mapped { mapper } => {
                     let invocation = mapper.map(&msg)?;
                     let result = self
-                        .runtime
+                        .invoker
                         .invoke(
                             &self.component_name,
                             &invocation.function_key,
@@ -183,12 +183,11 @@ impl Handler for Activator {
                         .map_err(|e| e.to_string())?;
 
                     if let Some(reply_to) = msg.headers().reply_to() {
-                        let registry = self.registry.as_ref().ok_or_else(|| {
-                            format!("reply-to '{reply_to}' requested but no channel registry")
+                        let publisher = self.reply_publisher.as_ref().ok_or_else(|| {
+                            format!(
+                                "reply-to '{reply_to}' requested but no reply publisher available"
+                            )
                         })?;
-                        let channel = registry
-                            .lookup(reply_to)
-                            .ok_or_else(|| format!("reply-to channel '{reply_to}' not found"))?;
                         let content_type = msg.headers().content_type();
                         let body = match content_type {
                             Some("text/plain") => match &result {
@@ -205,10 +204,17 @@ impl Handler for Activator {
                         if let Some(ct) = content_type {
                             builder = builder.header(header::CONTENT_TYPE, ct);
                         }
-                        let _receipt = channel
-                            .publish(builder.build())
+                        publisher
+                            .publish(reply_to, builder.build())
                             .await
                             .map_err(|e| format!("failed to publish reply: {e}"))?;
+                    } else {
+                        tracing::info!(
+                            component = %self.component_name,
+                            function = %invocation.function_key,
+                            result = %result,
+                            "invocation complete"
+                        );
                     }
 
                     Ok(())
@@ -227,7 +233,9 @@ mod tests {
     use tempfile::{Builder, NamedTempFile};
 
     use super::*;
-    use crate::messaging::{Channel, LocalChannel, MessageBuilder};
+    use crate::Runtime;
+    use crate::messaging::channel::{Channel, ChannelRegistry, LocalChannel, ReplyPublisher};
+    use crate::messaging::message::MessageBuilder;
 
     fn create_wasm_file(wat: &str) -> NamedTempFile {
         let component_bytes = wat::parse_str(wat).unwrap();
@@ -242,8 +250,13 @@ mod tests {
         temp_file
     }
 
-    async fn build_runtime(paths: &[PathBuf]) -> Runtime {
-        Runtime::builder().from_paths(paths).build().await.unwrap()
+    async fn build_invoker(paths: &[PathBuf]) -> Arc<dyn ComponentInvoker> {
+        Runtime::builder()
+            .from_paths(paths)
+            .build()
+            .await
+            .unwrap()
+            .invoker()
     }
 
     // Component that exports a single bare function: double(value: u32) -> u32
@@ -374,13 +387,19 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        let registry = Arc::new(ChannelRegistry::new());
+        let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
-        let activator = Activator::new(runtime, "guest", None, Some(registry)).unwrap();
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            None,
+            Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
+        )
+        .unwrap();
 
         let msg = MessageBuilder::new(b"21".to_vec())
             .header(header::CONTENT_TYPE, "application/json")
@@ -412,9 +431,9 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(runtime, "guest", None, None) {
+        match Activator::new(invoker, "guest", None, None) {
             Ok(_) => panic!("expected error for multi-function component without mapper"),
             Err(err) => assert!(
                 err.contains("default mapping currently requires exactly 1 exported function"),
@@ -434,9 +453,9 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(runtime, "nonexistent", None, None) {
+        match Activator::new(invoker, "nonexistent", None, None) {
             Ok(_) => panic!("expected error for nonexistent component"),
             Err(err) => assert!(
                 err.contains("component 'nonexistent' not found"),
@@ -456,7 +475,7 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
         struct TestMapper;
         impl Mapper for TestMapper {
@@ -468,12 +487,17 @@ mod tests {
             }
         }
 
-        let registry = Arc::new(ChannelRegistry::new());
+        let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
-        let activator =
-            Activator::new(runtime, "guest", Some(Box::new(TestMapper)), Some(registry)).unwrap();
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            Some(Box::new(TestMapper)),
+            Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
+        )
+        .unwrap();
 
         let msg = MessageBuilder::new(b"ignored".to_vec())
             .header(header::REPLY_TO, "replies")
@@ -504,13 +528,19 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        let registry = Arc::new(ChannelRegistry::new());
+        let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
-        let activator = Activator::new(runtime, "guest", None, Some(registry)).unwrap();
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            None,
+            Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
+        )
+        .unwrap();
 
         let msg = MessageBuilder::new(b"\"World\"".to_vec())
             .header(header::CONTENT_TYPE, "application/json")
@@ -545,13 +575,19 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let runtime = build_runtime(&[toml.path().to_path_buf()]).await;
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        let registry = Arc::new(ChannelRegistry::new());
+        let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
-        let activator = Activator::new(runtime, "guest", None, Some(registry)).unwrap();
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            None,
+            Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
+        )
+        .unwrap();
 
         let msg = MessageBuilder::new(b"World".to_vec())
             .header(header::CONTENT_TYPE, "text/plain")

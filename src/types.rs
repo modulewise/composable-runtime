@@ -4,6 +4,8 @@ use anyhow::Result;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 
 pub fn default_scope() -> String {
     "any".to_string()
@@ -206,4 +208,33 @@ pub struct FunctionParam {
     pub name: String,
     pub is_optional: bool,
     pub json_schema: serde_json::Value,
+}
+
+/// Wasm Component whose functions can be invoked
+#[derive(Debug, Clone)]
+pub struct Component {
+    pub name: String,
+    pub functions: HashMap<String, Function>,
+}
+
+/// Invoke components by name.
+pub trait ComponentInvoker: Send + Sync {
+    fn get_component(&self, name: &str) -> Option<Component>;
+
+    fn invoke<'a>(
+        &'a self,
+        component_name: &'a str,
+        function_name: &'a str,
+        args: Vec<serde_json::Value>,
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
+}
+
+/// Publish messages to channels by name.
+pub trait MessagePublisher: Send + Sync {
+    fn publish<'a>(
+        &'a self,
+        channel: &'a str,
+        body: Vec<u8>,
+        headers: HashMap<String, String>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }

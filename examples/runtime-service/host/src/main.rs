@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use composable_runtime::{
-    ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory, PropertyMap, Runtime,
-    RuntimeService, create_capability, create_state,
+    ComponentInvoker, ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
+    PropertyMap, Runtime, RuntimeService, create_capability, create_state,
 };
 use wasmtime::component::{HasSelf, Linker};
 
@@ -126,7 +126,7 @@ impl RuntimeService for GreetingService {
         })]
     }
 
-    fn start(&self) -> Result<()> {
+    fn start(&self, invoker: Arc<dyn ComponentInvoker>) -> Result<()> {
         println!("[GreetingService] started");
         Ok(())
     }
