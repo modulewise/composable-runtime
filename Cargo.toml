@@ -10,7 +10,7 @@ categories = ["wasm"]
 keywords = ["wasm"]
 
 [workspace]
-members = [".", "crates/interceptor"]
+members = [".", "crates/gateway-http", "crates/interceptor"]
 
 [workspace.package]
 license = "Apache-2.0"
@@ -20,7 +20,13 @@ edition = "2024"
 [workspace.dependencies]
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 wasm-encoder = "0.244"
 wasmparser = "0.244"
@@ -31,15 +37,15 @@ wit-parser = "0.244"
 anyhow.workspace = true
 clap.workspace = true
 composable-runtime-interceptor = { path = "crates/interceptor" }
-http-body-util = "0.1"
-hyper = { version = "1", features = ["client", "http1", "http2"] }
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
 oci-client = "0.15"
 petgraph = "0.8"
 rustyline = "17"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1"
+serde.workspace = true
+serde_json.workspace = true
 static-config = "0.2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio.workspace = true
 tokio-util = { version = "0.7", optional = true }
 toml = "0.9"
 tracing.workspace = true

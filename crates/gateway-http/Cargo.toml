@@ -1,0 +1,31 @@
+[package]
+name = "composable-gateway-http"
+version = "0.1.0"
+description = "HTTP Gateway for Composable Runtime"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+categories = ["wasm"]
+keywords = ["wasm"]
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true, optional = true }
+composable-runtime = { path = "../..", features = ["messaging"] }
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:tracing-subscriber"]
+
+[[bin]]
+name = "composable-http-gateway"
+path = "src/main.rs"
+required-features = ["cli"]
