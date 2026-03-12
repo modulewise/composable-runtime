@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
-use crate::config::types::{ConfigHandler, PropertyMap};
+use crate::config::types::{CategoryClaim, ConfigHandler, PropertyMap};
 use crate::service::Service;
 use crate::types::{ComponentInvoker, MessagePublisher};
 
@@ -18,8 +18,8 @@ struct MessagingConfigHandler {
 }
 
 impl ConfigHandler for MessagingConfigHandler {
-    fn claimed_categories(&self) -> &[&str] {
-        &[]
+    fn claimed_categories(&self) -> Vec<CategoryClaim> {
+        vec![]
     }
 
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {

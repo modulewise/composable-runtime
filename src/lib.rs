@@ -5,7 +5,9 @@
 
 pub use composition::graph::{ComponentGraph, GraphBuilder};
 pub use composition::registry::{CapabilityStateHasData, HostCapability, HostCapabilityFactory};
-pub use config::types::{ConfigHandler, DefinitionLoader, PropertyMap};
+pub use config::types::{
+    CategoryClaim, Condition, ConfigHandler, DefinitionLoader, Operator, PropertyMap, Selector,
+};
 pub use runtime::{Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{

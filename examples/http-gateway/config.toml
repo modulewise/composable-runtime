@@ -1,0 +1,20 @@
+[component.hello]
+uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
+
+[component.bonjour]
+uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
+config.greeting = "Bonjour"
+subscription = "names"
+
+[gateway.api]
+type = "http"
+port = 8888
+
+[gateway.api.route.hello]
+path = "/hello/{name}"
+component = "hello"
+function = "greet"
+
+[gateway.api.route.bonjour]
+path = "/bonjour"
+channel = "names"
