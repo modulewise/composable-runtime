@@ -1,0 +1,10 @@
+[component.greeter]
+uri = "./lib/configured-greeter.wasm"
+imports = ["translator"]
+config.locale = "${process:env:LOCALE|en-US}"
+subscription = "names"
+
+[component.translator]
+uri = "./lib/capable-translator.wasm"
+imports = ["http-client", "io"]
+interceptors = ["logger"]

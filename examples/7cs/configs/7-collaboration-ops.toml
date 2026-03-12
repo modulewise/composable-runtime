@@ -1,0 +1,3 @@
+[component.logger]
+uri = "./lib/logging-advice.wasm"
+imports = ["logging-stdout"]

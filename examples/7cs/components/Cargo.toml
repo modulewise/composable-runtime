@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "capable-translator",
+    "configured-greeter",
+    "logging-advice",
+    "simple-greeter",
+    "simple-translator",
+    "translating-greeter",
+]
+resolver = "3"
+
+[workspace.dependencies]
+wit-bindgen = "0.53.1"

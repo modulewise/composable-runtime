@@ -1,0 +1,7 @@
+[component.greeter]
+uri = "./lib/configured-greeter.wasm"
+imports = ["translator"]
+config.locale = "es-ES"
+
+[component.translator]
+uri = "./lib/simple-translator.wasm"

@@ -1,0 +1,10 @@
+[gateway.api]
+type = "http"
+port = 8080
+
+[gateway.api.route.hello]
+path = "/hello"
+channel = "names"
+
+[capability.http-client]
+uri = "wasmtime:http"

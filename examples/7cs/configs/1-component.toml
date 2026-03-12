@@ -1,0 +1,2 @@
+[component.greeter]
+uri = "./lib/simple-greeter.wasm"
