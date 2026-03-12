@@ -52,7 +52,7 @@ channel = "incoming-events"
 | `channel` | yes* | Channel to publish to (mutually exclusive with `component`/`function`) |
 | `method` | no | HTTP method (see defaults below) |
 
-\* Either `component` + `function` or `channel` is required, not both.
+\* Either `component` + `function` or `channel` is required, never both.
 
 ### Method defaults
 

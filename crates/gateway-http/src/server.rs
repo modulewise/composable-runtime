@@ -15,7 +15,6 @@ use composable_runtime::{ComponentInvoker, MessagePublisher};
 
 use crate::config::{RouteConfig, RouteTarget};
 
-// A compiled route ready for matching.
 struct Route {
     name: String,
     method: Method,

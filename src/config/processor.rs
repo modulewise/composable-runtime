@@ -123,7 +123,7 @@ fn dispatch(
             let has_unselected = claims.iter().any(|c| c.claim.selector.is_none());
             if has_unselected {
                 return Err(anyhow::anyhow!(
-                    "Category '{category}' claimed exclusivesly (without a selector) and by other handlers"
+                    "Category '{category}' claimed exclusively (without a selector) and by other handlers"
                 ));
             }
         }
