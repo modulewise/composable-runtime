@@ -103,7 +103,7 @@ Register the gateway service with a `RuntimeBuilder`:
 
 ```rust
 use composable_runtime::Runtime;
-use composable_gateway_http::HttpGatewayService;
+use composable_http_gateway::HttpGatewayService;
 
 let runtime = Runtime::builder()
     .from_paths(&config_paths)

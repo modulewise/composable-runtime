@@ -144,7 +144,7 @@ The Composable Runtime Interceptor is usable as a library crate for programmatic
 
 ```toml
 [dependencies]
-interceptor = { package = "composable-runtime-interceptor", version = "0.1" }
+interceptor = { package = "composable-interceptor", version = "0.1" }
 ```
 
 ### From a WIT path

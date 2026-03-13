@@ -1,5 +1,5 @@
 [package]
-name = "composable-runtime-interceptor"
+name = "composable-interceptor"
 version = "0.1.0"
 description = "Aspect-Oriented Programming for Wasm Components"
 edition.workspace = true
