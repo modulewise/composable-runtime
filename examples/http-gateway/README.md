@@ -38,7 +38,7 @@ Output:
 --- POST /bonjour (channel route -> subscription -> bonjour component) ---
 ```
 
-The gateway also logs the channel route result asynchronously:
+In the gateway log, you will see the channel route result logged asynchronously:
 
 ```
 ... invocation complete component=bonjour function=greet result="Bonjour, le Monde!"
