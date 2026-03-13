@@ -20,10 +20,10 @@ cd examples/7cs
 
 ## 1. Component
 
-<table border="0"><tr>
-<td valign="top">
+<table><tr>
+<td width="40%" valign="top">
 
-<img src="diagrams/1-component.svg" width="500" />
+![1-component](diagrams/1-component.svg)
 
 </td>
 <td>
@@ -31,6 +31,9 @@ cd examples/7cs
 A single Wasm Component, declared by name with a path to its `.wasm` file. The runtime will instantiate the component per-invocation and will run it within an isolated sandbox where it has no capabilities by default. The uri may include a file path as shown or a [Wasm OCI artifact](https://tag-runtime.cncf.io/wgs/wasm/deliverables/wasm-oci-artifact/).
 
 Of course, this initial version of our greeter simply returns: "Hello, World!"
+
+</td>
+</tr></table>
 
 ```toml
 [component.greeter]
@@ -42,17 +45,14 @@ $ ./run.sh 1
 "Hello, World!"
 ```
 
-</td>
-</tr></table>
-
 ---
 
 ## 2. Composition
 
 <table><tr>
-<td valign="top">
+<td width="40%" valign="top">
 
-<img src="diagrams/2-composition.svg" width="400" />
+![2-composition](diagrams/2-composition.svg)
 
 </td>
 <td>
@@ -60,6 +60,9 @@ $ ./run.sh 1
 A second component is added and injected into the first as an import. The runtime composes them at startup. Their interfaces are explicit and strict: they cannot provide any functionality other than what they declare as exports, and they cannot call out to anything other than their imports. Thus, neither of these components yet has any way to interact with external systems... no files, no network, no I/O, not even clocks or random number generators.
 
 But the greeter can now delegate to a translator with self-contained logic, passing 'haw-US' as the locale. This version of the translator is intentionally simplistic, translating just the word "Hello" across a handful of language codes: de, es, fr, haw, or nl.
+
+</td>
+</tr></table>
 
 ```toml
 [component.greeter]
@@ -75,17 +78,14 @@ $ ./run.sh 2
 "Aloha, World!"
 ```
 
-</td>
-</tr></table>
-
 ---
 
 ## 3. Configuration
 
 <table><tr>
-<td valign="top">
+<td width="40%" valign="top">
 
-<img src="diagrams/3-configuration.svg" width="400" />
+![3-configuration](diagrams/3-configuration.svg)
 
 </td>
 <td>
@@ -93,6 +93,9 @@ $ ./run.sh 2
 The `config.*` properties on a component definition are used by the runtime to generate a `wasi:config/store` component at startup. That generated component is then injected into the component whose configuration it provides, just like if you were to create a `wasi:config/store` component manually and add it as an "import". No other component, even within the same composition, can see those config values. Sharing between components is limited to whatever is explicitly passed across the import/export boundary.
 
 The greeter now reads its locale from configuration instead of hardcoding it.
+
+</td>
+</tr></table>
 
 ```toml
 [component.greeter]
@@ -109,17 +112,14 @@ $ ./run.sh 3
 "Hola, World!"
 ```
 
-</td>
-</tr></table>
-
 ---
 
 ## 4. Capability
 
 <table><tr>
-<td valign="top">
+<td width="40%" valign="top">
 
-<img src="diagrams/4-capability.svg" width="400" />
+![4-capability](diagrams/4-capability.svg)
 
 </td>
 <td>
@@ -127,6 +127,9 @@ $ ./run.sh 3
 Host capabilities provide the interfaces a component needs to interact with the external world. For example, the `wasmtime:http` capability enables outgoing requests, and the `wasmtime:io` capability enables the underlying streams and polling (the "io" capability is configured in a separate `infra.toml` file that is shared across examples 4-7 and shown in the final section below).
 
 The translator is now replaced with one that calls an external HTTP API. The `translate-api.js` implementation is slightly less simplistic as it also knows how to translate "World" into the same handful of languages.
+
+</td>
+</tr></table>
 
 ```toml
 [component.greeter]
@@ -147,17 +150,14 @@ $ ./run.sh 4
 "Bonjour, le Monde!"
 ```
 
-</td>
-</tr></table>
-
 ---
 
 ## 5. Cross-Cutting Concerns
 
 <table><tr>
-<td valign="top">
+<td width="40%" valign="top">
 
-<img src="diagrams/5-cross-cutting-concerns.svg" width="400" />
+![5-cross-cutting-concerns](diagrams/5-cross-cutting-concerns.svg)
 
 </td>
 <td>
@@ -165,6 +165,9 @@ $ ./run.sh 4
 The `interceptors` list accepts components that export *and* import the same exports as the target component (so they can wrap each function call), but it also accepts generic advice that has no awareness of any specific target exports. In the latter case, the runtime generates the interceptor component and composes it with the generic advice and the specific target. This is essentially [Aspect-Oriented Programming for Wasm Components](../../crates/interceptor/). The "logging-stdout" component is defined in the shared `infra.toml` file.
 
 The interceptor generated from logging-advice now wraps the translator and logs before (with args) and after (with the return value) each invocation of the translate function.
+
+</td>
+</tr></table>
 
 ```toml
 [component.greeter]
@@ -193,17 +196,14 @@ $ ./run.sh 5
 "Hallo, Welt!"
 ```
 
-</td>
-</tr></table>
-
 ---
 
 ## 6. Channel
 
 <table><tr>
-<td valign="top">
+<td width="40%" valign="top">
 
-<img src="diagrams/6-channel.svg" width="400" />
+![6-channel](diagrams/6-channel.svg)
 
 </td>
 <td>
@@ -211,6 +211,9 @@ $ ./run.sh 5
 An HTTP gateway accepts incoming requests and consults its configured routes. Each route indicates whether to invoke a specific component + function (where path segments can map to arg names) or to publish to a channel, as shown in this example.
 
 The greeter subscribes to the "names" channel and is invoked when messages arrive. Rather than calling `composable invoke`, this example and the next start the HTTP Gateway via the binary from the [gateway-http](../../crates/gateway-http/) sub-crate and then use `curl` to POST a request.
+
+</td>
+</tr></table>
 
 ```toml
 [gateway.api]
@@ -255,17 +258,14 @@ The gateway logs the result asynchronously:
 ... composable_runtime::messaging::activator: invocation complete component=greeter function=greet result="Hallo, Wereld!"
 ```
 
-</td>
-</tr></table>
-
 ---
 
 ## 7. Collaboration
 
 <table><tr>
-<td valign="top">
+<td width="40%" valign="top">
 
-<img src="diagrams/7-collaboration.svg" width="400" />
+![7-collaboration](diagrams/7-collaboration.svg)
 
 </td>
 <td>
@@ -273,6 +273,9 @@ The gateway logs the result asynchronously:
 Finally, the single config file is split into domain, env, and ops files. Each could be owned by a different team or role based on responsibilities. But more importantly, this decouples the configuration of domain components from the capabilities and infrastructure that may vary across environments.
 
 Notice the greeter can now be configured with a `LOCALE` env var or fallback to a default.
+
+</td>
+</tr></table>
 
 **domain.toml**:
 
@@ -340,9 +343,6 @@ POST /hello with body 'World':
 
 ... composable_runtime::messaging::activator: invocation complete component=greeter function=greet result="Bonjour, le Monde!"
 ```
-
-</td>
-</tr></table>
 
 ---
 
