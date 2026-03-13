@@ -20,10 +20,10 @@ cd examples/7cs
 
 ## 1. Component
 
-<table><tr>
-<td width="40%" valign="top">
+<table border="0"><tr>
+<td valign="top">
 
-![1-component](diagrams/1-component.svg)
+<img src="diagrams/1-component.svg" width="500" />
 
 </td>
 <td>
@@ -50,9 +50,9 @@ $ ./run.sh 1
 ## 2. Composition
 
 <table><tr>
-<td width="40%" valign="top">
+<td valign="top">
 
-![2-composition](diagrams/2-composition.svg)
+<img src="diagrams/2-composition.svg" width="400" />
 
 </td>
 <td>
@@ -83,9 +83,9 @@ $ ./run.sh 2
 ## 3. Configuration
 
 <table><tr>
-<td width="40%" valign="top">
+<td valign="top">
 
-![3-configuration](diagrams/3-configuration.svg)
+<img src="diagrams/3-configuration.svg" width="400" />
 
 </td>
 <td>
@@ -117,9 +117,9 @@ $ ./run.sh 3
 ## 4. Capability
 
 <table><tr>
-<td width="40%" valign="top">
+<td valign="top">
 
-![4-capability](diagrams/4-capability.svg)
+<img src="diagrams/4-capability.svg" width="400" />
 
 </td>
 <td>
@@ -155,9 +155,9 @@ $ ./run.sh 4
 ## 5. Cross-Cutting Concerns
 
 <table><tr>
-<td width="40%" valign="top">
+<td valign="top">
 
-![5-cross-cutting-concerns](diagrams/5-cross-cutting-concerns.svg)
+<img src="diagrams/5-cross-cutting-concerns.svg" width="400" />
 
 </td>
 <td>
@@ -201,9 +201,9 @@ $ ./run.sh 5
 ## 6. Channel
 
 <table><tr>
-<td width="40%" valign="top">
+<td valign="top">
 
-![6-channel](diagrams/6-channel.svg)
+<img src="diagrams/6-channel.svg" width="400" />
 
 </td>
 <td>
@@ -263,9 +263,9 @@ The gateway logs the result asynchronously:
 ## 7. Collaboration
 
 <table><tr>
-<td width="40%" valign="top">
+<td valign="top">
 
-![7-collaboration](diagrams/7-collaboration.svg)
+<img src="diagrams/7-collaboration.svg" width="400" />
 
 </td>
 <td>
@@ -361,4 +361,4 @@ A domain team can change component wiring without modifying infrastructure. An o
 
 The Composable Runtime also defines an extensibility model that will support additional host capabilities, interceptors, and gateways. The existing functionality has been built upon that same model.
 
-For more detail on specific concepts (messaging, interceptors, extensibility, etc), explore the other [examples](../examples).
+For more detail on specific concepts (messaging, interceptors, extensibility, etc), explore the other [examples](../).
