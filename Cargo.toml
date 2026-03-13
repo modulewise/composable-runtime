@@ -71,6 +71,9 @@ default = ["cli"]
 cli = ["messaging"]
 messaging = ["dep:tokio-util"]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [[bin]]
 name = "composable"
 path = "src/main.rs"

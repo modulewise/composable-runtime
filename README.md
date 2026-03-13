@@ -37,7 +37,7 @@ uri = "wasmtime:io"
 
 ## Core Concepts
 
-The best way to learn the core concepts of Composable Runtime is to go through the step-by-step overview in the [Sailing the 7 Cs with Composable Runtime](examples/7cs) example.
+The best way to learn the core concepts of Composable Runtime is to go through the step-by-step overview in the [Sailing the 7 Cs with Composable Runtime](examples/7cs/README.md) example.
 
 That incrementally introduces each concept along the way:
 1. **Component:** the Wasm Component that will run in an isolated sandbox, with reference to a portable artifact

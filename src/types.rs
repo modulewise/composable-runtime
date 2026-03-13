@@ -11,7 +11,7 @@ pub fn default_scope() -> String {
     "any".to_string()
 }
 
-/// Capability definition (host capabilities and wasmtime capabilities)
+/// Capability definition (host capabilities and wasmtime capabilities).
 #[derive(Debug, Clone)]
 pub struct CapabilityDefinition {
     pub name: String,
@@ -20,7 +20,7 @@ pub struct CapabilityDefinition {
     pub config: HashMap<String, serde_json::Value>,
 }
 
-/// Component definition
+/// Component definition.
 #[derive(Debug, Clone)]
 pub struct ComponentDefinition {
     pub name: String,
@@ -60,8 +60,8 @@ impl ComponentState {
     }
 }
 
-/// A validated WebAssembly Interface Type (WIT) interface name
-/// Format: namespace:package/interface[@version]
+/// A validated WebAssembly Interface Type (WIT) interface name.
+/// Format: `namespace:package/interface[@version]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Interface {
     namespace: String,
@@ -72,7 +72,7 @@ pub struct Interface {
 }
 
 impl Interface {
-    /// Parse and validate a WIT interface string
+    /// Parse and validate a WIT interface string.
     pub fn parse(s: &str) -> Result<Self> {
         if let Some((namespace, rest)) = s.split_once(':')
             && let Some((package, after_slash)) = rest.split_once('/')
@@ -97,27 +97,27 @@ impl Interface {
         ))
     }
 
-    /// Get the full interface string
+    /// Get the full interface string.
     pub fn as_str(&self) -> &str {
         &self.full_name
     }
 
-    /// Get the namespace (e.g., "wasi" from "wasi:http/outgoing-handler@0.2.3")
+    /// Get the namespace (e.g., "wasi" from "wasi:http/outgoing-handler@0.2.6").
     pub fn namespace(&self) -> &str {
         &self.namespace
     }
 
-    /// Get the package (e.g., "http" from "wasi:http/outgoing-handler@0.2.3")
+    /// Get the package (e.g., "http" from "wasi:http/outgoing-handler@0.2.6").
     pub fn package(&self) -> &str {
         &self.package
     }
 
-    /// Get the interface name (e.g., "outgoing-handler" from "wasi:http/outgoing-handler@0.2.3")
+    /// Get the interface name (e.g., "outgoing-handler" from "wasi:http/outgoing-handler@0.2.6").
     pub fn interface_name(&self) -> &str {
         &self.interface
     }
 
-    /// Get the version (e.g., Some("0.2.3") from "wasi:http/outgoing-handler@0.2.3")
+    /// Get the version (e.g., Some("0.2.6") from "wasi:http/outgoing-handler@0.2.6").
     pub fn version(&self) -> Option<&str> {
         self.version.as_deref()
     }
@@ -129,7 +129,7 @@ impl fmt::Display for Interface {
     }
 }
 
-/// A function specification
+/// A function specification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function {
     interface: Option<Interface>,
@@ -140,7 +140,7 @@ pub struct Function {
 }
 
 impl Function {
-    /// Create a new function specification
+    /// Create a new function specification.
     pub fn new(
         interface: Option<Interface>,
         function_name: String,
@@ -162,22 +162,22 @@ impl Function {
         self.interface.as_ref()
     }
 
-    /// Get the function name
+    /// Get the function name.
     pub fn function_name(&self) -> &str {
         &self.function_name
     }
 
-    /// Get the function documentation
+    /// Get the function documentation.
     pub fn docs(&self) -> &str {
         &self.docs
     }
 
-    /// Get the function parameters
+    /// Get the function parameters.
     pub fn params(&self) -> &[FunctionParam] {
         &self.params
     }
 
-    /// Get the function result type
+    /// Get the function result type.
     pub fn result(&self) -> Option<&serde_json::Value> {
         self.result.as_ref()
     }
@@ -202,7 +202,7 @@ impl fmt::Display for Function {
     }
 }
 
-/// A function parameter specification
+/// A function parameter specification.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionParam {
     pub name: String,
@@ -210,7 +210,7 @@ pub struct FunctionParam {
     pub json_schema: serde_json::Value,
 }
 
-/// Wasm Component whose functions can be invoked
+/// A named Wasm Component and its exported functions.
 #[derive(Debug, Clone)]
 pub struct Component {
     pub name: String,
