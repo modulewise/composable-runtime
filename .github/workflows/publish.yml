@@ -1,0 +1,29 @@
+name: Publish to crates.io
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    name: Publish crates
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Publish composable-interceptor
+      run: cargo publish -p composable-interceptor
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    - name: Wait for indexing
+      run: sleep 60
+    - name: Publish composable-runtime
+      run: cargo publish -p composable-runtime
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    - name: Wait for indexing
+      run: sleep 60
+    - name: Publish composable-http-gateway
+      run: cargo publish -p composable-http-gateway
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

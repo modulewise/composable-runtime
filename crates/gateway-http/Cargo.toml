@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "HTTP Gateway for Composable Runtime"
 edition.workspace = true
 license.workspace = true
+readme = "README.md"
 repository.workspace = true
 categories = ["wasm"]
 keywords = ["wasm"]
