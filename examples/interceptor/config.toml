@@ -10,10 +10,10 @@ imports = ["stdout-logger"]
 uri = "./wasi-logging-to-stdout.wasm"
 # could use this instead of pulling in the build script:
 # uri = "oci://ghcr.io/componentized/logging/to-stdout:v0.2.1"
-imports = ["clocks", "stdio"]
-
-[capability.clocks]
-uri = "wasmtime:wasip2"
+imports = ["stdio", "wasip2"]
 
 [capability.stdio]
 uri = "wasmtime:inherit-stdio"
+
+[capability.wasip2]
+uri = "wasmtime:wasip2"

@@ -1,7 +1,5 @@
 //! Converts wasi:otel log-records to OTLP protobuf and sends to gRPC endpoint
 
-#![no_main]
-
 wit_bindgen::generate!({
     path: "../wit",
     world: "otel-to-grpc",

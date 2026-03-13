@@ -1,12 +1,10 @@
-#![no_main]
-
-use wasi::otel::logs;
-
 wit_bindgen::generate!({
     path: "../wit",
     world: "guest",
     generate_all,
 });
+
+use wasi::otel::logs;
 
 struct Logger;
 
