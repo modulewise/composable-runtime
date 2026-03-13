@@ -50,7 +50,7 @@ where
             }
 
             tokio::select! {
-                _ = self.cancel.cancelled() => break,
+                biased;
                 result = self.channel.consume(&self.group) => {
                     match result {
                         Ok((msg, receipt)) => {
@@ -66,6 +66,7 @@ where
                         }
                     }
                 }
+                _ = self.cancel.cancelled() => break,
             }
         }
 
