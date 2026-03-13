@@ -230,6 +230,15 @@ impl LocalChannel {
         }
     }
 
+    // Signal that no more messages should be accepted. For Block channels,
+    // this drops the senders so consumers drain buffered messages then see
+    // Closed. For DropOldest channels, it is a no-op (rely on cancellation).
+    pub(crate) fn close(&self) {
+        if let ChannelInner::Block { senders, .. } = &self.inner {
+            senders.lock().unwrap().clear();
+        }
+    }
+
     /// Create a `LocalChannel` with default settings.
     pub fn with_defaults() -> Self {
         Self::new(
@@ -473,6 +482,15 @@ impl<C: Channel> ChannelRegistry<C> {
             .write()
             .expect("channel registry lock poisoned")
             .remove(name)
+    }
+
+    pub fn list(&self) -> Vec<Arc<C>> {
+        self.channels
+            .read()
+            .expect("channel registry lock poisoned")
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Look up a channel by name.

@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
@@ -42,12 +43,16 @@ pub(crate) trait ChannelFactory<C: Channel>: Send + Sync {
     // complete before the channel can accept publishes (e.g. registering
     // consumer groups for in-memory channels). Default is a no-op.
     fn init(&self, _channel: &C, _group: &str) {}
+
+    // Called during shutdown to signal that no more messages should be
+    // accepted. Default is a no-op.
+    fn close(&self, _channel: &C) {}
 }
 
 // Generic bus parameterized over channel type and factory.
 // All control plane logic lives here: channel creation,
 // subscription resolution, and dispatcher lifecycle.
-// Type-aliased per backend: `LocalBus`, `KafkaBus`, etc.
+// May be type-aliased per backend: `LocalBus`, `KafkaBus`, etc.
 pub(crate) struct GenericBus<C: Channel, F: ChannelFactory<C>> {
     factory: F,
     registry: Arc<ChannelRegistry<C>>,
@@ -145,11 +150,28 @@ where
     }
 
     fn shutdown(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        self.cancel.cancel();
+        for channel in self.registry.list() {
+            self.factory.close(&channel);
+        }
+
         Box::pin(async {
-            let handles: Vec<_> = self.handles.lock().unwrap().drain(..).collect();
-            for handle in handles {
-                let _ = handle.await;
+            let mut handles: Vec<_> = self.handles.lock().unwrap().drain(..).collect();
+
+            let graceful = async {
+                for handle in handles.iter_mut() {
+                    let _ = (&mut *handle).await;
+                }
+            };
+
+            if tokio::time::timeout(Duration::from_secs(10), graceful)
+                .await
+                .is_err()
+            {
+                tracing::warn!("graceful shutdown timed out, cancelling dispatchers");
+                self.cancel.cancel();
+                for handle in handles {
+                    let _ = handle.await;
+                }
             }
         })
     }
@@ -165,6 +187,10 @@ impl ChannelFactory<super::channel::LocalChannel> for LocalChannelFactory {
 
     fn init(&self, channel: &super::channel::LocalChannel, group: &str) {
         channel.init_group(group);
+    }
+
+    fn close(&self, channel: &super::channel::LocalChannel) {
+        channel.close();
     }
 }
 
