@@ -1,5 +1,3 @@
-#![no_main]
-
 wit_bindgen::generate!({
     path: "../wit/host-greeting.wit",
     world: "greeter",

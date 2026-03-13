@@ -8,5 +8,5 @@ if [ ! -f "$GREETER" ]; then
   ../hello-world/build.sh
 fi
 
-RUST_LOG=info cargo run -q --manifest-path ../../crates/gateway-http/Cargo.toml -- \
-  config.toml
+cargo run -q --manifest-path ../../Cargo.toml -- \
+  publish config.toml --channel names --body "${1:-World}"
