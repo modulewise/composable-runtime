@@ -1,5 +1,5 @@
 [package]
-name = "composable-gateway-http"
+name = "composable-http-gateway"
 version = "0.1.0"
 description = "HTTP Gateway for Composable Runtime"
 edition.workspace = true

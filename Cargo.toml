@@ -36,7 +36,7 @@ wit-parser = "0.244"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-composable-runtime-interceptor = { path = "crates/interceptor" }
+composable-interceptor = { path = "crates/interceptor" }
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 oci-client = "0.15"

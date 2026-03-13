@@ -514,7 +514,7 @@ async fn process_component(
                 if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&exports) {
                     // Current component is advice; the dependency is the target.
                     // Generate a wrapper from the target, plug in advice + target.
-                    let wrapper_bytes = composable_runtime_interceptor::create_from_component(
+                    let wrapper_bytes = composable_interceptor::create_from_component(
                         &component_spec.bytes,
                         &[],
                     )

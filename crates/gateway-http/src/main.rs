@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use composable_runtime::Runtime;
 
-use composable_gateway_http::HttpGatewayService;
+use composable_http_gateway::HttpGatewayService;
 
 #[derive(Parser)]
 #[command(
