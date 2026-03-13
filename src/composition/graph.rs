@@ -9,13 +9,15 @@ use crate::config::loaders::{TomlLoader, WasmLoader};
 use crate::config::processor::ConfigProcessor;
 use crate::types::{CapabilityDefinition, ComponentDefinition};
 
+/// Directed graph of component and capability definitions
+/// with dependency and interceptor edges.
 pub struct ComponentGraph {
     graph: DiGraph<Node, Edge>,
     node_map: HashMap<String, NodeIndex>,
 }
 
 impl ComponentGraph {
-    /// Create a new GraphBuilder
+    /// Create a new GraphBuilder.
     pub fn builder() -> GraphBuilder {
         GraphBuilder::new()
     }
@@ -183,7 +185,7 @@ impl ComponentGraph {
         Ok(Self { graph, node_map })
     }
 
-    /// Write the graph to a DOT file
+    /// Write the graph to a DOT file.
     pub fn write_dot_file<P: AsRef<std::path::Path>>(&self, path: P) -> Result<()> {
         let dot_content = self.dot();
         std::fs::write(path, dot_content)
@@ -327,7 +329,7 @@ pub enum Edge {
     Interceptor(i32), // Position in chain (0 = innermost)
 }
 
-/// Builder for constructing a ComponentGraph
+/// Builder for constructing a ComponentGraph.
 pub struct GraphBuilder {
     paths: Vec<PathBuf>,
     loaders: Vec<Box<dyn crate::config::types::DefinitionLoader>>,
@@ -345,34 +347,37 @@ impl GraphBuilder {
         }
     }
 
-    /// Add a definition source path (.toml, .wasm, oci://, etc.)
+    /// Add a definition source path (.toml, .wasm, oci://, etc.).
     pub fn from_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.paths.push(path.into());
         self
     }
 
-    /// Add multiple definition source paths
+    /// Add multiple definition source paths.
     pub fn from_paths(mut self, paths: &[PathBuf]) -> Self {
         self.paths.extend_from_slice(paths);
         self
     }
 
+    /// Add a definition loader.
     pub fn add_loader(mut self, loader: Box<dyn crate::config::types::DefinitionLoader>) -> Self {
         self.loaders.push(loader);
         self
     }
 
+    /// Add a config handler.
     pub fn add_handler(mut self, handler: Box<dyn crate::config::types::ConfigHandler>) -> Self {
         self.handlers.push(handler);
         self
     }
 
+    /// Do not enable the default definition loaders (.toml and .wasm).
     pub fn no_default_loaders(mut self) -> Self {
         self.use_default_loaders = false;
         self
     }
 
-    /// Build the ComponentGraph from all loaded definitions
+    /// Build the ComponentGraph from all loaded definitions.
     pub fn build(self) -> Result<ComponentGraph> {
         let mut processor = ConfigProcessor::new();
 
