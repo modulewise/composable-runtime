@@ -1,0 +1,6 @@
+[component.greeter]
+uri = "./lib/translating-greeter.wasm"
+imports = ["translator"]
+
+[component.translator]
+uri = "./lib/simple-translator.wasm"

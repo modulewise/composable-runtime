@@ -1,0 +1,16 @@
+[component.greeter]
+uri = "./lib/configured-greeter.wasm"
+imports = ["translator"]
+config.locale = "de-DE"
+
+[component.translator]
+uri = "./lib/capable-translator.wasm"
+imports = ["http-client", "io"]
+interceptors = ["logger"]
+
+[component.logger]
+uri = "./lib/logging-advice.wasm"
+imports = ["logging-stdout"]
+
+[capability.http-client]
+uri = "wasmtime:http"
