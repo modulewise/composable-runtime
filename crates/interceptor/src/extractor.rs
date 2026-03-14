@@ -111,7 +111,7 @@ fn extract_world_exports(
                     )));
                 }
             }
-            WorldItem::Type(_) => {}
+            WorldItem::Type { .. } => {}
         }
     }
 
@@ -184,10 +184,10 @@ fn collect_referenced_foreign_types(
             WorldExport::Interface(ie) => {
                 for fe in &ie.functions {
                     let func = fe.func();
-                    for (_, ty) in &func.params {
+                    for p in &func.params {
                         walk_type(
                             resolve,
-                            ty,
+                            &p.ty,
                             Some(ie.interface_id),
                             &mut referenced,
                             &mut visited,
@@ -206,8 +206,8 @@ fn collect_referenced_foreign_types(
             }
             WorldExport::Function(fe) => {
                 let func = fe.func();
-                for (_, ty) in &func.params {
-                    walk_type(resolve, ty, None, &mut referenced, &mut visited);
+                for p in &func.params {
+                    walk_type(resolve, &p.ty, None, &mut referenced, &mut visited);
                 }
                 if let Some(ty) = &func.result {
                     walk_type(resolve, ty, None, &mut referenced, &mut visited);
@@ -325,7 +325,7 @@ fn walk_type(
             walk_type(resolve, k, home_interface, referenced, visited);
             walk_type(resolve, v, home_interface, referenced, visited);
         }
-        TypeDefKind::FixedSizeList(t, _) => {
+        TypeDefKind::FixedLengthList(t, _) => {
             walk_type(resolve, t, home_interface, referenced, visited);
         }
         TypeDefKind::Flags(_)

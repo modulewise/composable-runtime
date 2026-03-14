@@ -70,9 +70,8 @@ impl HostCapability for GrpcCapability {
         vec!["modulewise:grpc/endpoint@0.1.0".to_string()]
     }
 
-    fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
-        endpoint::add_to_linker::<_, HasSelf<_>>(linker, |state| state)?;
-        Ok(())
+    fn link(&self, linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
+        endpoint::add_to_linker::<_, HasSelf<_>>(linker, |state| state)
     }
 
     composable_runtime::create_state!(this, ComponentEndpointState, {

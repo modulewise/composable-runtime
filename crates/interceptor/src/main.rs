@@ -37,8 +37,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let patterns: Vec<&str> = cli.r#match.iter().map(|s| s.as_str()).collect();
 
-    let component_bytes =
-        composable_interceptor::create_from_wit(&cli.wit, &cli.world, &patterns)?;
+    let component_bytes = composable_interceptor::create_from_wit(&cli.wit, &cli.world, &patterns)?;
 
     std::fs::write(&cli.output, &component_bytes)?;
     tracing::info!("Wrote interceptor to {}", cli.output.display());

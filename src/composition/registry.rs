@@ -21,7 +21,7 @@ pub trait HostCapability: Send + Sync {
     fn interfaces(&self) -> Vec<String>;
 
     /// Add bindings to the linker. Called once per component instantiation.
-    fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()>;
+    fn link(&self, linker: &mut Linker<ComponentState>) -> wasmtime::Result<()>;
 
     /// Create per-component-instance state. Called once per component instantiation.
     /// Returns None if capability needs no per-instance state.
@@ -38,7 +38,7 @@ pub trait HostCapability: Send + Sync {
 /// # Example
 ///
 /// ```ignore
-/// fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+/// fn link(&self, linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
 ///     my_capability::add_to_linker::<_, CapabilityStateHasData<MyState>>(
 ///         linker,
 ///         |state| state.get_extension_mut::<MyState>().expect("MyState not initialized"),
@@ -631,7 +631,7 @@ async fn read_bytes(uri: &str) -> Result<Vec<u8>> {
 
         // Get the component bytes from the first layer
         if let Some(layer) = image_data.layers.first() {
-            Ok(layer.data.clone())
+            Ok(layer.data.to_vec())
         } else {
             Err(anyhow::anyhow!("No layers found in OCI image: {oci_ref}"))
         }

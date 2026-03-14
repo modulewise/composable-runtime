@@ -15,7 +15,7 @@ impl HostCapability for GreeterCapability {
         vec!["modulewise:test-host/greeter".to_string()]
     }
 
-    fn link(&self, _linker: &mut Linker<ComponentState>) -> Result<()> {
+    fn link(&self, _linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
         Ok(())
     }
 }
@@ -112,9 +112,9 @@ impl HostCapability for ValueProviderCapability {
         vec!["modulewise:test-host/value-provider".to_string()]
     }
 
-    fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+    fn link(&self, linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
         let mut inst = linker.instance("modulewise:test-host/value-provider")?;
-        inst.func_wrap("get-value", |_ctx, (): ()| -> Result<(u32,)> {
+        inst.func_wrap("get-value", |_ctx, (): ()| -> wasmtime::Result<(u32,)> {
             Ok((42u32,))
         })?;
         Ok(())
@@ -203,12 +203,12 @@ impl HostCapability for MultiplierCapability {
         vec!["modulewise:test-host/multiplier".to_string()]
     }
 
-    fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+    fn link(&self, linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
         let multiplier = self.multiplier;
         let mut inst = linker.instance("modulewise:test-host/multiplier")?;
         inst.func_wrap(
             "multiply",
-            move |_ctx, (value,): (u32,)| -> Result<(u32,)> { Ok((value * multiplier,)) },
+            move |_ctx, (value,): (u32,)| -> wasmtime::Result<(u32,)> { Ok((value * multiplier,)) },
         )?;
         Ok(())
     }
@@ -321,16 +321,21 @@ impl HostCapability for CounterCapability {
         vec!["modulewise:test-host/counter".to_string()]
     }
 
-    fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+    fn link(&self, linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
         let mut inst = linker.instance("modulewise:test-host/counter")?;
-        inst.func_wrap("increment", |mut ctx, (): ()| -> Result<(u32,)> {
-            let state = ctx
-                .data_mut()
-                .get_extension_mut::<CounterState>()
-                .ok_or_else(|| anyhow::anyhow!("CounterState not found"))?;
-            state.count += 1;
-            Ok((state.count,))
-        })?;
+        inst.func_wrap(
+            "increment",
+            |mut ctx: wasmtime::StoreContextMut<'_, ComponentState>,
+             (): ()|
+             -> wasmtime::Result<(u32,)> {
+                let state = ctx
+                    .data_mut()
+                    .get_extension_mut::<CounterState>()
+                    .ok_or_else(|| wasmtime::Error::msg("CounterState not found"))?;
+                state.count += 1;
+                Ok((state.count,))
+            },
+        )?;
         Ok(())
     }
 
@@ -456,7 +461,7 @@ impl HostCapability for FirstCapabilityWithSharedState {
         vec!["modulewise:test-host/first".to_string()]
     }
 
-    fn link(&self, _linker: &mut Linker<ComponentState>) -> Result<()> {
+    fn link(&self, _linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
         Ok(())
     }
 
@@ -476,7 +481,7 @@ impl HostCapability for SecondCapabilityWithSharedState {
         vec!["modulewise:test-host/second".to_string()]
     }
 
-    fn link(&self, _linker: &mut Linker<ComponentState>) -> Result<()> {
+    fn link(&self, _linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
         Ok(())
     }
 

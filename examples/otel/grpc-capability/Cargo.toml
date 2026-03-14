@@ -10,6 +10,6 @@ bytes = "1"
 composable-runtime = { path = "../../.." }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["sync", "rt"] }
-tonic = "0.12"
+tonic = "0.14"
 tracing = "0.1"
-wasmtime = "41"
+wasmtime = "42"
