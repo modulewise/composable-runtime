@@ -6,5 +6,5 @@ subscription = "names"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
-imports = ["http-client", "io"]
+imports = ["http-client"]
 interceptors = ["logger"]

@@ -13,7 +13,8 @@ uri = "./wasi-logging-to-stdout.wasm"
 imports = ["stdio", "wasip2"]
 
 [capability.stdio]
-uri = "wasmtime:inherit-stdio"
+type = "wasi:cli"
+inherit-stdio = true
 
 [capability.wasip2]
-uri = "wasmtime:wasip2"
+type = "wasi:p2"

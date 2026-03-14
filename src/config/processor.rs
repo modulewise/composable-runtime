@@ -279,7 +279,7 @@ fn resolve_placeholders_in_components(definitions: &mut [ComponentDefinition]) -
 
 fn resolve_placeholders_in_capabilities(definitions: &mut [CapabilityDefinition]) -> Result<()> {
     for def in definitions {
-        resolve_placeholders_in_map(&mut def.config)?;
+        resolve_placeholders_in_map(&mut def.properties)?;
     }
     Ok(())
 }

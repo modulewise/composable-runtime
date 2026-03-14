@@ -124,7 +124,7 @@ $ ./run.sh 3
 </td>
 <td>
 
-Host capabilities provide the interfaces a component needs to interact with the external world. For example, the `wasmtime:http` capability enables outgoing requests, and the `wasmtime:io` capability enables the underlying streams and polling (the "io" capability is configured in a separate `infra.toml` file that is shared across examples 4-7 and shown in the final section below).
+Host capabilities provide the interfaces a component needs to interact with the external world. For example, the `wasmtime:http` capability enables a component to make outgoing HTTP requests.
 
 The translator is now replaced with one that calls an external HTTP API. The `translate-api.js` implementation is slightly less simplistic as it also knows how to translate "World" into the same handful of languages.
 
@@ -139,7 +139,7 @@ config.locale = "fr-FR"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
-imports = ["http-client", "io"]
+imports = ["http-client"]
 
 [capability.http-client]
 uri = "wasmtime:http"
@@ -177,7 +177,7 @@ config.locale = "de-DE"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
-imports = ["http-client", "io"]
+imports = ["http-client"]
 interceptors = ["logger"]
 
 [component.logger]
@@ -232,7 +232,7 @@ subscription = "names"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
-imports = ["http-client", "io"]
+imports = ["http-client"]
 interceptors = ["logger"]
 
 [component.logger]
@@ -288,7 +288,7 @@ subscription = "names"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
-imports = ["http-client", "io"]
+imports = ["http-client"]
 interceptors = ["logger"]
 ```
 
@@ -319,16 +319,14 @@ And finally, the shared `infra.toml` used for examples 4-7:
 ```toml
 [component.logging-stdout]
 uri = "./lib/wasi-logging-to-stdout.wasm"
-imports = ["stdio", "wasip2"]
+imports = ["stdout", "wasip2"]
 
-[capability.io]
-uri = "wasmtime:io"
-
-[capability.stdio]
-uri = "wasmtime:inherit-stdio"
+[capability.stdout]
+type = "wasi:cli"
+inherit-stdout = true
 
 [capability.wasip2]
-uri = "wasmtime:wasip2"
+type = "wasi:p2"
 ```
 
 ```

@@ -5,7 +5,10 @@ use wasmtime::{
     Cache, Config, Engine, Store,
     component::{Component as WasmComponent, Linker, Type, Val},
 };
+use wasmtime_wasi::cli::{WasiCli, WasiCliView};
+use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
 use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
+use wasmtime_wasi::sockets::{WasiSockets, WasiSocketsView};
 use wasmtime_wasi::{ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::bindings::http::types::ErrorCode;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
@@ -188,49 +191,105 @@ impl Invoker {
         // Add WASI interfaces based on explicitly requested capabilities
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name) {
-                if let Some(wasmtime_capability) = capability.uri.strip_prefix("wasmtime:") {
-                    match wasmtime_capability {
-                        "wasip2" => {
-                            // Comprehensive WASI Preview 2 support
+                if let Some(wasi_capability) = capability.kind.strip_prefix("wasi:") {
+                    use wasmtime_wasi::p2::bindings::{cli, clocks, random, sockets};
+
+                    match wasi_capability {
+                        "p2" => {
                             wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+                        }
+                        "cli" => {
+                            cli::stdin::add_to_linker::<ComponentState, WasiCli>(
+                                &mut linker,
+                                ComponentState::cli,
+                            )?;
+                            cli::stdout::add_to_linker::<ComponentState, WasiCli>(
+                                &mut linker,
+                                ComponentState::cli,
+                            )?;
+                            cli::stderr::add_to_linker::<ComponentState, WasiCli>(
+                                &mut linker,
+                                ComponentState::cli,
+                            )?;
+                            cli::environment::add_to_linker::<ComponentState, WasiCli>(
+                                &mut linker,
+                                ComponentState::cli,
+                            )?;
+                        }
+                        "clocks" => {
+                            clocks::wall_clock::add_to_linker::<ComponentState, WasiClocks>(
+                                &mut linker,
+                                ComponentState::clocks,
+                            )?;
+                            clocks::monotonic_clock::add_to_linker::<ComponentState, WasiClocks>(
+                                &mut linker,
+                                ComponentState::clocks,
+                            )?;
                         }
                         "http" => {
                             wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
+                            // io is a transitive dep
+                            wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
                         }
                         "io" => {
                             wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
                         }
                         "random" => {
-                            wasmtime_wasi::p2::bindings::random::random::add_to_linker::<
-                                ComponentState,
-                                WasiRandom,
-                            >(&mut linker, |state| {
-                                <ComponentState as WasiRandomView>::random(state)
-                            })?;
-                            wasmtime_wasi::p2::bindings::random::insecure_seed::add_to_linker::<
-                                ComponentState,
-                                WasiRandom,
-                            >(&mut linker, |state| {
-                                <ComponentState as WasiRandomView>::random(state)
-                            })?;
+                            random::random::add_to_linker::<ComponentState, WasiRandom>(
+                                &mut linker,
+                                |state| <ComponentState as WasiRandomView>::random(state),
+                            )?;
+                            random::insecure::add_to_linker::<ComponentState, WasiRandom>(
+                                &mut linker,
+                                |state| <ComponentState as WasiRandomView>::random(state),
+                            )?;
+                            random::insecure_seed::add_to_linker::<ComponentState, WasiRandom>(
+                                &mut linker,
+                                |state| <ComponentState as WasiRandomView>::random(state),
+                            )?;
                         }
-                        "inherit-stdio" | "inherit-network" | "allow-ip-name-lookup" => {
-                            // These capabilities are handled in WASI context, not linker
-                            // No linker functions to add, only context configuration
+                        "sockets" => {
+                            sockets::tcp::add_to_linker::<ComponentState, WasiSockets>(
+                                &mut linker,
+                                ComponentState::sockets,
+                            )?;
+                            sockets::udp::add_to_linker::<ComponentState, WasiSockets>(
+                                &mut linker,
+                                ComponentState::sockets,
+                            )?;
+                            sockets::network::add_to_linker::<ComponentState, WasiSockets>(
+                                &mut linker,
+                                &Default::default(),
+                                ComponentState::sockets,
+                            )?;
+                            sockets::instance_network::add_to_linker::<ComponentState, WasiSockets>(
+                                &mut linker,
+                                ComponentState::sockets,
+                            )?;
+                            sockets::ip_name_lookup::add_to_linker::<ComponentState, WasiSockets>(
+                                &mut linker,
+                                ComponentState::sockets,
+                            )?;
+                            sockets::tcp_create_socket::add_to_linker::<ComponentState, WasiSockets>(
+                                &mut linker,
+                                ComponentState::sockets,
+                            )?;
+                            sockets::udp_create_socket::add_to_linker::<ComponentState, WasiSockets>(
+                                &mut linker,
+                                ComponentState::sockets,
+                            )?;
                         }
                         _ => {
-                            tracing::warn!(
-                                "Unknown wasmtime capability for linker: {}",
-                                capability.uri
-                            );
+                            anyhow::bail!("Unknown capability type: '{}'", capability.kind);
                         }
                     }
-                } else if capability.uri.starts_with("host:") {
+                } else {
+                    // Custom capability
                     if let Some(cap) = &capability.instance {
                         cap.link(&mut linker)?;
                     } else {
                         return Err(anyhow::anyhow!(
-                            "Host capability '{}' requested but no capability registered",
+                            "Capability '{}' requested but no capability instance registered",
                             capability_name
                         ));
                     }
@@ -258,18 +317,37 @@ impl Invoker {
         }
 
         for capability_name in capabilities {
-            if let Some(capability) = capability_registry.get_capability(capability_name)
-                && let Some(wasmtime_capability) = capability.uri.strip_prefix("wasmtime:")
-            {
-                match wasmtime_capability {
-                    "inherit-stdio" => {
+            if let Some(capability) = capability_registry.get_capability(capability_name) {
+                let props = &capability.properties;
+                match capability.kind.as_str() {
+                    "wasi:p2" => {
                         wasi_builder.inherit_stdio();
-                    }
-                    "inherit-network" => {
                         wasi_builder.inherit_network();
-                    }
-                    "allow-ip-name-lookup" => {
                         wasi_builder.allow_ip_name_lookup(true);
+                    }
+                    "wasi:cli" => {
+                        if props.get("inherit-stdio").and_then(|v| v.as_bool()) == Some(true) {
+                            wasi_builder.inherit_stdio();
+                        } else {
+                            if props.get("inherit-stdin").and_then(|v| v.as_bool()) == Some(true) {
+                                wasi_builder.inherit_stdin();
+                            }
+                            if props.get("inherit-stdout").and_then(|v| v.as_bool()) == Some(true) {
+                                wasi_builder.inherit_stdout();
+                            }
+                            if props.get("inherit-stderr").and_then(|v| v.as_bool()) == Some(true) {
+                                wasi_builder.inherit_stderr();
+                            }
+                        }
+                    }
+                    "wasi:sockets" => {
+                        if props.get("inherit-network").and_then(|v| v.as_bool()) == Some(true) {
+                            wasi_builder.inherit_network();
+                        }
+                        if props.get("allow-ip-name-lookup").and_then(|v| v.as_bool()) == Some(true)
+                        {
+                            wasi_builder.allow_ip_name_lookup(true);
+                        }
                     }
                     _ => {}
                 }
@@ -280,7 +358,7 @@ impl Invoker {
         let needs_http = capabilities.iter().any(|capability_name| {
             capability_registry
                 .get_capability(capability_name)
-                .and_then(|cap| cap.uri.strip_prefix("wasmtime:"))
+                .and_then(|cap| cap.kind.strip_prefix("wasi:"))
                 == Some("http")
         });
 
@@ -288,7 +366,7 @@ impl Invoker {
         let mut extensions = HashMap::new();
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name)
-                && capability.uri.starts_with("host:")
+                && !capability.kind.starts_with("wasi:")
                 && let Some(cap) = &capability.instance
                 && let Some((type_id, boxed_state)) = cap.create_state_boxed()?
             {

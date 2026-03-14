@@ -11,13 +11,13 @@ pub fn default_scope() -> String {
     "any".to_string()
 }
 
-/// Capability definition (host capabilities and wasmtime capabilities).
+/// Capability definition (built-in and custom capabilities).
 #[derive(Debug, Clone)]
 pub struct CapabilityDefinition {
     pub name: String,
-    pub uri: String,
+    pub kind: String,
     pub scope: String,
-    pub config: HashMap<String, serde_json::Value>,
+    pub properties: HashMap<String, serde_json::Value>,
 }
 
 /// Component definition.

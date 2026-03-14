@@ -5,7 +5,7 @@ config.locale = "de-DE"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
-imports = ["http-client", "io"]
+imports = ["http-client"]
 interceptors = ["logger"]
 
 [component.logger]
@@ -13,4 +13,4 @@ uri = "./lib/logging-advice.wasm"
 imports = ["logging-stdout"]
 
 [capability.http-client]
-uri = "wasmtime:http"
+type = "wasi:http"

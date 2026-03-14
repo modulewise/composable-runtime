@@ -7,4 +7,4 @@ path = "/hello"
 channel = "names"
 
 [capability.http-client]
-uri = "wasmtime:http"
+type = "wasi:http"

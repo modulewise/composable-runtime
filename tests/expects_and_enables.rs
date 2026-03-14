@@ -8,7 +8,7 @@ async fn test_imports_and_scope() {
     let toml_content = format!(
         r#"
         [capability.infra]
-        uri = "wasmtime:some-infra"
+        type = "wasi:io"
         scope = "any"
 
         [component.client]
@@ -28,7 +28,7 @@ async fn test_imports_and_scope() {
     let graph = common::load_graph_and_assert_ok(&[toml_file.to_path_buf()]);
 
     let infra_def = common::get_capability_definition(&graph, "infra");
-    assert_eq!(infra_def.uri, "wasmtime:some-infra");
+    assert_eq!(infra_def.kind, "wasi:io");
     assert_eq!(infra_def.scope, "any");
 
     let client_def = common::get_component_definition(&graph, "client");
@@ -47,8 +47,8 @@ async fn test_imports_and_scope() {
     let (component_registry, capability_registry) =
         common::build_registries_and_assert_ok(&graph).await;
     assert_eq!(
-        capability_registry.get_capability("infra").unwrap().uri,
-        "wasmtime:some-infra"
+        capability_registry.get_capability("infra").unwrap().kind,
+        "wasi:io"
     );
     assert_eq!(component_registry.get_components().count(), 2);
 

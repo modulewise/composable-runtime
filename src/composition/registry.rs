@@ -15,7 +15,7 @@ use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState, Fu
 /// Trait implemented by host capability instances.
 ///
 /// An instance represents a configured capability (from one TOML block).
-/// Multiple TOML blocks with the same `uri = "host:X"` create multiple instances.
+/// Multiple TOML blocks with the same type create multiple instances.
 pub trait HostCapability: Send + Sync {
     /// Fully qualified interfaces this capability provides (namespace:package/interface@version)
     fn interfaces(&self) -> Vec<String>;
@@ -129,12 +129,14 @@ macro_rules! create_capability {
     };
 }
 
+// TODO: `properties` (wasi:* only) and `instance` (custom only)
+// should unify into an enum (e.g., Wasi vs Custom variants).
 #[derive(Serialize, Deserialize)]
 pub struct Capability {
-    pub uri: String,
+    pub kind: String,
     pub scope: String,
     pub interfaces: Vec<String>,
-    /// The host capability instance (for `host:` URIs)
+    pub properties: HashMap<String, serde_json::Value>,
     #[serde(skip)]
     pub instance: Option<Box<dyn HostCapability>>,
 }
@@ -142,7 +144,7 @@ pub struct Capability {
 impl std::fmt::Debug for Capability {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Capability")
-            .field("uri", &self.uri)
+            .field("kind", &self.kind)
             .field("scope", &self.scope)
             .field("interfaces", &self.interfaces)
             .field(
@@ -302,45 +304,40 @@ fn create_capability_registry(
     let mut capabilities = HashMap::new();
 
     for def in capability_definitions {
-        let (interfaces, capability_instance) = if let Some(capability_name) =
-            def.uri.strip_prefix("host:")
-        {
-            let factory = factories.get(capability_name).ok_or_else(|| {
+        let (interfaces, capability_instance) = if def.kind.starts_with("wasi:") {
+            let interfaces = get_interfaces_for_capability(&def.kind);
+            if interfaces.is_empty() {
+                anyhow::bail!("Unknown capability type: '{}'", def.kind);
+            }
+            (interfaces, None)
+        } else {
+            // Custom capability
+            let factory = factories.get(def.kind.as_str()).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Host capability '{}' (URI: '{}') not registered. Use Runtime::builder().with_capability::<T>(\"{}\")",
-                    capability_name,
-                    def.uri,
-                    capability_name
+                    "Capability type '{}' not registered. Use Runtime::builder().with_capability::<T>(\"{}\")",
+                    def.kind,
+                    def.kind
                 )
             })?;
 
-            // Deserialize config into capability instance
-            let config_value = serde_json::to_value(&def.config)?;
+            let config_value = serde_json::to_value(&def.properties)?;
             let cap = factory(config_value).map_err(|e| {
                 anyhow::anyhow!(
-                    "Failed to create host capability '{}' from TOML block '{}': {}",
-                    capability_name,
+                    "Failed to create capability '{}' from TOML block '{}': {}",
+                    def.kind,
                     def.name,
                     e
                 )
             })?;
 
             (cap.interfaces(), Some(cap))
-        } else {
-            // wasmtime capability
-            if !def.config.is_empty() {
-                tracing::warn!(
-                    "Config provided for capability '{}' but only host capabilities support config",
-                    def.name
-                );
-            }
-            (get_interfaces_for_capability(&def.uri), None)
         };
 
         let capability = Capability {
-            uri: def.uri.clone(),
+            kind: def.kind.clone(),
             scope: def.scope.clone(),
             interfaces,
+            properties: def.properties,
             instance: capability_instance,
         };
         capabilities.insert(def.name, capability);
@@ -349,34 +346,46 @@ fn create_capability_registry(
     Ok(CapabilityRegistry::new(capabilities))
 }
 
-fn get_interfaces_for_capability(uri: &str) -> Vec<String> {
-    match uri {
-        "wasmtime:http" => vec![
+fn get_interfaces_for_capability(kind: &str) -> Vec<String> {
+    match kind {
+        "wasi:cli" => vec![
+            "wasi:cli/stdin@0.2.6".to_string(),
+            "wasi:cli/stdout@0.2.6".to_string(),
+            "wasi:cli/stderr@0.2.6".to_string(),
+            "wasi:cli/environment@0.2.6".to_string(),
+        ],
+        "wasi:clocks" => vec![
+            "wasi:clocks/monotonic-clock@0.2.6".to_string(),
+            "wasi:clocks/wall-clock@0.2.6".to_string(),
+        ],
+        "wasi:http" => vec![
             "wasi:http/outgoing-handler@0.2.6".to_string(),
             "wasi:http/types@0.2.6".to_string(),
-        ],
-        "wasmtime:io" => vec![
+            // io is a transitive dep
             "wasi:io/error@0.2.6".to_string(),
             "wasi:io/poll@0.2.6".to_string(),
             "wasi:io/streams@0.2.6".to_string(),
         ],
-        "wasmtime:random" => vec![
+        "wasi:io" => vec![
+            "wasi:io/error@0.2.6".to_string(),
+            "wasi:io/poll@0.2.6".to_string(),
+            "wasi:io/streams@0.2.6".to_string(),
+        ],
+        "wasi:random" => vec![
             "wasi:random/random@0.2.6".to_string(),
+            "wasi:random/insecure@0.2.6".to_string(),
             "wasi:random/insecure-seed@0.2.6".to_string(),
         ],
-        "wasmtime:inherit-network" => vec![
+        "wasi:sockets" => vec![
             "wasi:sockets/tcp@0.2.6".to_string(),
             "wasi:sockets/udp@0.2.6".to_string(),
             "wasi:sockets/network@0.2.6".to_string(),
             "wasi:sockets/instance-network@0.2.6".to_string(),
+            "wasi:sockets/ip-name-lookup@0.2.6".to_string(),
+            "wasi:sockets/tcp-create-socket@0.2.6".to_string(),
+            "wasi:sockets/udp-create-socket@0.2.6".to_string(),
         ],
-        "wasmtime:allow-ip-name-lookup" => vec!["wasi:sockets/ip-name-lookup@0.2.6".to_string()],
-        "wasmtime:inherit-stdio" => vec![
-            "wasi:cli/stdin@0.2.6".to_string(),
-            "wasi:cli/stdout@0.2.6".to_string(),
-            "wasi:cli/stderr@0.2.6".to_string(),
-        ],
-        "wasmtime:wasip2" => vec![
+        "wasi:p2" => vec![
             "wasi:cli/environment@0.2.6".to_string(),
             "wasi:cli/exit@0.2.6".to_string(),
             "wasi:cli/stderr@0.2.6".to_string(),
@@ -395,6 +404,7 @@ fn get_interfaces_for_capability(uri: &str) -> Vec<String> {
             "wasi:io/poll@0.2.6".to_string(),
             "wasi:io/streams@0.2.6".to_string(),
             "wasi:random/random@0.2.6".to_string(),
+            "wasi:random/insecure@0.2.6".to_string(),
             "wasi:random/insecure-seed@0.2.6".to_string(),
             "wasi:sockets/tcp@0.2.6".to_string(),
             "wasi:sockets/udp@0.2.6".to_string(),
@@ -405,7 +415,6 @@ fn get_interfaces_for_capability(uri: &str) -> Vec<String> {
             "wasi:sockets/udp-create-socket@0.2.6".to_string(),
         ],
         _ => {
-            tracing::warn!("Unknown capability URI: {uri}");
             vec![]
         }
     }

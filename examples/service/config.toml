@@ -2,8 +2,8 @@
 message = "Howdy"
 
 [capability.greeting]
-uri = "host:greeting"
-config.uppercase = true
+type = "greeting"
+uppercase = true
 
 [component.greeter]
 uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
