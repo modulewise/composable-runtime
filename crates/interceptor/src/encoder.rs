@@ -229,7 +229,7 @@ pub fn encode_valtype(
                                 c.ty.as_ref()
                                     .map(|t| encode_valtype(resolve, t, enc, type_map))
                                     .transpose()?;
-                            Ok((c.name.as_str(), ty, None))
+                            Ok((c.name.as_str(), ty))
                         })
                         .collect::<Result<Vec<_>>>()?;
                     let index = enc.type_count();
@@ -332,10 +332,10 @@ pub fn encode_valtype(
                     enc.ty().defined_type().map(key, value);
                     ComponentValType::Type(index)
                 }
-                TypeDefKind::FixedSizeList(t, size) => {
+                TypeDefKind::FixedLengthList(t, size) => {
                     let inner = encode_valtype(resolve, t, enc, type_map)?;
                     let index = enc.type_count();
-                    enc.ty().defined_type().fixed_size_list(inner, *size);
+                    enc.ty().defined_type().fixed_length_list(inner, *size);
                     ComponentValType::Type(index)
                 }
                 TypeDefKind::Unknown => bail!("unknown type"),
@@ -375,7 +375,12 @@ pub fn encode_functype(
     let params: Vec<(&str, ComponentValType)> = func
         .params
         .iter()
-        .map(|(name, ty)| Ok((name.as_str(), encode_valtype(resolve, ty, enc, type_map)?)))
+        .map(|p| {
+            Ok((
+                p.name.as_str(),
+                encode_valtype(resolve, &p.ty, enc, type_map)?,
+            ))
+        })
         .collect::<Result<Vec<_>>>()?;
 
     let result = func

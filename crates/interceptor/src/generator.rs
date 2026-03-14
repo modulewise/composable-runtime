@@ -4,7 +4,7 @@
 use std::fmt::Write;
 
 use anyhow::Result;
-use wit_parser::{Resolve, Type};
+use wit_parser::{Param, Resolve, Type};
 
 use crate::types::*;
 
@@ -28,7 +28,7 @@ pub struct InterceptedFunction {
     /// Function name (from WIT).
     pub func_name: String,
     /// Parameter names and types (from WIT).
-    pub params: Vec<(String, Type)>,
+    pub params: Vec<Param>,
     /// Result type (from WIT).
     pub result: Option<Type>,
     /// Core param types for canon lower (GuestImport ABI).
@@ -143,7 +143,7 @@ fn derive_intercepted_function(
     let param_flat_types: Vec<Vec<&'static str>> = ifn
         .params
         .iter()
-        .map(|(_, ty)| flat_types(resolve, *ty))
+        .map(|p| flat_types(resolve, p.ty))
         .collect::<Result<_>>()?;
 
     let result_flat_types: Vec<&'static str> = ifn
@@ -184,7 +184,7 @@ fn derive_intercepted_function(
     let param_discriminants: Vec<u8> = ifn
         .params
         .iter()
-        .map(|(_, ty)| value_discriminant(resolve, *ty))
+        .map(|p| value_discriminant(resolve, p.ty))
         .collect();
 
     let result_discriminant = ifn.result.map(|ty| value_discriminant(resolve, ty));
@@ -405,13 +405,13 @@ fn generate_main_module(
     let mut param_string_entries: Vec<Vec<(u32, u32, u32, u32)>> = Vec::new();
     for ifunc in intercepted {
         let mut entries = Vec::new();
-        for (param_name, param_ty) in &ifunc.params {
+        for p in &ifunc.params {
             let name_off = str_offset;
-            let name_len = param_name.len() as u32;
-            all_strings.push_str(param_name);
+            let name_len = p.name.len() as u32;
+            all_strings.push_str(&p.name);
             str_offset += name_len;
 
-            let tn = type_name_str(resolve, *param_ty);
+            let tn = type_name_str(resolve, p.ty);
             let type_off = str_offset;
             let type_len = tn.len() as u32;
             all_strings.push_str(&tn);

@@ -142,8 +142,7 @@ impl DecodedInterceptor {
 // Build an interceptor from inline WIT and decode the result.
 fn build_and_decode(package_wit: &str, world: &str, patterns: &[&str]) -> DecodedInterceptor {
     let dir = wit_dir(package_wit);
-    let bytes =
-        composable_interceptor::create_from_wit(&wit_path(&dir), world, patterns).unwrap();
+    let bytes = composable_interceptor::create_from_wit(&wit_path(&dir), world, patterns).unwrap();
     DecodedInterceptor::from_bytes(&bytes)
 }
 
@@ -577,8 +576,7 @@ fn no_exports_errors() {
         }
         "#,
     );
-    let err = composable_interceptor::create_from_wit(&wit_path(&dir), "target", &[])
-        .unwrap_err();
+    let err = composable_interceptor::create_from_wit(&wit_path(&dir), "target", &[]).unwrap_err();
     assert!(
         err.to_string().contains("No exports"),
         "expected 'No exports' error, got: {err}"
@@ -595,8 +593,8 @@ fn bad_world_name_errors() {
         }
         "#,
     );
-    let err = composable_interceptor::create_from_wit(&wit_path(&dir), "nonexistent", &[])
-        .unwrap_err();
+    let err =
+        composable_interceptor::create_from_wit(&wit_path(&dir), "nonexistent", &[]).unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("nonexistent") || msg.contains("world"),
@@ -628,8 +626,7 @@ fn from_component_simple_interface() {
         "#,
     )
     .unwrap();
-    let bytes =
-        composable_interceptor::create_from_component(&component_bytes, &[]).unwrap();
+    let bytes = composable_interceptor::create_from_component(&component_bytes, &[]).unwrap();
     let d = DecodedInterceptor::from_bytes(&bytes);
 
     assert!(d.export_names().contains("test:calc/math@0.1.0"));
@@ -663,8 +660,7 @@ fn from_component_direct_export() {
         "#,
     )
     .unwrap();
-    let bytes =
-        composable_interceptor::create_from_component(&component_bytes, &[]).unwrap();
+    let bytes = composable_interceptor::create_from_component(&component_bytes, &[]).unwrap();
     let d = DecodedInterceptor::from_bytes(&bytes);
 
     assert_eq!(d.direct_export_func_names(), set(&["add"]));

@@ -5,7 +5,7 @@ wit_bindgen::generate!({
 });
 
 use exports::modulewise::interceptor::advice::{
-    Arg, Value, AfterAction, BeforeAction, Guest, GuestInvocation,
+    AfterAction, Arg, BeforeAction, Guest, GuestInvocation, Value,
 };
 
 struct Squarer;

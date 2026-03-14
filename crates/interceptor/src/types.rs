@@ -171,7 +171,7 @@ pub fn type_name_str(resolve: &Resolve, ty: Type) -> String {
                     TypeDefKind::Future(_) => "future".to_string(),
                     TypeDefKind::Stream(_) => "stream".to_string(),
                     TypeDefKind::Map(_, _) => "map".to_string(),
-                    TypeDefKind::FixedSizeList(_, _) => "fixed-size-list".to_string(),
+                    TypeDefKind::FixedLengthList(_, _) => "fixed-length-list".to_string(),
                     TypeDefKind::Unknown => "unknown".to_string(),
                 }
             }
@@ -213,7 +213,7 @@ pub fn type_needs_memory(resolve: &Resolve, ty: &Type) -> bool {
                 TypeDefKind::Map(k, v) => {
                     type_needs_memory(resolve, k) || type_needs_memory(resolve, v)
                 }
-                TypeDefKind::FixedSizeList(_t, _) => true,
+                TypeDefKind::FixedLengthList(t, _) => type_needs_memory(resolve, t),
                 TypeDefKind::Unknown => false,
             }
         }
@@ -225,7 +225,7 @@ pub fn type_needs_memory(resolve: &Resolve, ty: &Type) -> bool {
 pub fn func_needs_memory(resolve: &Resolve, func: &wit_parser::Function) -> bool {
     func.params
         .iter()
-        .any(|(_, ty)| type_needs_memory(resolve, ty))
+        .any(|p| type_needs_memory(resolve, &p.ty))
         || func
             .result
             .as_ref()
@@ -325,6 +325,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert_eq!(value_discriminant(&resolve, Type::Id(id)), 6);
     }
@@ -338,6 +339,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert_eq!(value_discriminant(&resolve, Type::Id(id)), 1);
     }
@@ -351,6 +353,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert_eq!(value_discriminant(&resolve, Type::Id(id)), 3);
     }
@@ -384,6 +387,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert_eq!(type_name_str(&resolve, Type::Id(id)), "point");
     }
@@ -397,6 +401,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert_eq!(type_name_str(&resolve, Type::Id(id)), "record");
     }
@@ -410,6 +415,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert_eq!(type_name_str(&resolve, Type::Id(id)), "list");
     }
@@ -491,6 +497,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -505,11 +512,13 @@ mod tests {
                     name: "message".into(),
                     ty: Type::String,
                     docs: Default::default(),
+                    span: Default::default(),
                 }],
             }),
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -525,17 +534,20 @@ mod tests {
                         name: "x".into(),
                         ty: Type::F64,
                         docs: Default::default(),
+                        span: Default::default(),
                     },
                     wit_parser::Field {
                         name: "y".into(),
                         ty: Type::F64,
                         docs: Default::default(),
+                        span: Default::default(),
                     },
                 ],
             }),
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert!(!type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -549,6 +561,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -562,6 +575,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert!(!type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -576,16 +590,19 @@ mod tests {
                     wit_parser::EnumCase {
                         name: "red".into(),
                         docs: Default::default(),
+                        span: Default::default(),
                     },
                     wit_parser::EnumCase {
                         name: "green".into(),
                         docs: Default::default(),
+                        span: Default::default(),
                     },
                 ],
             }),
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert!(!type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -599,6 +616,7 @@ mod tests {
             owner: TypeOwner::None,
             docs: Default::default(),
             stability: Default::default(),
+            span: Default::default(),
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }

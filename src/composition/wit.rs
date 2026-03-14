@@ -50,7 +50,10 @@ impl Parser {
         // Extract imports
         let mut imports = Vec::new();
         for (_, item) in &world.imports {
-            if let wit_parser::WorldItem::Interface { id, stability: _ } = item {
+            if let wit_parser::WorldItem::Interface {
+                id, stability: _, ..
+            } = item
+            {
                 let interface = resolve.interfaces.get(*id).unwrap();
                 // Skip type-only interfaces (no functions to satisfy at runtime)
                 if interface.functions.is_empty() {
@@ -64,7 +67,10 @@ impl Parser {
         // Extract exports
         let mut exports = Vec::new();
         for (_, item) in &world.exports {
-            if let wit_parser::WorldItem::Interface { id, stability: _ } = item {
+            if let wit_parser::WorldItem::Interface {
+                id, stability: _, ..
+            } = item
+            {
                 let interface_name = Self::build_full_interface_name(&resolve, *id)?;
                 exports.push(interface_name);
             }
@@ -74,7 +80,7 @@ impl Parser {
             let mut functions = Vec::new();
             for (_, item) in &world.exports {
                 match item {
-                    wit_parser::WorldItem::Interface { id, stability: _ } => {
+                    wit_parser::WorldItem::Interface { id, .. } => {
                         let interface_functions = Self::parse_interface(id, &resolve)?;
                         functions.extend(interface_functions);
                     }
@@ -82,7 +88,7 @@ impl Parser {
                         let function = Self::parse_function(func, None, &resolve)?;
                         functions.push(function);
                     }
-                    wit_parser::WorldItem::Type(_) => {
+                    wit_parser::WorldItem::Type { .. } => {
                         // No functions
                     }
                 }
@@ -145,12 +151,12 @@ impl Parser {
     ) -> Result<Function> {
         // Validate and resolve parameter types
         let mut params = Vec::new();
-        for (param_name, param_type) in &func.params {
-            Self::validate_wit_type_for_json_rpc(*param_type, resolve)?;
-            let json_schema = Self::wit_type_to_json_schema(*param_type, resolve);
-            let is_optional = Self::is_optional_type(*param_type, resolve);
+        for p in &func.params {
+            Self::validate_wit_type_for_json_rpc(p.ty, resolve)?;
+            let json_schema = Self::wit_type_to_json_schema(p.ty, resolve);
+            let is_optional = Self::is_optional_type(p.ty, resolve);
             params.push(FunctionParam {
-                name: param_name.clone(),
+                name: p.name.clone(),
                 is_optional,
                 json_schema,
             });

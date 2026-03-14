@@ -25,7 +25,7 @@ impl HostCapability for GreetingCapability {
         vec!["example:greeting/host-greeting".to_string()]
     }
 
-    fn link(&self, linker: &mut Linker<ComponentState>) -> Result<()> {
+    fn link(&self, linker: &mut Linker<ComponentState>) -> wasmtime::Result<()> {
         crate::example::greeting::host_greeting::add_to_linker::<_, HasSelf<_>>(linker, |state| {
             state
         })
