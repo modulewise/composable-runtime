@@ -50,10 +50,7 @@ impl Parser {
         // Extract imports
         let mut imports = Vec::new();
         for (_, item) in &world.imports {
-            if let wit_parser::WorldItem::Interface {
-                id, stability: _, ..
-            } = item
-            {
+            if let wit_parser::WorldItem::Interface { id, .. } = item {
                 let interface = resolve.interfaces.get(*id).unwrap();
                 // Skip type-only interfaces (no functions to satisfy at runtime)
                 if interface.functions.is_empty() {
@@ -67,10 +64,7 @@ impl Parser {
         // Extract exports
         let mut exports = Vec::new();
         for (_, item) in &world.exports {
-            if let wit_parser::WorldItem::Interface {
-                id, stability: _, ..
-            } = item
-            {
+            if let wit_parser::WorldItem::Interface { id, .. } = item {
                 let interface_name = Self::build_full_interface_name(&resolve, *id)?;
                 exports.push(interface_name);
             }
