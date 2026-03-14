@@ -14,10 +14,10 @@ config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
 [capability.http]
-uri = "wasmtime:http"
+type = "wasi:http"
 
 [capability.io]
-uri = "wasmtime:io"
+type = "wasi:io"
 
 [capability.wasip2]
-uri = "wasmtime:wasip2"
+type = "wasi:p2"

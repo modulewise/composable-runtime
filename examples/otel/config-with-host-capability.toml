@@ -7,10 +7,10 @@ uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
 imports = ["grpc", "wasip2"]
 
 [capability.grpc]
-uri = "host:grpc"
-config.url = "http://localhost:4317"
-config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
-config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
+type = "grpc"
+url = "http://localhost:4317"
+paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
+paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
 [capability.wasip2]
-uri = "wasmtime:wasip2"
+type = "wasi:p2"

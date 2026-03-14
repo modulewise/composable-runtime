@@ -203,7 +203,7 @@ impl RuntimeBuilder {
 
     /// Register a host capability type for the given name.
     ///
-    /// The name corresponds to the suffix in `uri = "host:name"` in TOML.
+    /// The name corresponds to the `type` value in `[capability.*]` TOML blocks.
     ///
     /// If the config is empty and deserialization fails,
     /// falls back to `Default::default()`.

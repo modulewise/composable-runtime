@@ -83,7 +83,7 @@ impl ConfigHandler for CapabilityConfigHandler<'_> {
     }
 
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
-        HashMap::from([("capability", ["uri", "scope", "config"].as_slice())])
+        HashMap::from([("capability", ["type", "scope"].as_slice())])
     }
 
     fn handle_category(
@@ -98,24 +98,19 @@ impl ConfigHandler for CapabilityConfigHandler<'_> {
             ));
         }
         let ctx = |e: PropertyError| e.with_context("capability", name);
-        let uri = take_required_string(&mut properties, "uri").map_err(ctx)?;
+        let kind = take_required_string(&mut properties, "type").map_err(ctx)?;
         let scope = take_optional_string(&mut properties, "scope")
             .map_err(ctx)?
             .unwrap_or_else(default_scope);
-        let config = take_object(&mut properties, "config").map_err(ctx)?;
 
-        if !properties.is_empty() {
-            let unknown: Vec<_> = properties.keys().collect();
-            return Err(anyhow::anyhow!(
-                "Capability '{name}' has unknown properties: {unknown:?}"
-            ));
-        }
+        // Remaining properties are the capability's direct configuration
+        let remaining: HashMap<String, serde_json::Value> = properties.into_iter().collect();
 
         self.definitions.push(CapabilityDefinition {
             name: name.to_string(),
-            uri,
+            kind,
             scope,
-            config,
+            properties: remaining,
         });
         Ok(())
     }

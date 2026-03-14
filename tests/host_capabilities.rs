@@ -44,7 +44,7 @@ async fn test_host_capability_provides_interface() {
     let toml_content = format!(
         r#"
         [capability.greeter]
-        uri = "host:greeter"
+        type = "greeter"
 
         [component.guest]
         uri = "{}"
@@ -77,14 +77,14 @@ async fn test_host_capability_provides_interface() {
 }
 
 #[tokio::test]
-#[should_panic(expected = "Host capability 'missing' (URI: 'host:missing') not registered")]
+#[should_panic(expected = "Capability type 'missing' not registered")]
 async fn test_missing_host_capability_panics() {
     let component_wasm = component_importing_host_interface();
 
     let toml_content = format!(
         r#"
         [capability.missing]
-        uri = "host:missing"
+        type = "missing"
 
         [component.guest]
         uri = "{}"
@@ -151,7 +151,7 @@ async fn test_host_capability_invoked() {
     let toml_content = format!(
         r#"
         [capability.value-provider]
-        uri = "host:value-provider"
+        type = "value-provider"
 
         [component.guest]
         uri = "{}"
@@ -244,8 +244,8 @@ async fn test_host_capability_with_config() {
     let toml_content = format!(
         r#"
         [capability.multiplier]
-        uri = "host:multiplier"
-        config.multiplier = 5
+        type = "multiplier"
+        multiplier = 5
 
         [component.guest]
         uri = "{}"
@@ -280,7 +280,7 @@ async fn test_host_capability_with_default_config() {
     let toml_content = format!(
         r#"
         [capability.multiplier]
-        uri = "host:multiplier"
+        type = "multiplier"
 
         [component.guest]
         uri = "{}"
@@ -378,7 +378,7 @@ async fn test_host_capability_with_state() {
     let toml_content = format!(
         r#"
         [capability.counter]
-        uri = "host:counter"
+        type = "counter"
 
         [component.guest]
         uri = "{}"
@@ -412,7 +412,7 @@ async fn test_host_capability_state_isolated_per_instance() {
     let toml_content = format!(
         r#"
         [capability.counter]
-        uri = "host:counter"
+        type = "counter"
 
         [component.guest]
         uri = "{}"
@@ -517,10 +517,10 @@ async fn test_duplicate_capability_state_type_fails() {
     let toml_content = format!(
         r#"
         [capability.first]
-        uri = "host:first"
+        type = "first"
 
         [capability.second]
-        uri = "host:second"
+        type = "second"
 
         [component.guest]
         uri = "{}"

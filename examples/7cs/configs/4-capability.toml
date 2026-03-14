@@ -5,7 +5,7 @@ config.locale = "fr-FR"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
-imports = ["http-client", "io"]
+imports = ["http-client"]
 
 [capability.http-client]
-uri = "wasmtime:http"
+type = "wasi:http"

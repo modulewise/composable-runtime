@@ -1,5 +1,5 @@
 [capability.greeting]
-uri = "host:greeting"
+type = "greeting"
 
 [component.greeter]
 uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
