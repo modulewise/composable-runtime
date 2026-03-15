@@ -1,6 +1,6 @@
 [package]
 name = "composable-runtime"
-version = "0.3.1"
+version = "0.4.0"
 description = "Modulewise Composable Runtime"
 edition.workspace = true
 license.workspace = true
@@ -36,7 +36,7 @@ wit-parser = "0.245"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-composable-interceptor = { path = "crates/interceptor" }
+composable-interceptor = { version = "0.4.0", path = "crates/interceptor" }
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 oci-client = "0.16"
