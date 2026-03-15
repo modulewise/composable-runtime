@@ -1,6 +1,6 @@
 [package]
 name = "composable-http-gateway"
-version = "0.1.0"
+version = "0.4.0"
 description = "HTTP Gateway for Composable Runtime"
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ keywords = ["wasm"]
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
-composable-runtime = { path = "../..", features = ["messaging"] }
+composable-runtime = { version = "0.4.0", path = "../..", features = ["messaging"] }
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util.workspace = true
