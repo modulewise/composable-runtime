@@ -124,7 +124,7 @@ $ ./run.sh 3
 </td>
 <td>
 
-Host capabilities provide the interfaces a component needs to interact with the external world. For example, the `wasmtime:http` capability enables a component to make outgoing HTTP requests.
+Host capabilities provide the interfaces a component needs to interact with the external world. For example, the `wasi:http` capability enables a component to make outgoing HTTP requests.
 
 The translator is now replaced with one that calls an external HTTP API. The `translate-api.js` implementation is slightly less simplistic as it also knows how to translate "World" into the same handful of languages.
 
@@ -142,7 +142,7 @@ uri = "./lib/capable-translator.wasm"
 imports = ["http-client"]
 
 [capability.http-client]
-uri = "wasmtime:http"
+type = "wasi:http"
 ```
 
 ```
@@ -185,7 +185,7 @@ uri = "./lib/logging-advice.wasm"
 imports = ["logging-stdout"]
 
 [capability.http-client]
-uri = "wasmtime:http"
+type = "wasi:http"
 ```
 
 ```
@@ -240,7 +240,7 @@ uri = "./lib/logging-advice.wasm"
 imports = ["logging-stdout"]
 
 [capability.http-client]
-uri = "wasmtime:http"
+type = "wasi:http"
 ```
 
 ```
@@ -304,7 +304,7 @@ path = "/hello"
 channel = "names"
 
 [capability.http-client]
-uri = "wasmtime:http"
+type = "wasi:http"
 ```
 **ops.toml**:
 
@@ -319,11 +319,7 @@ And finally, the shared `infra.toml` used for examples 4-7:
 ```toml
 [component.logging-stdout]
 uri = "./lib/wasi-logging-to-stdout.wasm"
-imports = ["stdout", "wasip2"]
-
-[capability.stdout]
-type = "wasi:cli"
-inherit-stdout = true
+imports = ["wasip2"]
 
 [capability.wasip2]
 type = "wasi:p2"

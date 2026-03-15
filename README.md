@@ -23,17 +23,17 @@ config.locale = "fr-FR"
 
 [component.translator]
 uri = "./lib/translator.wasm"
-imports = ["http", "io"]
+imports = ["http"]
 
 [capability.http]
-uri = "wasmtime:http"
-
-[capability.io]
-uri = "wasmtime:io"
+type = "wasi:http"
 ```
 
 </td>
 </tr></table>
+
+> [!NOTE]
+> This project is still in an early design phase. All configurations and implementations are subject to change.
 
 ## Core Concepts
 
