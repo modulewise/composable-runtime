@@ -35,12 +35,12 @@ Result: "HOWDY, World!"
 `GreetingService` implements `Service` with three responsibilities:
 
 1. **Config handling**: A `ConfigHandler` claims the `[greeting]` category, parsing the `message` property. Config is shared with the service via `Arc<Mutex<...>>`.
-2. **Capability provision**: After config is parsed, `capabilities()` uses `.take()` to pull the message out of the mutex and creates a `GreetingCapability` factory. The factory also reads `uppercase` from the capability's `config.*` sub-table.
+2. **Capability provisioning**: After config is parsed, `capabilities()` uses `.take()` to pull the message out of the mutex and creates a `GreetingCapability` factory. The factory also reads `uppercase` from the capability's properties.
 3. **Lifecycle**: `start()` and `shutdown()` are called around invocation.
 
 ## Flow
 
-1. **Configuration**: `[greeting.default]` sets `message = "Howdy"`. `[capability.greeting]` sets `config.uppercase = true`.
+1. **Configuration**: `[greeting.default]` sets `message = "Howdy"`. `[capability.greeting]` sets `uppercase = true`.
 2. **Config phase**: `GreetingConfigHandler` parses the greeting category and stores the message.
 3. **Capability phase**: `GreetingService.capabilities()` takes the stored message, creates a factory that applies the `uppercase` transform.
 4. **Invocation**: Guest calls `get_greeting()`, host returns "HOWDY", guest formats "HOWDY, World!".

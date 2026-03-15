@@ -41,12 +41,12 @@ interface endpoint {
 }
 ```
 
-The endpoint is generic gRPC (OTLP-agnostic, hence the `otel-to-grpc` component). It just sends raw bytes to a named path. Path keys like `logs` and `traces` map to gRPC service paths via config, either in the `host:grpc` capability definition, or the `grpc-to-http` component definition:
+The endpoint is generic gRPC (OTLP-agnostic, hence the `otel-to-grpc` component). It just sends raw bytes to a named path. Path keys like `logs` and `traces` map to gRPC service paths via config, either in the `grpc` capability definition, or the `grpc-to-http` component definition:
 
 ```toml
-config.url = "http://localhost:4317"
-config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
-config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
+url = "http://localhost:4317"
+paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
+paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 ```
 
 ## Two Endpoint Options
@@ -67,16 +67,16 @@ uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
 imports = ["grpc", "wasip2"]
 
 [capability.grpc]
-uri = "host:grpc"
-config.url = "http://localhost:4317"
-config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
-config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
+type = "grpc"
+url = "http://localhost:4317"
+paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
+paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
 [capability.wasip2]
-uri = "wasmtime:wasip2"
+type = "wasi:p2"
 ```
 
-The "grpc" definition with `uri = "host:grpc"` creates an instance of the host capability, which the host binary has registered when building the runtime:
+The "grpc" definition creates an instance of the host capability, which the host binary has registered when building the runtime:
 
 ```rust
 let runtime = Runtime::builder()
@@ -105,19 +105,16 @@ imports = ["grpc", "wasip2"]
 
 [component.grpc]
 uri = "./target/wasm32-unknown-unknown/release/grpc_to_http.wasm"
-imports = ["http", "io"]
+imports = ["http"]
 config.url = "http://localhost:4317"
 config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
 [capability.http]
-uri = "wasmtime:http"
-
-[capability.io]
-uri = "wasmtime:io"
+type = "wasi:http"
 
 [capability.wasip2]
-uri = "wasmtime:wasip2"
+type = "wasi:p2"
 ```
 
 The `grpc-to-http` component constructs a gRPC-framed request and sends it via `wasi:http/outgoing-handler`.

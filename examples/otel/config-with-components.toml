@@ -8,16 +8,13 @@ imports = ["grpc", "wasip2"]
 
 [component.grpc]
 uri = "./target/wasm32-unknown-unknown/release/grpc_to_http.wasm"
-imports = ["http", "io"]
+imports = ["http"]
 config.url = "http://localhost:4317"
 config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
 [capability.http]
 type = "wasi:http"
-
-[capability.io]
-type = "wasi:io"
 
 [capability.wasip2]
 type = "wasi:p2"

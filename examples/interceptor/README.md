@@ -44,13 +44,10 @@ imports = ["stdout-logger"]
 
 [component.stdout-logger]
 uri = "./wasi-logging-to-stdout.wasm"
-imports = ["stdio", "wasip2"]
-
-[capability.stdio]
-uri = "wasmtime:inherit-stdio"
+imports = ["wasip2"]
 
 [capability.wasip2]
-uri = "wasmtime:wasip2"
+type = "wasi:p2"
 ```
 
 ## How It Works

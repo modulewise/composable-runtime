@@ -10,11 +10,7 @@ imports = ["stdout-logger"]
 uri = "./wasi-logging-to-stdout.wasm"
 # could use this instead of pulling in the build script:
 # uri = "oci://ghcr.io/componentized/logging/to-stdout:v0.2.1"
-imports = ["stdio", "wasip2"]
-
-[capability.stdio]
-type = "wasi:cli"
-inherit-stdio = true
+imports = ["wasip2"]
 
 [capability.wasip2]
 type = "wasi:p2"
