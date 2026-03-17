@@ -174,6 +174,9 @@ impl Invoker {
         config.parallel_compilation(true);
         config.wasm_component_model_async(true);
         config.memory_init_cow(true);
+        config.wasm_gc(true);
+        config.wasm_exceptions(true);
+        config.wasm_function_references(true);
         let engine = Engine::new(&config)?;
         Ok(Self { engine })
     }
@@ -542,6 +545,48 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
                 Err(anyhow::anyhow!("Expected single character, got: {s}"))
             }
         }
+
+        // String-to-number coercion (e.g. CLI arguments)
+        (serde_json::Value::String(s), wasmtime::component::Type::U8) => Ok(Val::U8(
+            s.parse::<u8>()
+                .map_err(|_| anyhow::anyhow!("Invalid u8: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::U16) => Ok(Val::U16(
+            s.parse::<u16>()
+                .map_err(|_| anyhow::anyhow!("Invalid u16: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::U32) => Ok(Val::U32(
+            s.parse::<u32>()
+                .map_err(|_| anyhow::anyhow!("Invalid u32: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::U64) => Ok(Val::U64(
+            s.parse::<u64>()
+                .map_err(|_| anyhow::anyhow!("Invalid u64: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::S8) => Ok(Val::S8(
+            s.parse::<i8>()
+                .map_err(|_| anyhow::anyhow!("Invalid s8: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::S16) => Ok(Val::S16(
+            s.parse::<i16>()
+                .map_err(|_| anyhow::anyhow!("Invalid s16: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::S32) => Ok(Val::S32(
+            s.parse::<i32>()
+                .map_err(|_| anyhow::anyhow!("Invalid s32: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::S64) => Ok(Val::S64(
+            s.parse::<i64>()
+                .map_err(|_| anyhow::anyhow!("Invalid s64: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::Float32) => Ok(Val::Float32(
+            s.parse::<f32>()
+                .map_err(|_| anyhow::anyhow!("Invalid f32: {s}"))?,
+        )),
+        (serde_json::Value::String(s), wasmtime::component::Type::Float64) => Ok(Val::Float64(
+            s.parse::<f64>()
+                .map_err(|_| anyhow::anyhow!("Invalid f64: {s}"))?,
+        )),
 
         // Number types - JSON number maps to all WIT numeric types
         (serde_json::Value::Number(n), wasmtime::component::Type::U8) => {
