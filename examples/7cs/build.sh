@@ -2,16 +2,18 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 (
-  cd components
+  cd "$SCRIPT_DIR/components"
   cargo component build --target wasm32-unknown-unknown --release
 )
 
-for f in components/target/wasm32-unknown-unknown/release/*.wasm; do
-  cp "$f" "./lib/$(basename "$f" | tr '_' '-')"
+for f in "$SCRIPT_DIR"/components/target/wasm32-unknown-unknown/release/*.wasm; do
+  cp "$f" "$SCRIPT_DIR/lib/$(basename "$f" | tr '_' '-')"
 done
 
-if [[ ! -f ./lib/wasi-logging-to-stdout.wasm ]]; then
+if [[ ! -f "$SCRIPT_DIR/lib/wasi-logging-to-stdout.wasm" ]]; then
   echo "Fetching WASI logging adapter..."
-  wkg oci pull -o ./lib/wasi-logging-to-stdout.wasm ghcr.io/componentized/logging/to-stdout:v0.2.1
+  wkg oci pull -o "$SCRIPT_DIR/lib/wasi-logging-to-stdout.wasm" ghcr.io/componentized/logging/to-stdout:v0.2.1
 fi
