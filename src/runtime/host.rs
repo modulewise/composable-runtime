@@ -733,6 +733,94 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
             Ok(Val::Option(Some(Box::new(inner_val))))
         }
 
+        // Variants: {"variant": "case-name", "value": payload} or {"variant": "case-name", ...fields}
+        (serde_json::Value::Object(obj), wasmtime::component::Type::Variant(variant_type)) => {
+            let case_name = obj.get("variant").and_then(|v| v.as_str()).ok_or_else(|| {
+                anyhow::anyhow!("Variant object must have a \"variant\" field with the case name")
+            })?;
+
+            let case = variant_type
+                .cases()
+                .find(|c| c.name == case_name)
+                .ok_or_else(|| {
+                    let valid: Vec<_> = variant_type.cases().map(|c| c.name.to_string()).collect();
+                    anyhow::anyhow!("Unknown variant case '{case_name}'. Valid cases: {valid:?}")
+                })?;
+
+            let payload = match &case.ty {
+                Some(payload_type) => {
+                    // Try "value" key first, then try reconstructing from remaining fields
+                    let payload_json = if let Some(value) = obj.get("value") {
+                        value.clone()
+                    } else {
+                        // Collect all fields except "variant" into an object
+                        let mut payload_obj = serde_json::Map::new();
+                        for (k, v) in obj {
+                            if k != "variant" {
+                                payload_obj.insert(k.clone(), v.clone());
+                            }
+                        }
+                        serde_json::Value::Object(payload_obj)
+                    };
+                    Some(json_to_val(&payload_json, payload_type)?)
+                }
+                None => None,
+            };
+
+            Ok(Val::Variant(case_name.to_string(), payload.map(Box::new)))
+        }
+
+        // Enums: plain string matching a case name
+        (serde_json::Value::String(s), wasmtime::component::Type::Enum(enum_type)) => {
+            if enum_type.names().any(|name| name == s.as_str()) {
+                Ok(Val::Enum(s.clone()))
+            } else {
+                let valid: Vec<_> = enum_type.names().map(|n| n.to_string()).collect();
+                Err(anyhow::anyhow!(
+                    "Unknown enum value '{s}'. Valid values: {valid:?}"
+                ))
+            }
+        }
+
+        // Results: {"ok": value} or {"error": value}
+        (serde_json::Value::Object(obj), wasmtime::component::Type::Result(result_type)) => {
+            if let Some(ok_val) = obj.get("ok") {
+                let val = match result_type.ok() {
+                    Some(ok_type) => Some(Box::new(json_to_val(ok_val, &ok_type)?)),
+                    None => None,
+                };
+                Ok(Val::Result(Ok(val)))
+            } else if let Some(err_val) = obj.get("error") {
+                let val = match result_type.err() {
+                    Some(err_type) => Some(Box::new(json_to_val(err_val, &err_type)?)),
+                    None => None,
+                };
+                Ok(Val::Result(Err(val)))
+            } else {
+                Err(anyhow::anyhow!(
+                    "Result object must have either an \"ok\" or \"error\" field"
+                ))
+            }
+        }
+
+        // Flags: array of flag name strings
+        (serde_json::Value::Array(arr), wasmtime::component::Type::Flags(flags_type)) => {
+            let valid_names: Vec<_> = flags_type.names().map(|n| n.to_string()).collect();
+            let mut flag_names = Vec::new();
+            for item in arr {
+                let name = item
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Flag values must be strings, got: {item:?}"))?;
+                if !valid_names.iter().any(|n| n == name) {
+                    return Err(anyhow::anyhow!(
+                        "Unknown flag '{name}'. Valid flags: {valid_names:?}"
+                    ));
+                }
+                flag_names.push(name.to_string());
+            }
+            Ok(Val::Flags(flag_names))
+        }
+
         // Type mismatches
         _ => Err(anyhow::anyhow!(
             "Type mismatch: cannot convert JSON {json_value:?} to WIT type {val_type:?}"
