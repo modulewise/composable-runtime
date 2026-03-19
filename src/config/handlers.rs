@@ -5,17 +5,19 @@ use super::types::{CategoryClaim, ConfigHandler, PropertyMap};
 use crate::types::{CapabilityDefinition, ComponentDefinition, default_scope};
 
 /// Handles `[component.*]` definitions.
-pub struct ComponentConfigHandler<'a> {
-    definitions: &'a mut Vec<ComponentDefinition>,
+pub struct ComponentConfigHandler {
+    definitions: Vec<ComponentDefinition>,
 }
 
-impl<'a> ComponentConfigHandler<'a> {
-    pub fn new(definitions: &'a mut Vec<ComponentDefinition>) -> Self {
-        Self { definitions }
+impl ComponentConfigHandler {
+    pub fn new() -> Self {
+        Self {
+            definitions: Vec::new(),
+        }
     }
 }
 
-impl ConfigHandler for ComponentConfigHandler<'_> {
+impl ConfigHandler for ComponentConfigHandler {
     fn claimed_categories(&self) -> Vec<CategoryClaim> {
         vec![CategoryClaim::all("component")]
     }
@@ -64,20 +66,26 @@ impl ConfigHandler for ComponentConfigHandler<'_> {
         });
         Ok(())
     }
-}
 
-/// Handles `[capability.*]` definitions.
-pub struct CapabilityConfigHandler<'a> {
-    definitions: &'a mut Vec<CapabilityDefinition>,
-}
-
-impl<'a> CapabilityConfigHandler<'a> {
-    pub fn new(definitions: &'a mut Vec<CapabilityDefinition>) -> Self {
-        Self { definitions }
+    fn generated_component_definitions(&mut self) -> Vec<ComponentDefinition> {
+        std::mem::take(&mut self.definitions)
     }
 }
 
-impl ConfigHandler for CapabilityConfigHandler<'_> {
+/// Handles `[capability.*]` definitions.
+pub struct CapabilityConfigHandler {
+    definitions: Vec<CapabilityDefinition>,
+}
+
+impl CapabilityConfigHandler {
+    pub fn new() -> Self {
+        Self {
+            definitions: Vec::new(),
+        }
+    }
+}
+
+impl ConfigHandler for CapabilityConfigHandler {
     fn claimed_categories(&self) -> Vec<CategoryClaim> {
         vec![CategoryClaim::all("capability")]
     }
@@ -113,6 +121,10 @@ impl ConfigHandler for CapabilityConfigHandler<'_> {
             properties: remaining,
         });
         Ok(())
+    }
+
+    fn generated_capability_definitions(&mut self) -> Vec<CapabilityDefinition> {
+        std::mem::take(&mut self.definitions)
     }
 }
 
