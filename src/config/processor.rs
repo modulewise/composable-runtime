@@ -64,19 +64,19 @@ impl ConfigProcessor {
         }
 
         // Build unified handler collection: core handlers + registered handlers
+        let mut all_handlers: Vec<Box<dyn ConfigHandler>> = Vec::new();
+        all_handlers.push(Box::new(ComponentConfigHandler::new()));
+        all_handlers.push(Box::new(CapabilityConfigHandler::new()));
+        all_handlers.extend(self.handlers);
+
+        dispatch(&mut definitions, &mut all_handlers)?;
+
+        // Collect generated definitions from all handlers
         let mut component_definitions = Vec::new();
         let mut capability_definitions = Vec::new();
-        {
-            let mut all_handlers: Vec<Box<dyn ConfigHandler + '_>> = Vec::new();
-            all_handlers.push(Box::new(ComponentConfigHandler::new(
-                &mut component_definitions,
-            )));
-            all_handlers.push(Box::new(CapabilityConfigHandler::new(
-                &mut capability_definitions,
-            )));
-            all_handlers.extend(self.handlers);
-
-            dispatch(&mut definitions, &mut all_handlers)?;
+        for handler in &mut all_handlers {
+            component_definitions.extend(handler.generated_component_definitions());
+            capability_definitions.extend(handler.generated_capability_definitions());
         }
 
         // Resolve placeholders

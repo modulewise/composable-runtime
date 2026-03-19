@@ -2,6 +2,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::types::{CapabilityDefinition, ComponentDefinition};
+
 /// Source-agnostic property map with JSON values.
 pub type PropertyMap = HashMap<String, serde_json::Value>;
 
@@ -136,5 +138,15 @@ pub trait ConfigHandler {
         _properties: PropertyMap,
     ) -> Result<()> {
         Ok(())
+    }
+
+    /// Return component definitions generated during config handling.
+    fn generated_component_definitions(&mut self) -> Vec<ComponentDefinition> {
+        vec![]
+    }
+
+    /// Return capability definitions generated during config handling.
+    fn generated_capability_definitions(&mut self) -> Vec<CapabilityDefinition> {
+        vec![]
     }
 }
