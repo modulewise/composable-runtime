@@ -11,7 +11,8 @@ pub use config::types::{
 pub use runtime::{Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{
-    Component, ComponentInvoker, ComponentState, Function, FunctionParam, MessagePublisher,
+    CapabilityDefinition, Component, ComponentDefinition, ComponentInvoker, ComponentState,
+    Function, FunctionParam, MessagePublisher,
 };
 
 // exposed for testing, hidden from docs
