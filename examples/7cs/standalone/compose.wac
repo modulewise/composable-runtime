@@ -1,0 +1,23 @@
+package modulewise:standalone;
+
+let translator = new modulewise:capable-translator { ... };
+
+let logging = new modulewise:logging-to-stdout { ... };
+
+// Interceptor wrapping translator with logging advice
+let logging-translator = new modulewise:logging-translator {
+  translator: translator.translator,
+  logging: logging.logging,
+  ...
+};
+
+// Static config providing locale=de-DE
+let config = new modulewise:config {};
+
+// Greeter: imports intercepted translator + config, exports greet
+let greeter = new modulewise:greeter {
+  translator: logging-translator.translator,
+  store: config.store,
+};
+
+export greeter.greet;
