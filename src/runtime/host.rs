@@ -470,6 +470,8 @@ impl Invoker {
             1 => {
                 let value = &results[0];
                 match value {
+                    Val::Result(Ok(Some(ok_val))) => Ok(val_to_json(ok_val)),
+                    Val::Result(Ok(None)) => Ok(serde_json::Value::Null),
                     Val::Result(Err(Some(error_val))) => {
                         let error_json = val_to_json(error_val);
                         Err(anyhow::anyhow!("Component returned error: {error_json}"))
@@ -733,10 +735,10 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
             Ok(Val::Option(Some(Box::new(inner_val))))
         }
 
-        // Variants: {"variant": "case-name", "value": payload} or {"variant": "case-name", ...fields}
+        // Variants: {"type": "case-name", "value": payload} or {"type": "case-name", ...fields}
         (serde_json::Value::Object(obj), wasmtime::component::Type::Variant(variant_type)) => {
-            let case_name = obj.get("variant").and_then(|v| v.as_str()).ok_or_else(|| {
-                anyhow::anyhow!("Variant object must have a \"variant\" field with the case name")
+            let case_name = obj.get("type").and_then(|v| v.as_str()).ok_or_else(|| {
+                anyhow::anyhow!("Variant object must have a \"type\" field with the case name")
             })?;
 
             let case = variant_type
