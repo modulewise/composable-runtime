@@ -29,6 +29,7 @@ pub struct ComponentDefinition {
     pub imports: Vec<String>,
     pub interceptors: Vec<String>,
     pub config: HashMap<String, serde_json::Value>,
+    pub labels: HashMap<String, String>,
 }
 
 /// State passed to Wasm components during execution.
@@ -210,16 +211,65 @@ pub struct FunctionParam {
     pub json_schema: serde_json::Value,
 }
 
+/// Metadata about a component, available for selector evaluation.
+/// `dependents` is `None` before registry building (e.g. at scope evaluation time).
+#[derive(Debug, Clone)]
+pub struct ComponentMetadata {
+    pub name: String,
+    pub namespace: Option<String>,
+    pub package: Option<String>,
+    pub labels: HashMap<String, String>,
+    pub dependents: Option<Vec<String>>,
+    pub exports: Vec<String>,
+}
+
+impl ComponentMetadata {
+    /// Flatten metadata into a selectable map for selector evaluation.
+    /// Top-level fields become direct keys. Labels are prefixed with `labels.`.
+    /// `None` fields are omitted (enabling existence checks like `!dependents`).
+    pub fn to_selectable(&self) -> HashMap<String, Option<String>> {
+        let mut map = HashMap::new();
+        map.insert("name".to_string(), Some(self.name.clone()));
+        if let Some(ns) = &self.namespace {
+            map.insert("namespace".to_string(), Some(ns.clone()));
+        }
+        if let Some(pkg) = &self.package {
+            map.insert("package".to_string(), Some(pkg.clone()));
+        }
+        if let Some(dependents) = &self.dependents
+            && !dependents.is_empty()
+        {
+            map.insert(
+                "dependents".to_string(),
+                Some(format!("[{}]", dependents.join(","))),
+            );
+        }
+        if !self.exports.is_empty() {
+            map.insert(
+                "exports".to_string(),
+                Some(format!("[{}]", self.exports.join(","))),
+            );
+        }
+        for (k, v) in &self.labels {
+            map.insert(format!("labels.{k}"), Some(v.clone()));
+        }
+        map
+    }
+}
+
 /// A named Wasm Component and its exported functions.
 #[derive(Debug, Clone)]
 pub struct Component {
-    pub name: String,
+    pub metadata: ComponentMetadata,
     pub functions: HashMap<String, Function>,
 }
 
 /// Invoke components by name.
 pub trait ComponentInvoker: Send + Sync {
-    fn get_component(&self, name: &str) -> Option<Component>;
+    fn get_component(&self, name: &str) -> Option<&Component>;
+
+    fn list_components(&self, selector: Option<&crate::config::types::Selector>)
+    -> Vec<&Component>;
 
     fn invoke<'a>(
         &'a self,

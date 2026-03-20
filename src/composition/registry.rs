@@ -9,8 +9,10 @@ use wasmtime::component::{HasData, Linker};
 
 use super::composer::Composer;
 use super::graph::{ComponentGraph, Edge, Node};
-use super::wit::{ComponentMetadata, Parser};
-use crate::types::{CapabilityDefinition, ComponentDefinition, ComponentState, Function};
+use super::wit::Parser;
+use crate::types::{
+    CapabilityDefinition, ComponentDefinition, ComponentMetadata, ComponentState, Function,
+};
 
 /// Trait implemented by host capability instances.
 ///
@@ -160,10 +162,12 @@ pub struct ComponentSpec {
     pub name: String,
     pub namespace: Option<String>,
     pub package: Option<String>,
+    pub labels: HashMap<String, String>,
     pub bytes: Arc<[u8]>,
     pub imports: Vec<String>,
     pub exports: Vec<String>,
     pub capabilities: Vec<String>,
+    pub dependents: Vec<String>,
     pub functions: HashMap<String, Function>,
 }
 
@@ -271,7 +275,7 @@ pub async fn build_registries(
 
     let mut built_components = HashMap::new();
 
-    for node_index in sorted_indices {
+    for &node_index in &sorted_indices {
         if let Node::Component(definition) = &component_graph[node_index] {
             let temp_component_registry = ComponentRegistry {
                 components: Arc::new(built_components.clone()),
@@ -286,6 +290,20 @@ pub async fn build_registries(
             .await?;
 
             built_components.insert(definition.name.clone(), component_spec);
+        }
+    }
+
+    // Compute dependents from graph edges
+    for &node_index in &sorted_indices {
+        if let Node::Component(definition) = &component_graph[node_index] {
+            for (dep_index, edge) in component_graph.get_dependencies(node_index) {
+                if matches!(edge, Edge::Dependency)
+                    && let Node::Component(dep_def) = &component_graph[dep_index]
+                    && let Some(spec) = built_components.get_mut(&dep_def.name)
+                {
+                    spec.dependents.push(definition.name.clone());
+                }
+            }
         }
     }
 
@@ -509,6 +527,15 @@ async fn process_component(
 
     let mut all_capabilities = HashSet::new();
 
+    let requester_metadata = ComponentMetadata {
+        name: definition.name.clone(),
+        namespace: metadata.namespace.clone(),
+        package: metadata.name.clone(),
+        labels: definition.labels.clone(),
+        dependents: None,
+        exports: exports.clone(),
+    };
+
     let dependencies: Vec<_> = component_graph.get_dependencies(node_index).collect();
     for (dependency_node_index, edge) in &dependencies {
         let dependency_node = &component_graph[*dependency_node_index];
@@ -517,7 +544,7 @@ async fn process_component(
                 let component_spec = component_registry.get_required_import(
                     dependency_def,
                     definition,
-                    &metadata,
+                    &requester_metadata,
                 )?;
 
                 if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&exports) {
@@ -614,11 +641,13 @@ async fn process_component(
     Ok(ComponentSpec {
         name: definition.name.clone(),
         namespace: metadata.namespace,
-        package: metadata.package,
+        package: metadata.name,
+        labels: definition.labels.clone(),
         bytes: Arc::from(bytes),
         imports,
         exports,
         capabilities: all_capabilities.into_iter().collect(),
+        dependents: Vec::new(),
         functions,
     })
 }

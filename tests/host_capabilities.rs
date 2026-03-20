@@ -71,9 +71,9 @@ async fn test_host_capability_provides_interface() {
     let runtime = runtime.unwrap();
 
     // Verify the component was registered
-    let components: Vec<_> = runtime.list_components();
+    let components: Vec<_> = runtime.list_components(None);
     assert_eq!(components.len(), 1);
-    assert_eq!(components[0].name, "guest");
+    assert_eq!(components[0].metadata.name, "guest");
 }
 
 #[tokio::test]
