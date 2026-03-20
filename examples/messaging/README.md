@@ -23,12 +23,10 @@ Output:
 ... invocation complete component=greeter function=greet result="Hello, Alice!"
 ```
 
-If you have already run `cargo install --path .` in this repo's root, you can use `composable publish` directly:
+You can also run `composable publish` directly:
 ```
 composable publish config.toml --channel names --body Bob
 ```
-
-You will notice that is much faster than the `cargo run` in `publish.sh`.
 
 ## How It Works
 

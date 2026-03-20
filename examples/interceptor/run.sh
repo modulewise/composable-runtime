@@ -2,6 +2,9 @@
 
 set -e
 
-cargo run -q --manifest-path ../../Cargo.toml -- \
-  invoke config.toml -- \
-  greeter.greeter.greet World
+if ! command -v composable &>/dev/null; then
+  echo "Error: composable CLI not found (cargo install composable-runtime)"
+  exit 1
+fi
+
+composable invoke config.toml -- greeter.greeter.greet World

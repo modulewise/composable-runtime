@@ -20,10 +20,23 @@ fi
 
 N="$1"
 
+if ! command -v composable &>/dev/null; then
+  echo "Error: composable CLI not found (cargo install composable-runtime)"
+  exit 1
+fi
+
 # Examples 4-7 need the translate API (node)
 if [[ "$N" =~ ^[4-7]$ ]]; then
   if ! command -v node &>/dev/null; then
     echo "Error: node is required for examples 4-7 (runs translate-api.js)"
+    exit 1
+  fi
+fi
+
+# Examples 6-7 need the HTTP gateway
+if [[ "$N" =~ ^[6-7]$ ]]; then
+  if ! command -v composable-http-gateway &>/dev/null; then
+    echo "Error: composable-http-gateway not found (cargo install composable-http-gateway)"
     exit 1
   fi
 fi
@@ -68,8 +81,7 @@ run_gateway() {
 
   check_port "$port" "HTTP gateway"
   echo "Starting gateway on port ${port}..."
-  RUST_LOG=info cargo run -q \
-    --manifest-path ../../crates/gateway-http/Cargo.toml -- \
+  RUST_LOG=info composable-http-gateway \
     "${configs[@]}" &
   PIDS+=($!)
 
