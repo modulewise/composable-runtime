@@ -8,7 +8,8 @@ A step-by-step tutorial that builds up a composable system incrementally. Each s
 - [cargo-component](https://github.com/bytecodealliance/cargo-component)
 - [wkg](https://github.com/bytecodealliance/wasm-pkg-tools)
 - Node.js (for examples 4–7, which use a mock translate API)
-- The `composable` CLI (run `cargo install --path .` in this repo's root)
+- The `composable` CLI (`cargo install composable-runtime`)
+- The `composable-http-gateway` CLI (`cargo install composable-http-gateway`) for examples 6 and 7
 
 ```sh
 cd examples/7cs
