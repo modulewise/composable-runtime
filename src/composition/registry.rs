@@ -527,7 +527,7 @@ async fn process_component(
 
     let mut all_capabilities = HashSet::new();
 
-    let requester_metadata = ComponentMetadata {
+    let component_metadata = ComponentMetadata {
         name: definition.name.clone(),
         namespace: metadata.namespace.clone(),
         package: metadata.name.clone(),
@@ -544,7 +544,7 @@ async fn process_component(
                 let component_spec = component_registry.get_required_import(
                     dependency_def,
                     definition,
-                    &requester_metadata,
+                    &component_metadata,
                 )?;
 
                 if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&exports) {
