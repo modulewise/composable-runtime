@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use composable_runtime::{ComponentGraph, FunctionParam, Runtime};
+use composable_runtime::{Component, ComponentGraph, FunctionParam, Runtime, Selector};
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
@@ -38,6 +38,10 @@ enum Command {
         /// Component definition files (.toml) and standalone .wasm files
         #[arg(required = true)]
         definitions: Vec<PathBuf>,
+
+        /// Filter components by selector (e.g. labels.domain=payments, !dependents, name in (foo, bar))
+        #[arg(long)]
+        selector: Option<String>,
     },
     /// Publish a message to a channel
     Publish {
@@ -89,10 +93,14 @@ async fn main() -> Result<()> {
                 println!("{graph:#?}");
             }
         }
-        Command::Shell { definitions } => {
+        Command::Shell {
+            definitions,
+            selector,
+        } => {
+            let selector = selector.map(|s| Selector::parse(&s)).transpose()?;
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
             runtime.start()?;
-            run_shell(&runtime).await?;
+            run_shell(&runtime, selector.as_ref()).await?;
             runtime.shutdown().await;
         }
         Command::Invoke {
@@ -174,13 +182,20 @@ async fn run_invoke(runtime: &Runtime, target_args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-async fn run_shell(runtime: &Runtime) -> Result<()> {
-    let components = runtime.list_components();
-    println!(
-        "Successfully built runtime with {} components.",
-        components.len()
-    );
+async fn run_shell(runtime: &Runtime, selector: Option<&Selector>) -> Result<()> {
+    let components = runtime.list_components(selector);
 
+    if selector.is_some() {
+        println!(
+            "Shell session with {} selected components.",
+            components.len()
+        );
+    } else {
+        println!(
+            "Successfully built runtime with {} components.",
+            components.len()
+        );
+    }
     println!("Starting interactive session. Type 'help' for commands.");
     let mut rl = Editor::<(), DefaultHistory>::new()?;
     loop {
@@ -188,7 +203,7 @@ async fn run_shell(runtime: &Runtime) -> Result<()> {
         match readline {
             Ok(line) => {
                 let _ = rl.add_history_entry(line.as_str());
-                if handle_command(line, runtime).await.is_err() {
+                if handle_command(line, runtime, &components).await.is_err() {
                     break;
                 }
             }
@@ -210,7 +225,11 @@ async fn run_shell(runtime: &Runtime) -> Result<()> {
     Ok(())
 }
 
-async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
+async fn handle_command(
+    line: String,
+    runtime: &Runtime,
+    components: &[&Component],
+) -> Result<(), ()> {
     let parts = parse_quoted_args(&line);
 
     if let Some(command_str) = parts.first() {
@@ -266,9 +285,9 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
             match command {
                 ShellCommand::List => {
                     let mut targets = Vec::new();
-                    for component in runtime.list_components() {
+                    for component in components {
                         for func_name in component.functions.keys() {
-                            targets.push(format!("{}.{}", component.name, func_name));
+                            targets.push(format!("{}.{}", component.metadata.name, func_name));
                         }
                     }
                     targets.sort();
@@ -278,7 +297,7 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                 }
                 ShellCommand::Describe { target } => {
                     if let Some((component_name, func_name)) = target.split_once('.') {
-                        if let Some(component) = runtime.get_component(component_name) {
+                        if let Some(component) = find_component(components, component_name) {
                             if let Some(function) = component.functions.get(func_name) {
                                 println!("Target: {target}");
                                 if !function.docs().is_empty() {
@@ -316,7 +335,7 @@ async fn handle_command(line: String, runtime: &Runtime) -> Result<(), ()> {
                 }
                 ShellCommand::Invoke { target, args } => {
                     if let Some((component_name, func_name)) = target.split_once('.') {
-                        if let Some(component) = runtime.get_component(component_name) {
+                        if let Some(component) = find_component(components, component_name) {
                             if let Some(function) = component.functions.get(func_name) {
                                 match parse_invoke_args(&args, function.params()) {
                                     Ok(final_args) => {
@@ -404,6 +423,10 @@ fn parse_invoke_args(
     }
 
     Ok(final_args)
+}
+
+fn find_component<'a>(components: &[&'a Component], name: &str) -> Option<&'a Component> {
+    components.iter().find(|c| c.metadata.name == name).copied()
 }
 
 fn parse_quoted_args(line: &str) -> Vec<String> {

@@ -49,7 +49,7 @@ impl DefaultMapper {
                     return Err(format!(
                         "default mapping currently requires exactly 1 exported function, \
                          '{}' has {}",
-                        component.name,
+                        component.metadata.name,
                         functions.len()
                     ));
                 }
@@ -60,7 +60,7 @@ impl DefaultMapper {
         let function = component.functions.get(&function_key).ok_or_else(|| {
             format!(
                 "function '{}' not found in '{}'",
-                function_key, component.name
+                function_key, component.metadata.name
             )
         })?;
         let param_count = function.params().len();
@@ -137,12 +137,12 @@ impl Activator {
             .get_component(component_name)
             .ok_or_else(|| format!("component '{component_name}' not found"))?;
 
-        let mode = if Self::exports_handler_interface(&component) {
+        let mode = if Self::exports_handler_interface(component) {
             InvocationMode::Direct
         } else {
             let mapper = match mapper {
                 Some(m) => m,
-                None => Box::new(DefaultMapper::from_component(&component, None)?),
+                None => Box::new(DefaultMapper::from_component(component, None)?),
             };
             InvocationMode::Mapped { mapper }
         };

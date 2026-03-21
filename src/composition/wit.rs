@@ -6,9 +6,9 @@ use wit_parser::{Resolve, Type};
 use crate::types::{Function, FunctionParam, Interface};
 
 #[derive(Debug, Clone)]
-pub struct ComponentMetadata {
+pub struct PackageMetadata {
     pub namespace: Option<String>,
-    pub package: Option<String>,
+    pub name: Option<String>,
 }
 
 pub struct Parser;
@@ -18,7 +18,7 @@ impl Parser {
     pub fn parse(
         component_bytes: &[u8],
     ) -> Result<(
-        ComponentMetadata,
+        PackageMetadata,
         Vec<String>,
         Vec<String>,
         HashMap<String, Function>,
@@ -36,14 +36,14 @@ impl Parser {
         let component_metadata = if let Some(package_id) = &world.package {
             let package = resolve.packages.get(*package_id).unwrap();
             let package_name = &package.name;
-            ComponentMetadata {
+            PackageMetadata {
                 namespace: Some(package_name.namespace.clone()),
-                package: Some(package_name.name.clone()),
+                name: Some(package_name.name.clone()),
             }
         } else {
-            ComponentMetadata {
+            PackageMetadata {
                 namespace: None,
-                package: None,
+                name: None,
             }
         };
 

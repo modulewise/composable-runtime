@@ -25,7 +25,15 @@ impl ConfigHandler for ComponentConfigHandler {
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
         HashMap::from([(
             "component",
-            ["uri", "scope", "imports", "interceptors", "config"].as_slice(),
+            [
+                "uri",
+                "scope",
+                "imports",
+                "interceptors",
+                "config",
+                "labels",
+            ]
+            .as_slice(),
         )])
     }
 
@@ -48,6 +56,7 @@ impl ConfigHandler for ComponentConfigHandler {
         let imports = take_string_array(&mut properties, "imports").map_err(ctx)?;
         let interceptors = take_string_array(&mut properties, "interceptors").map_err(ctx)?;
         let config = take_object(&mut properties, "config").map_err(ctx)?;
+        let labels = take_string_map(&mut properties, "labels").map_err(ctx)?;
 
         if !properties.is_empty() {
             let unknown: Vec<_> = properties.keys().collect();
@@ -63,6 +72,7 @@ impl ConfigHandler for ComponentConfigHandler {
             imports,
             interceptors,
             config,
+            labels,
         });
         Ok(())
     }
@@ -220,6 +230,39 @@ fn take_object(
         Some(got) => Err(PropertyError::TypeMismatch {
             key: key.into(),
             expected: "an object/table",
+            got,
+        }),
+        None => Ok(HashMap::new()),
+    }
+}
+
+fn take_string_map(
+    properties: &mut PropertyMap,
+    key: &str,
+) -> Result<HashMap<String, String>, PropertyError> {
+    match properties.remove(key) {
+        Some(serde_json::Value::Object(map)) => {
+            let mut result = HashMap::new();
+            for (k, v) in map {
+                let s = match v {
+                    serde_json::Value::String(s) => s,
+                    serde_json::Value::Number(n) => n.to_string(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    got => {
+                        return Err(PropertyError::TypeMismatch {
+                            key: format!("{key}.{k}"),
+                            expected: "a scalar value",
+                            got,
+                        });
+                    }
+                };
+                result.insert(k, s);
+            }
+            Ok(result)
+        }
+        Some(got) => Err(PropertyError::TypeMismatch {
+            key: key.into(),
+            expected: "an object/table of strings",
             got,
         }),
         None => Ok(HashMap::new()),

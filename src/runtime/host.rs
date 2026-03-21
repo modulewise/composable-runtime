@@ -19,12 +19,13 @@ use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::composition::registry::{CapabilityRegistry, ComponentRegistry};
-use crate::types::{Component, ComponentInvoker, ComponentState, Function};
+use crate::types::{Component, ComponentInvoker, ComponentMetadata, ComponentState, Function};
 
 // Component host: wasmtime engine + registries, provides instantiation + invocation.
 #[derive(Clone)]
 pub(crate) struct ComponentHost {
     invoker: Invoker,
+    components: HashMap<String, Component>,
     pub(crate) component_registry: ComponentRegistry,
     pub(crate) capability_registry: CapabilityRegistry,
 }
@@ -35,8 +36,26 @@ impl ComponentHost {
         capability_registry: CapabilityRegistry,
     ) -> Result<Self> {
         let invoker = Invoker::new()?;
+        let components = component_registry
+            .get_components()
+            .map(|spec| {
+                let component = Component {
+                    metadata: ComponentMetadata {
+                        name: spec.name.clone(),
+                        namespace: spec.namespace.clone(),
+                        package: spec.package.clone(),
+                        labels: spec.labels.clone(),
+                        dependents: Some(spec.dependents.clone()),
+                        exports: spec.exports.clone(),
+                    },
+                    functions: spec.functions.clone(),
+                };
+                (spec.name.clone(), component)
+            })
+            .collect();
         Ok(Self {
             invoker,
+            components,
             component_registry,
             capability_registry,
         })
@@ -92,13 +111,22 @@ impl ComponentHost {
 }
 
 impl ComponentInvoker for ComponentHost {
-    fn get_component(&self, name: &str) -> Option<Component> {
-        self.component_registry
-            .get_component(name)
-            .map(|spec| Component {
-                name: spec.name.clone(),
-                functions: spec.functions.clone(),
-            })
+    fn get_component(&self, name: &str) -> Option<&Component> {
+        self.components.get(name)
+    }
+
+    fn list_components(
+        &self,
+        selector: Option<&crate::config::types::Selector>,
+    ) -> Vec<&Component> {
+        match selector {
+            Some(selector) => self
+                .components
+                .values()
+                .filter(|c| selector.matches(&c.metadata.to_selectable()))
+                .collect(),
+            None => self.components.values().collect(),
+        }
     }
 
     fn invoke<'a>(

@@ -31,20 +31,16 @@ impl Runtime {
         RuntimeBuilder::new()
     }
 
-    /// List all components
-    pub fn list_components(&self) -> Vec<Component> {
-        self.host
-            .component_registry
-            .get_components()
-            .map(|spec| Component {
-                name: spec.name.clone(),
-                functions: spec.functions.clone(),
-            })
-            .collect()
+    /// List all components, optionally filtered by a selector
+    pub fn list_components(
+        &self,
+        selector: Option<&crate::config::types::Selector>,
+    ) -> Vec<&Component> {
+        self.host.list_components(selector)
     }
 
     /// Get a specific component by name
-    pub fn get_component(&self, name: &str) -> Option<Component> {
+    pub fn get_component(&self, name: &str) -> Option<&Component> {
         self.host.get_component(name)
     }
 
