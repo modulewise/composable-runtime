@@ -47,7 +47,7 @@ pub struct Selector {
 impl Selector {
     /// Parse a selector string.
     ///
-    /// Comma-separated conditions, AND semantics. Supported expressions:
+    /// Comma-separated conditions with AND semantics. Supported expressions:
     /// - equality/inequality: `key=val`, `key!=val`
     /// - set membership: `key in (a,b,c)`, `key notin (a,b,c)`
     /// - substring or list element match: `key contains val`, `key notcontains val`
@@ -210,6 +210,9 @@ fn parse_value_list(s: &str) -> Result<Vec<String>> {
         .strip_prefix('(')
         .and_then(|s| s.strip_suffix(')'))
         .ok_or_else(|| anyhow::anyhow!("expected parenthesized list like (a,b,c), got: {s}"))?;
+    if inner.trim().is_empty() {
+        anyhow::bail!("empty value list in: {s}");
+    }
     Ok(inner.split(',').map(|v| v.trim().to_string()).collect())
 }
 
@@ -400,6 +403,16 @@ mod tests {
     #[test]
     fn parse_in_missing_parens_fails() {
         assert!(Selector::parse("key in a,b").is_err());
+    }
+
+    #[test]
+    fn parse_in_empty_list_fails() {
+        assert!(Selector::parse("key in ()").is_err());
+    }
+
+    #[test]
+    fn parse_notin_empty_list_fails() {
+        assert!(Selector::parse("key notin ()").is_err());
     }
 
     #[test]
