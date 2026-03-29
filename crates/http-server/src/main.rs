@@ -2,14 +2,14 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use composable_runtime::Runtime;
 
-use composable_http_gateway::HttpGatewayService;
+use composable_http_server::HttpService;
+use composable_runtime::Runtime;
 
 #[derive(Parser)]
 #[command(
-    name = "composable-http-gateway",
-    about = "HTTP Gateway for Composable Runtime"
+    name = "composable-http-server",
+    about = "HTTP Server for Composable Runtime"
 )]
 struct Cli {
     /// Definition files (TOML, .wasm, etc.)
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
 
     let runtime = Runtime::builder()
         .from_paths(&cli.definitions)
-        .with_service::<HttpGatewayService>()
+        .with_service::<HttpService>()
         .build()
         .await?;
 

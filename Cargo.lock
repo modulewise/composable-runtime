@@ -651,7 +651,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "composable-http-gateway"
+name = "composable-http-server"
 version = "0.5.0-alpha.1"
 dependencies = [
  "anyhow",

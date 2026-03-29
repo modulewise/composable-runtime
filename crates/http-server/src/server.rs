@@ -359,7 +359,7 @@ pub async fn run(
     });
 
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
-    tracing::info!(port, "HTTP gateway listening");
+    tracing::info!(port, "HTTP server listening");
 
     loop {
         tokio::select! {
@@ -378,7 +378,7 @@ pub async fn run(
                 });
             }
             _ = shutdown.changed() => {
-                tracing::info!(port, "HTTP gateway shutting down");
+                tracing::info!(port, "HTTP server shutting down");
                 break;
             }
         }

@@ -13,7 +13,7 @@ if [[ -z "$1" ]]; then
   echo "  3  Configuration     — configure a component"
   echo "  4  Capability        — import a host capability"
   echo "  5  Cross-cutting     — apply an interceptor (advice)"
-  echo "  6  Channel           — add HTTP gateway and messaging"
+  echo "  6  Channel           — add HTTP server and messaging"
   echo "  7  Collaboration     — combine config files from collaborators"
   exit 1
 fi
@@ -33,10 +33,10 @@ if [[ "$N" =~ ^[4-7]$ ]]; then
   fi
 fi
 
-# Examples 6-7 need the HTTP gateway
+# Examples 6-7 need an HTTP server
 if [[ "$N" =~ ^[6-7]$ ]]; then
-  if ! command -v composable-http-gateway &>/dev/null; then
-    echo "Error: composable-http-gateway not found (cargo install composable-http-gateway)"
+  if ! command -v composable-http-server &>/dev/null; then
+    echo "Error: composable-http-server not found (cargo install composable-http-server)"
     exit 1
   fi
 fi
@@ -52,7 +52,7 @@ check_port() {
 
 PIDS=()
 cleanup() {
-  # Kill in reverse order: gateway first (lets in-flight work finish
+  # Kill in reverse order: http server first (lets in-flight work finish
   # against still-running dependencies like translate API), then deps.
   for (( i=${#PIDS[@]}-1; i>=0; i-- )); do
     kill "${PIDS[i]}" 2>/dev/null || true
@@ -74,18 +74,18 @@ start_translate_api() {
   done
 }
 
-run_gateway() {
+run_server() {
   local port="$1"
   shift
   local configs=("$@")
 
-  check_port "$port" "HTTP gateway"
-  echo "Starting gateway on port ${port}..."
-  RUST_LOG=info composable-http-gateway \
+  check_port "$port" "HTTP server"
+  echo "Starting server on port ${port}..."
+  RUST_LOG=info composable-http-server \
     "${configs[@]}" &
   PIDS+=($!)
 
-  # Wait for the gateway to be ready
+  # Wait for the server to be ready
   for i in $(seq 1 30); do
     if curl -s -o /dev/null "http://localhost:${port}/hello" 2>/dev/null; then
       break
@@ -113,12 +113,12 @@ case "$N" in
 
   6)
     start_translate_api
-    run_gateway 8080 configs/6-channel.toml configs/infra.toml
+    run_server 8080 configs/6-channel.toml configs/infra.toml
     ;;
 
   7)
     start_translate_api
-    run_gateway 8080 \
+    run_server 8080 \
       configs/7-collaboration-domain.toml \
       configs/7-collaboration-env.toml \
       configs/7-collaboration-ops.toml \
