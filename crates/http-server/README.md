@@ -1,30 +1,30 @@
-# Composable HTTP Gateway
+# Composable HTTP Server
 
 **Expose Wasm Components and messaging channels as HTTP endpoints.**
 
-The HTTP gateway maps incoming HTTP requests to component function invocations or to messages published to a channel based on TOML route configuration. It runs as a `RuntimeService`, starting automatically when `[gateway.*]` definitions with `type = "http"` are present.
+The HTTP server maps incoming HTTP requests to component function invocations or to messages published to a channel based on TOML route configuration. It runs as a runtime `Service`, starting automatically when `[server.*]` definitions with `type = "http"` are present.
 
 ---
 
 ## Configuration
 
-Gateway routes are defined under `[gateway.<name>]` in TOML config files.
+Server routes are defined under `[server.<name>]` in TOML config files.
 
 ### Component routes
 
 Invoke a component function, mapping path parameters and an optional request body to function arguments:
 
 ```toml
-[gateway.api]
+[server.api]
 type = "http"
 port = 8080
 
-[gateway.api.route.get-user]
+[server.api.route.get-user]
 path = "/users/{id}"
 component = "user-service"
 function = "get-user"
 
-[gateway.api.route.create-user]
+[server.api.route.create-user]
 path = "/users"
 component = "user-service"
 function = "create"
@@ -36,7 +36,7 @@ body = "user"
 Publish the raw request body to a messaging channel:
 
 ```toml
-[gateway.api.route.events]
+[server.api.route.events]
 path = "/events"
 channel = "incoming-events"
 ```
@@ -90,28 +90,28 @@ The config handler rejects:
 ## Standalone binary
 
 ```sh
-composable-http-gateway config.toml [additional-configs...]
+composable-http-server config.toml [additional-configs...]
 ```
 
-Multiple config files are merged, allowing separation of concerns (e.g. domain components, infrastructure capabilities, gateway routes in separate files). The default log level is `info`, overridable via the `RUST_LOG` environment variable.
+Multiple config files are merged, allowing separation of concerns (e.g. domain components, infrastructure capabilities, server routes in separate files). The default log level is `info`, overridable via the `RUST_LOG` environment variable.
 
 ---
 
 ## Library usage
 
-Register the gateway service with a `RuntimeBuilder`:
+Register the HTTP service with a `RuntimeBuilder`:
 
 ```rust
 use composable_runtime::Runtime;
-use composable_http_gateway::HttpGatewayService;
+use composable_http_server::HttpService;
 
 let runtime = Runtime::builder()
     .from_paths(&config_paths)
-    .with_service::<HttpGatewayService>()
+    .with_service::<HttpService>()
     .build()
     .await?;
 
 runtime.run().await
 ```
 
-The service claims `[gateway.*]` definitions where `type = "http"`, so other gateway types can coexist under the same `[gateway.*]` category using different type selectors.
+The service claims `[server.*]` definitions where `type = "http"`, so other server types can coexist under the same `[server.*]` category using different type selectors.

@@ -1,7 +1,7 @@
 [package]
-name = "composable-http-gateway"
+name = "composable-http-server"
 version.workspace = true
-description = "HTTP Gateway for Composable Runtime"
+description = "HTTP Server for Composable Runtime"
 edition.workspace = true
 license.workspace = true
 readme = "README.md"
@@ -27,6 +27,6 @@ default = ["cli"]
 cli = ["dep:clap", "dep:tracing-subscriber"]
 
 [[bin]]
-name = "composable-http-gateway"
+name = "composable-http-server"
 path = "src/main.rs"
 required-features = ["cli"]

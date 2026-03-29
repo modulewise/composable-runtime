@@ -1,8 +1,8 @@
-[gateway.api]
+[server.api]
 type = "http"
 port = 8080
 
-[gateway.api.route.hello]
+[server.api.route.hello]
 path = "/hello"
 channel = "names"
 

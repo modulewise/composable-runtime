@@ -7,7 +7,7 @@ use composable_runtime::{
     CategoryClaim, Condition, ConfigHandler, Operator, PropertyMap, Selector,
 };
 
-/// Parsed route within an HTTP gateway.
+/// Parsed route within an HTTP server.
 #[derive(Debug, Clone)]
 pub struct RouteConfig {
     pub name: String,
@@ -29,35 +29,35 @@ pub enum RouteTarget {
     Channel { channel: String },
 }
 
-/// Parsed HTTP gateway definition.
+/// Parsed HTTP server definition.
 #[derive(Debug, Clone)]
-pub struct GatewayConfig {
+pub struct ServerConfig {
     pub name: String,
     pub port: u16,
     pub routes: Vec<RouteConfig>,
 }
 
-pub type SharedConfig = Arc<Mutex<Vec<GatewayConfig>>>;
+pub type SharedConfig = Arc<Mutex<Vec<ServerConfig>>>;
 
 pub fn shared_config() -> SharedConfig {
     Arc::new(Mutex::new(Vec::new()))
 }
 
-/// Claims `[gateway.*]` definitions where `type = "http"`.
-pub struct HttpGatewayConfigHandler {
-    gateways: SharedConfig,
+/// Claims `[server.*]` definitions where `type = "http"`.
+pub struct HttpServerConfigHandler {
+    servers: SharedConfig,
 }
 
-impl HttpGatewayConfigHandler {
-    pub fn new(gateways: SharedConfig) -> Self {
-        Self { gateways }
+impl HttpServerConfigHandler {
+    pub fn new(servers: SharedConfig) -> Self {
+        Self { servers }
     }
 }
 
-impl ConfigHandler for HttpGatewayConfigHandler {
+impl ConfigHandler for HttpServerConfigHandler {
     fn claimed_categories(&self) -> Vec<CategoryClaim> {
         vec![CategoryClaim::with_selector(
-            "gateway",
+            "server",
             Selector {
                 conditions: vec![Condition {
                     key: "type".to_string(),
@@ -68,7 +68,7 @@ impl ConfigHandler for HttpGatewayConfigHandler {
     }
 
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
-        HashMap::from([("gateway", ["type", "port", "route"].as_slice())])
+        HashMap::from([("server", ["type", "port", "route"].as_slice())])
     }
 
     fn handle_category(
@@ -77,9 +77,9 @@ impl ConfigHandler for HttpGatewayConfigHandler {
         name: &str,
         mut properties: PropertyMap,
     ) -> Result<()> {
-        if category != "gateway" {
+        if category != "server" {
             return Err(anyhow::anyhow!(
-                "HttpGatewayConfigHandler received unexpected category '{category}'"
+                "HttpServerConfigHandler received unexpected category '{category}'"
             ));
         }
 
@@ -91,16 +91,16 @@ impl ConfigHandler for HttpGatewayConfigHandler {
                 .as_u64()
                 .and_then(|p| u16::try_from(p).ok())
                 .ok_or_else(|| {
-                    anyhow::anyhow!("Gateway '{name}': 'port' must be a valid port number")
+                    anyhow::anyhow!("Server '{name}': 'port' must be a valid port number")
                 })?,
             Some(got) => {
                 return Err(anyhow::anyhow!(
-                    "Gateway '{name}': 'port' must be a number, got {got}"
+                    "Server '{name}': 'port' must be a number, got {got}"
                 ));
             }
             None => {
                 return Err(anyhow::anyhow!(
-                    "Gateway '{name}' missing required 'port' field"
+                    "Server '{name}' missing required 'port' field"
                 ));
             }
         };
@@ -110,11 +110,11 @@ impl ConfigHandler for HttpGatewayConfigHandler {
         if !properties.is_empty() {
             let unknown: Vec<_> = properties.keys().collect();
             return Err(anyhow::anyhow!(
-                "Gateway '{name}' has unknown properties: {unknown:?}"
+                "Server '{name}' has unknown properties: {unknown:?}"
             ));
         }
 
-        self.gateways.lock().unwrap().push(GatewayConfig {
+        self.servers.lock().unwrap().push(ServerConfig {
             name: name.to_string(),
             port,
             routes,
@@ -138,12 +138,12 @@ fn get_optional_string(
     }
 }
 
-fn parse_routes(gateway_name: &str, properties: &mut PropertyMap) -> Result<Vec<RouteConfig>> {
+fn parse_routes(server_name: &str, properties: &mut PropertyMap) -> Result<Vec<RouteConfig>> {
     let route_table = match properties.remove("route") {
         Some(serde_json::Value::Object(map)) => map,
         Some(got) => {
             return Err(anyhow::anyhow!(
-                "Gateway '{gateway_name}': 'route' must be a table, got {got}"
+                "Server '{server_name}': 'route' must be a table, got {got}"
             ));
         }
         None => return Ok(Vec::new()),
@@ -155,13 +155,13 @@ fn parse_routes(gateway_name: &str, properties: &mut PropertyMap) -> Result<Vec<
             serde_json::Value::Object(map) => map,
             got => {
                 return Err(anyhow::anyhow!(
-                    "Gateway '{gateway_name}': route '{route_name}' must be a table, got {got}"
+                    "Server '{server_name}': route '{route_name}' must be a table, got {got}"
                 ));
             }
         };
 
         let ctx = |field: &str, msg: &str| -> anyhow::Error {
-            anyhow::anyhow!("Gateway '{gateway_name}': route '{route_name}' {field} {msg}")
+            anyhow::anyhow!("Server '{server_name}': route '{route_name}' {field} {msg}")
         };
 
         let path = match route_props.get("path") {
@@ -246,9 +246,9 @@ fn parse_routes(gateway_name: &str, properties: &mut PropertyMap) -> Result<Vec<
                 && path_structure(&routes[i].path) == path_structure(&routes[j].path)
             {
                 return Err(anyhow::anyhow!(
-                    "Gateway '{}': routes '{}' and '{}' conflict \
+                    "Server '{}': routes '{}' and '{}' conflict \
                      (same method {} and path structure)",
-                    gateway_name,
+                    server_name,
                     routes[i].name,
                     routes[j].name,
                     routes[i].method,
@@ -278,9 +278,9 @@ fn path_structure(path: &str) -> Vec<&str> {
 mod tests {
     use super::*;
 
-    fn make_handler() -> (HttpGatewayConfigHandler, SharedConfig) {
+    fn make_handler() -> (HttpServerConfigHandler, SharedConfig) {
         let config = shared_config();
-        let handler = HttpGatewayConfigHandler::new(Arc::clone(&config));
+        let handler = HttpServerConfigHandler::new(Arc::clone(&config));
         (handler, config)
     }
 
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_basic_gateway() {
+    fn parse_basic_server() {
         let (mut handler, config) = make_handler();
         let properties = props(vec![
             ("type", serde_json::json!("http")),
@@ -307,18 +307,18 @@ mod tests {
         ]);
 
         handler
-            .handle_category("gateway", "api", properties)
+            .handle_category("server", "api", properties)
             .unwrap();
 
-        let gateways = config.lock().unwrap();
-        assert_eq!(gateways.len(), 1);
-        assert_eq!(gateways[0].name, "api");
-        assert_eq!(gateways[0].port, 8080);
-        assert_eq!(gateways[0].routes.len(), 1);
-        assert_eq!(gateways[0].routes[0].name, "hello");
-        assert_eq!(gateways[0].routes[0].method, "GET");
-        assert_eq!(gateways[0].routes[0].path, "/hello/{name}");
-        match &gateways[0].routes[0].target {
+        let servers = config.lock().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "api");
+        assert_eq!(servers[0].port, 8080);
+        assert_eq!(servers[0].routes.len(), 1);
+        assert_eq!(servers[0].routes[0].name, "hello");
+        assert_eq!(servers[0].routes[0].method, "GET");
+        assert_eq!(servers[0].routes[0].path, "/hello/{name}");
+        match &servers[0].routes[0].target {
             RouteTarget::Component {
                 component,
                 function,
@@ -352,12 +352,12 @@ mod tests {
         ]);
 
         handler
-            .handle_category("gateway", "api", properties)
+            .handle_category("server", "api", properties)
             .unwrap();
 
-        let gateways = config.lock().unwrap();
-        assert_eq!(gateways[0].routes[0].method, "POST");
-        match &gateways[0].routes[0].target {
+        let servers = config.lock().unwrap();
+        assert_eq!(servers[0].routes[0].method, "POST");
+        match &servers[0].routes[0].target {
             RouteTarget::Component { body, .. } => {
                 assert_eq!(body.as_deref(), Some("user"));
             }
@@ -386,11 +386,11 @@ mod tests {
         ]);
 
         handler
-            .handle_category("gateway", "api", properties)
+            .handle_category("server", "api", properties)
             .unwrap();
 
-        let gateways = config.lock().unwrap();
-        assert_eq!(gateways[0].routes[0].method, "PUT");
+        let servers = config.lock().unwrap();
+        assert_eq!(servers[0].routes[0].method, "PUT");
     }
 
     #[test]
@@ -413,7 +413,7 @@ mod tests {
             ),
         ]);
 
-        let result = handler.handle_category("gateway", "api", properties);
+        let result = handler.handle_category("server", "api", properties);
         assert!(result.is_err());
         assert!(
             result
@@ -428,7 +428,7 @@ mod tests {
         let (mut handler, _) = make_handler();
         let properties = props(vec![("type", serde_json::json!("http"))]);
 
-        let result = handler.handle_category("gateway", "api", properties);
+        let result = handler.handle_category("server", "api", properties);
         assert!(result.is_err());
         assert!(
             result
@@ -455,7 +455,7 @@ mod tests {
             ),
         ]);
 
-        let result = handler.handle_category("gateway", "api", properties);
+        let result = handler.handle_category("server", "api", properties);
         assert!(result.is_err());
         assert!(
             result
@@ -474,11 +474,11 @@ mod tests {
         ]);
 
         handler
-            .handle_category("gateway", "api", properties)
+            .handle_category("server", "api", properties)
             .unwrap();
 
-        let gateways = config.lock().unwrap();
-        assert_eq!(gateways[0].routes.len(), 0);
+        let servers = config.lock().unwrap();
+        assert_eq!(servers[0].routes.len(), 0);
     }
 
     #[test]
@@ -499,12 +499,12 @@ mod tests {
         ]);
 
         handler
-            .handle_category("gateway", "api", properties)
+            .handle_category("server", "api", properties)
             .unwrap();
 
-        let gateways = config.lock().unwrap();
-        assert_eq!(gateways[0].routes[0].method, "POST");
-        match &gateways[0].routes[0].target {
+        let servers = config.lock().unwrap();
+        assert_eq!(servers[0].routes[0].method, "POST");
+        match &servers[0].routes[0].target {
             RouteTarget::Channel { channel } => {
                 assert_eq!(channel, "incoming-events");
             }
@@ -531,7 +531,7 @@ mod tests {
             ),
         ]);
 
-        let result = handler.handle_category("gateway", "api", properties);
+        let result = handler.handle_category("server", "api", properties);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot have both"));
     }
@@ -554,7 +554,7 @@ mod tests {
             ),
         ]);
 
-        let result = handler.handle_category("gateway", "api", properties);
+        let result = handler.handle_category("server", "api", properties);
         assert!(result.is_err());
         assert!(
             result
@@ -582,7 +582,7 @@ mod tests {
             ),
         ]);
 
-        let result = handler.handle_category("gateway", "api", properties);
+        let result = handler.handle_category("server", "api", properties);
         assert!(result.is_err());
         assert!(
             result
@@ -615,7 +615,7 @@ mod tests {
             ),
         ]);
 
-        let result = handler.handle_category("gateway", "api", properties);
+        let result = handler.handle_category("server", "api", properties);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("conflict"));
     }
@@ -647,19 +647,19 @@ mod tests {
         ]);
 
         handler
-            .handle_category("gateway", "api", properties)
+            .handle_category("server", "api", properties)
             .unwrap();
 
-        let gateways = config.lock().unwrap();
-        assert_eq!(gateways[0].routes.len(), 2);
+        let servers = config.lock().unwrap();
+        assert_eq!(servers[0].routes.len(), 2);
     }
 
     #[test]
     fn selector_matches_http_type() {
-        let handler = HttpGatewayConfigHandler::new(shared_config());
+        let handler = HttpServerConfigHandler::new(shared_config());
         let claims = handler.claimed_categories();
         assert_eq!(claims.len(), 1);
-        assert_eq!(claims[0].category, "gateway");
+        assert_eq!(claims[0].category, "server");
         assert!(claims[0].selector.is_some());
 
         let selector = claims[0].selector.as_ref().unwrap();

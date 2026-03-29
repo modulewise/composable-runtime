@@ -1,30 +1,30 @@
-# HTTP Gateway Example
+# HTTP Server Example
 
-This example demonstrates the HTTP gateway with two types of routes:
+This example demonstrates a composable HTTP server with two types of routes:
 
 1. a component route that invokes a function directly
 2. a channel route that publishes a message for a subscribed component
 
-Because the HTTP Gateway applies inversion of control, neither component has any built-in HTTP request handling. In fact, both routes target the simple [hello-world](../hello-world/) greeter component.
+Because the HTTP Server applies inversion of control, neither component has any built-in HTTP request handling. In fact, both routes target the simple [hello-world](../hello-world/) greeter component.
 
 ## Structure
 
-- `config.toml`: gateway, component, and route configuration
-- `run-gateway.sh`: starts the Composable Runtime with HTTP Gateway as a service
+- `config.toml`: server, component, and route configuration
+- `run-server.sh`: starts the Composable Runtime with an HTTP Server
 - `greet.sh`: sends requests to both routes via `curl`
 
 ## Building and Running
 
-Change into the `examples/http-gateway` directory.
+Change into the `examples/http-server` directory.
 
-1. Start the gateway:
+1. Start the server:
 ```bash
-./run-gateway.sh
+./run-server.sh
 ```
 
 That will build the [hello-world](../hello-world/) example's greeter component if not already built.
 
-Then it starts a long-running Composable Runtime instance with the [HTTP Gateway](../../crates/gateway-http/) enabled, and configures info-level logging.
+Then it starts a long-running Composable Runtime instance with the [HTTP Server](../../crates/http-server/) support enabled, and configures info-level logging.
 
 3. In another terminal, send requests:
 ```bash
@@ -38,7 +38,7 @@ Output:
 --- POST /bonjour (channel route -> subscription -> bonjour component) ---
 ```
 
-In the gateway log, you will see the channel route result logged asynchronously:
+In the server log, you will see the channel route result logged asynchronously:
 
 ```
 ... invocation complete component=bonjour function=greet result="Bonjour, le Monde!"
@@ -53,16 +53,16 @@ In the gateway log, you will see the channel route result logged asynchronously:
 ## Configuration
 
 ```toml
-[gateway.api]
+[server.api]
 type = "http"
 port = 8888
 
-[gateway.api.route.hello]
+[server.api.route.hello]
 path = "/hello/{name}"
 component = "hello"
 function = "greet"
 
-[gateway.api.route.bonjour]
+[server.api.route.bonjour]
 path = "/bonjour"
 channel = "names"
 

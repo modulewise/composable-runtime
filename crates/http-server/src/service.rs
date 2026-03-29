@@ -8,14 +8,14 @@ use tokio::task::JoinHandle;
 
 use composable_runtime::{ComponentInvoker, ConfigHandler, MessagePublisher, Service};
 
-use crate::config::{self, GatewayConfig, HttpGatewayConfigHandler, SharedConfig};
+use crate::config::{self, HttpServerConfigHandler, ServerConfig, SharedConfig};
 
-/// HTTP Gateway service for the composable runtime.
+/// HTTP Server support for the composable runtime.
 ///
-/// Register with `RuntimeBuilder::with_service::<HttpGatewayService>()`.
-/// Handles `[gateway.*]` definitions where `type = "http"`.
-pub struct HttpGatewayService {
-    gateways: SharedConfig,
+/// Register with `RuntimeBuilder::with_service::<HttpService>()`.
+/// Handles `[server.*]` definitions where `type = "http"`.
+pub struct HttpService {
+    servers: SharedConfig,
     invoker: Mutex<Option<Arc<dyn ComponentInvoker>>>,
     publisher: Mutex<Option<Arc<dyn MessagePublisher>>>,
     shutdown_tx: watch::Sender<bool>,
@@ -23,11 +23,11 @@ pub struct HttpGatewayService {
     tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
-impl Default for HttpGatewayService {
+impl Default for HttpService {
     fn default() -> Self {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         Self {
-            gateways: config::shared_config(),
+            servers: config::shared_config(),
             invoker: Mutex::new(None),
             publisher: Mutex::new(None),
             shutdown_tx,
@@ -37,10 +37,10 @@ impl Default for HttpGatewayService {
     }
 }
 
-impl Service for HttpGatewayService {
+impl Service for HttpService {
     fn config_handler(&self) -> Option<Box<dyn ConfigHandler>> {
-        Some(Box::new(HttpGatewayConfigHandler::new(Arc::clone(
-            &self.gateways,
+        Some(Box::new(HttpServerConfigHandler::new(Arc::clone(
+            &self.servers,
         ))))
     }
 
@@ -58,34 +58,34 @@ impl Service for HttpGatewayService {
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("HttpGatewayService: invoker not set"))?;
+            .ok_or_else(|| anyhow::anyhow!("HttpService: invoker not set"))?;
 
         let publisher = self.publisher.lock().unwrap().clone();
 
-        let gateways: Vec<GatewayConfig> = {
-            let mut lock = self.gateways.lock().unwrap();
+        let servers: Vec<ServerConfig> = {
+            let mut lock = self.servers.lock().unwrap();
             std::mem::take(&mut *lock)
         };
 
-        if gateways.is_empty() {
+        if servers.is_empty() {
             return Ok(());
         }
 
         let mut tasks = self.tasks.lock().unwrap();
-        for gateway in gateways {
+        for server in servers {
             let invoker = Arc::clone(&invoker);
             let publisher = publisher.clone();
             let shutdown = self.shutdown_rx.clone();
-            let name = gateway.name.clone();
-            let port = gateway.port;
+            let name = server.name.clone();
+            let port = server.port;
 
-            tracing::info!(gateway = %name, port, routes = gateway.routes.len(), "starting HTTP gateway");
+            tracing::info!(server = %name, port, routes = server.routes.len(), "starting HTTP server");
 
             tasks.push(tokio::spawn(async move {
                 if let Err(e) =
-                    crate::server::run(port, gateway.routes, invoker, publisher, shutdown).await
+                    crate::server::run(port, server.routes, invoker, publisher, shutdown).await
                 {
-                    tracing::error!(gateway = %name, "HTTP gateway error: {e}");
+                    tracing::error!(server = %name, "HTTP server error: {e}");
                 }
             }));
         }

@@ -1,13 +1,13 @@
-[gateway.api]
+[server.api]
 type = "http"
 port = 8888
 
-[gateway.api.route.hello]
+[server.api.route.hello]
 path = "/hello/{name}"
 component = "hello"
 function = "greet"
 
-[gateway.api.route.bonjour]
+[server.api.route.bonjour]
 path = "/bonjour"
 channel = "names"
 
