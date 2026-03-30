@@ -24,7 +24,14 @@ async fn main() -> Result<()> {
     let message = format!("testing {}", config_file);
 
     let result = runtime
-        .invoke("guest", "test.log", vec![serde_json::json!(message)])
+        .invoker()
+        .invoke(
+            "guest",
+            "test.log",
+            vec![serde_json::json!(message)],
+            None,
+            None,
+        )
         .await?;
     println!("Result: {}", result);
 

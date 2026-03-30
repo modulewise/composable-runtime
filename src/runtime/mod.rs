@@ -44,50 +44,18 @@ impl Runtime {
         self.host.get_component(name)
     }
 
-    /// Invoke a component function
-    pub async fn invoke(
-        &self,
-        component_name: &str,
-        function_name: &str,
-        args: Vec<serde_json::Value>,
-    ) -> Result<serde_json::Value> {
-        ComponentInvoker::invoke(&self.host, component_name, function_name, args).await
-    }
-
-    /// Invoke a component function with environment variables
-    pub async fn invoke_with_env(
-        &self,
-        component_name: &str,
-        function_name: &str,
-        args: Vec<serde_json::Value>,
-        env_vars: &[(&str, &str)],
-    ) -> Result<serde_json::Value> {
-        self.host
-            .invoke(component_name, function_name, args, env_vars)
-            .await
-    }
-
     /// Instantiate a component
     pub async fn instantiate(
         &self,
         component_name: &str,
+        env: Option<HashMap<String, String>>,
     ) -> Result<(
         wasmtime::Store<crate::types::ComponentState>,
         wasmtime::component::Instance,
     )> {
-        self.instantiate_with_env(component_name, &[]).await
-    }
-
-    /// Instantiate a component with environment variables
-    pub async fn instantiate_with_env(
-        &self,
-        component_name: &str,
-        env_vars: &[(&str, &str)],
-    ) -> Result<(
-        wasmtime::Store<crate::types::ComponentState>,
-        wasmtime::component::Instance,
-    )> {
-        self.host.instantiate(component_name, env_vars).await
+        let env_pairs: Vec<(String, String)> =
+            env.map(|m| m.into_iter().collect()).unwrap_or_default();
+        self.host.instantiate(component_name, &env_pairs).await
     }
 
     /// Get a component invoker for this runtime.

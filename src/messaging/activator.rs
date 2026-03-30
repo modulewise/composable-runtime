@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::types::{Component, ComponentInvoker};
+use crate::types::{Component, ComponentInvoker, PROPAGATED_HEADERS};
 
 use super::channel::ReplyPublisher;
 use super::message::{Message, MessageBuilder, header};
@@ -169,12 +169,21 @@ impl Handler for Activator {
             InvocationMode::Direct => Err("direct handler mode not yet implemented".to_string()),
             InvocationMode::Mapped { mapper } => {
                 let invocation = mapper.map(&msg)?;
+                let mut context = std::collections::HashMap::new();
+                for key in PROPAGATED_HEADERS {
+                    if let Some(val) = msg.headers().get::<&str>(key) {
+                        context.insert((*key).to_string(), val.to_string());
+                    }
+                }
+                let context = (!context.is_empty()).then_some(context);
                 let result = self
                     .invoker
                     .invoke(
                         &self.component_name,
                         &invocation.function_key,
                         invocation.args,
+                        context,
+                        None,
                     )
                     .await
                     .map_err(|e| e.to_string())?;

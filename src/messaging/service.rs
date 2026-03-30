@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use crate::config::types::{CategoryClaim, ConfigHandler, PropertyMap};
+use crate::context::PROPAGATION_CONTEXT;
 use crate::service::Service;
-use crate::types::{ComponentInvoker, MessagePublisher};
+use crate::types::{ComponentInvoker, MessagePublisher, PROPAGATED_HEADERS};
 
 use super::bus::{Bus, LocalBus, LocalChannelFactory, SubscriptionConfig};
 use super::message::MessageBuilder;
@@ -115,6 +116,19 @@ impl MessagePublisher for BusPublisher {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
             let mut builder = MessageBuilder::new(body);
+            // Merge propagated context entries into outgoing message headers.
+            if let Some(entries) = PROPAGATION_CONTEXT
+                .try_with(|ctx| ctx.as_ref().map(|c| c.entries.clone()))
+                .ok()
+                .flatten()
+            {
+                for key in PROPAGATED_HEADERS {
+                    if let Some(val) = entries.get(*key) {
+                        builder = builder.header(*key, val.as_str());
+                    }
+                }
+            }
+            // Caller-supplied headers may override propagated entries.
             for (key, value) in headers {
                 builder = builder.header(key, value);
             }

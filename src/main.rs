@@ -4,6 +4,7 @@ use composable_runtime::{Component, ComponentGraph, FunctionParam, Runtime, Sele
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -22,6 +23,14 @@ enum Command {
         /// Component definition files (.toml) and standalone .wasm files
         #[arg(required = true)]
         definitions: Vec<PathBuf>,
+
+        /// Propagation context entries (KEY=VALUE)
+        #[arg(long = "ctx", value_parser = parse_key_value)]
+        ctx: Vec<(String, String)>,
+
+        /// Environment variables (KEY=VALUE)
+        #[arg(long = "env", value_parser = parse_key_value)]
+        env: Vec<(String, String)>,
 
         /// Target and arguments, passed after --
         #[arg(last = true)]
@@ -42,6 +51,10 @@ enum Command {
         /// Filter components by selector (e.g. labels.domain=payments, !dependents, name in (foo, bar))
         #[arg(long)]
         selector: Option<String>,
+
+        /// Environment variables (KEY=VALUE)
+        #[arg(long = "env", value_parser = parse_key_value)]
+        env: Vec<(String, String)>,
     },
     /// Publish a message to a channel
     Publish {
@@ -96,20 +109,26 @@ async fn main() -> Result<()> {
         Command::Shell {
             definitions,
             selector,
+            env,
         } => {
             let selector = selector.map(|s| Selector::parse(&s)).transpose()?;
+            let env = vec_to_option_map(env);
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
             runtime.start()?;
-            run_shell(&runtime, selector.as_ref()).await?;
+            run_shell(&runtime, selector.as_ref(), env.as_ref()).await?;
             runtime.shutdown().await;
         }
         Command::Invoke {
             definitions,
+            ctx,
+            env,
             target_args,
         } => {
+            let context = vec_to_option_map(ctx);
+            let env = vec_to_option_map(env);
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
             runtime.start()?;
-            run_invoke(&runtime, target_args).await?;
+            run_invoke(&runtime, target_args, context, env).await?;
             runtime.shutdown().await;
         }
         Command::Publish {
@@ -154,7 +173,12 @@ fn build_graph(definitions: &[PathBuf]) -> Result<ComponentGraph> {
     ComponentGraph::builder().from_paths(definitions).build()
 }
 
-async fn run_invoke(runtime: &Runtime, target_args: Vec<String>) -> Result<()> {
+async fn run_invoke(
+    runtime: &Runtime,
+    target_args: Vec<String>,
+    context: Option<HashMap<String, String>>,
+    env: Option<HashMap<String, String>>,
+) -> Result<()> {
     let (target, args) = target_args
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("missing target after --"))?;
@@ -176,13 +200,18 @@ async fn run_invoke(runtime: &Runtime, target_args: Vec<String>) -> Result<()> {
         parse_invoke_args(args, function.params()).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let result = runtime
-        .invoke(component_name, func_name, final_args)
+        .invoker()
+        .invoke(component_name, func_name, final_args, context, env)
         .await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 
-async fn run_shell(runtime: &Runtime, selector: Option<&Selector>) -> Result<()> {
+async fn run_shell(
+    runtime: &Runtime,
+    selector: Option<&Selector>,
+    env: Option<&HashMap<String, String>>,
+) -> Result<()> {
     let components = runtime.list_components(selector);
 
     if selector.is_some() {
@@ -203,7 +232,10 @@ async fn run_shell(runtime: &Runtime, selector: Option<&Selector>) -> Result<()>
         match readline {
             Ok(line) => {
                 let _ = rl.add_history_entry(line.as_str());
-                if handle_command(line, runtime, &components).await.is_err() {
+                if handle_command(line, runtime, &components, env)
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -229,6 +261,7 @@ async fn handle_command(
     line: String,
     runtime: &Runtime,
     components: &[&Component],
+    env: Option<&HashMap<String, String>>,
 ) -> Result<(), ()> {
     let parts = parse_quoted_args(&line);
 
@@ -341,7 +374,14 @@ async fn handle_command(
                                     Ok(final_args) => {
                                         println!("Invoking {target}...");
                                         match runtime
-                                            .invoke(component_name, func_name, final_args)
+                                            .invoker()
+                                            .invoke(
+                                                component_name,
+                                                func_name,
+                                                final_args,
+                                                None,
+                                                env.cloned(),
+                                            )
                                             .await
                                         {
                                             Ok(result) => {
@@ -459,4 +499,15 @@ fn parse_quoted_args(line: &str) -> Vec<String> {
         parts.push(current);
     }
     parts
+}
+
+fn parse_key_value(s: &str) -> Result<(String, String), String> {
+    let (key, value) = s
+        .split_once('=')
+        .ok_or_else(|| format!("expected KEY=VALUE, got '{s}'"))?;
+    Ok((key.to_string(), value.to_string()))
+}
+
+fn vec_to_option_map(pairs: Vec<(String, String)>) -> Option<HashMap<String, String>> {
+    (!pairs.is_empty()).then(|| pairs.into_iter().collect())
 }
