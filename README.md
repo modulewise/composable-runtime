@@ -52,7 +52,7 @@ That incrementally introduces each concept along the way:
 
 - [hello-world](examples/hello-world): A simple greeter component invoked by a host application
 - [host-capability](examples/host-capability): A greeter component calls a host-provided function to get its greeting
-- [http-gateway](examples/http-gateway): The greeter component invoked by the runtime when HTTP requests arrive, either directly or via a messaging channel depending on the route
+- [http-server](examples/http-server): The greeter component invoked by the runtime when HTTP requests arrive, either directly or via a messaging channel depending on the route
 - [interceptor](examples/interceptor): An interceptor component, dynamically generated from generic advice, logs before and after greeter function calls
 - [messsaging](examples/messaging): The greeter component invoked when messages arrive via `composable publish`
 - [otel](examples/otel): A guest component uses wasi:otel backed by either a host-capability or an adapter component

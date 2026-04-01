@@ -9,7 +9,7 @@ A step-by-step tutorial that builds up a composable system incrementally. Each s
 - [wkg](https://github.com/bytecodealliance/wasm-pkg-tools)
 - Node.js (for examples 4–7, which use a mock translate API)
 - The `composable` CLI (`cargo install composable-runtime`)
-- The `composable-http-gateway` CLI (`cargo install composable-http-gateway`) for examples 6 and 7
+- The `composable-http-server` CLI (`cargo install composable-http-server`) for examples 6 and 7
 
 ```sh
 cd examples/7cs
@@ -209,19 +209,19 @@ $ ./run.sh 5
 </td>
 <td>
 
-An HTTP gateway accepts incoming requests and consults its configured routes. Each route indicates whether to invoke a specific component + function (where path segments can map to arg names) or to publish to a channel, as shown in this example.
+An HTTP server accepts incoming requests and consults its configured routes. Each route indicates whether to invoke a specific component + function (where path segments can map to arg names) or to publish to a channel, as shown in this example.
 
-The greeter subscribes to the "names" channel and is invoked when messages arrive. Rather than calling `composable invoke`, this example and the next start the HTTP Gateway via the binary from the [gateway-http](../../crates/gateway-http/) sub-crate and then use `curl` to POST a request.
+The greeter subscribes to the "names" channel and is invoked when messages arrive. Rather than calling `composable invoke`, this example and the next start the HTTP server via the binary from the [http-server](../../crates/http-server/) sub-crate and then use `curl` to POST a request.
 
 </td>
 </tr></table>
 
 ```toml
-[gateway.api]
+[server.api]
 type = "http"
 port = 8080
 
-[gateway.api.route.hello]
+[server.api.route.hello]
 path = "/hello"
 channel = "names"
 
@@ -250,7 +250,7 @@ POST /hello with body 'World':
 
 ```
 
-The gateway logs the result asynchronously:
+The HTTP server logs the result asynchronously:
 
 ```
 ... [interceptor]: Before translate(text: "Hello, World!", locale: "nl-NL")
@@ -296,11 +296,11 @@ interceptors = ["logger"]
 **env.toml**:
 
 ```toml
-[gateway.api]
+[server.api]
 type = "http"
 port = 8080
 
-[gateway.api.route.hello]
+[server.api.route.hello]
 path = "/hello"
 channel = "names"
 
@@ -354,6 +354,6 @@ A domain team can change component wiring without modifying infrastructure. An o
 > [!NOTE]
 > The ability to support collaboration in highly dynamic environments will be increasingly important as AI agents become collaborators across each of these roles with varying degrees of autonomy.
 
-The Composable Runtime also defines an extensibility model that will support additional host capabilities, interceptors, and gateways. The existing functionality has been built upon that same model.
+The Composable Runtime also defines an extensibility model that will support additional host capabilities, interceptors, and servers. The existing functionality has been built upon that same model.
 
 For more detail on specific concepts (messaging, interceptors, extensibility, etc), explore the other [examples](../).
