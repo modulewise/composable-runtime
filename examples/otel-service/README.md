@@ -43,7 +43,7 @@ let runtime = Runtime::builder()
 runtime.run().await
 ```
 
-`with_service` is the registration mechanism for built-in sub-crates that provide a `RuntimeService`. Each service may contribute config handlers, capability factories, and lifecycle hooks.
+Each `Service` implementation registered via `with_service` may contribute config handlers, capability factories, and lifecycle hooks.
 
 ## Configuration
 
@@ -79,7 +79,7 @@ type = "wasi:random"
 ```
 
 - `[capability.otel]`: configures the OTLP exporter (endpoint, protocol, resource attributes), and exports `wasi:otel/logs` and `wasi:otel/tracing` for guest components.
-- `[server.http]`: runs the HTTP server on port 8080. `otlp-endpoint` configures `HttpService`'s own OTLP exporter for server spans (using same URL as `OtelService`).
+- `[server.http]`: runs the HTTP server on port 8080. `otlp-endpoint` configures `HttpService`'s own OTLP exporter for server spans (using the same endpoint URL as `OtelService`).
 - `[server.http.route.test]`: dispatches `GET /test` to the guest's `run` function.
 
 ## Guest Component
