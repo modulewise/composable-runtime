@@ -7,6 +7,9 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
+/// Base set of header keys that should be propagated across service boundaries.
+pub const PROPAGATED_HEADERS: &[&str] = &["traceparent", "tracestate", "baggage"];
+
 pub fn default_scope() -> String {
     "any".to_string()
 }
@@ -276,6 +279,8 @@ pub trait ComponentInvoker: Send + Sync {
         component_name: &'a str,
         function_name: &'a str,
         args: Vec<serde_json::Value>,
+        context: Option<HashMap<String, String>>,
+        env: Option<HashMap<String, String>>,
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
 }
 

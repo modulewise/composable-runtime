@@ -1,0 +1,7 @@
+package modulewise:otel@0.1.0;
+
+world otel-capability {
+    import wasi:otel/logs@0.2.0-rc.2+patch;
+    import wasi:otel/tracing@0.2.0-rc.2+patch;
+    import wasi:otel/types@0.2.0-rc.2+patch;
+}

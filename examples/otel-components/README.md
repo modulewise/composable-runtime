@@ -1,4 +1,4 @@
-# OpenTelemetry Example
+# OpenTelemetry Example using Components
 
 This example demonstrates sending OpenTelemetry logs from a guest wasm component to an OTLP-compatible collector via the [wasi:otel](https://github.com/WebAssembly/wasi-otel) WIT interface and a gRPC endpoint interface. Tracing and metrics will be added to the demo in a future update.
 

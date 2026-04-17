@@ -35,6 +35,10 @@ pub struct ServerConfig {
     pub name: String,
     pub port: u16,
     pub routes: Vec<RouteConfig>,
+    /// OTLP endpoint for host-side span export. If absent, no host spans are exported.
+    pub otlp_endpoint: Option<String>,
+    /// OTLP protocol: "grpc" (default) or "http/protobuf".
+    pub otlp_protocol: String,
 }
 
 pub type SharedConfig = Arc<Mutex<Vec<ServerConfig>>>;
@@ -68,7 +72,10 @@ impl ConfigHandler for HttpServerConfigHandler {
     }
 
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
-        HashMap::from([("server", ["type", "port", "route"].as_slice())])
+        HashMap::from([(
+            "server",
+            ["type", "port", "route", "otlp-endpoint", "otlp-protocol"].as_slice(),
+        )])
     }
 
     fn handle_category(
@@ -105,6 +112,26 @@ impl ConfigHandler for HttpServerConfigHandler {
             }
         };
 
+        let otlp_endpoint = match properties.remove("otlp-endpoint") {
+            Some(serde_json::Value::String(s)) => Some(s),
+            Some(got) => {
+                return Err(anyhow::anyhow!(
+                    "Server '{name}': 'otlp-endpoint' must be a string, got {got}"
+                ));
+            }
+            None => None,
+        };
+
+        let otlp_protocol = match properties.remove("otlp-protocol") {
+            Some(serde_json::Value::String(s)) => s,
+            Some(got) => {
+                return Err(anyhow::anyhow!(
+                    "Server '{name}': 'otlp-protocol' must be a string, got {got}"
+                ));
+            }
+            None => "grpc".to_string(),
+        };
+
         let routes = parse_routes(name, &mut properties)?;
 
         if !properties.is_empty() {
@@ -118,6 +145,8 @@ impl ConfigHandler for HttpServerConfigHandler {
             name: name.to_string(),
             port,
             routes,
+            otlp_endpoint,
+            otlp_protocol,
         });
         Ok(())
     }

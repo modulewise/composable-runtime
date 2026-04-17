@@ -41,7 +41,14 @@ async fn main() -> Result<()> {
         .await?;
 
     let result = runtime
-        .invoke("greeter", "greet", vec![serde_json::json!("World")])
+        .invoker()
+        .invoke(
+            "greeter",
+            "greet",
+            vec![serde_json::json!("World")],
+            None,
+            None,
+        )
         .await?;
 
     println!("Result: {}", result);

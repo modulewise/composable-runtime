@@ -19,7 +19,10 @@ use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::composition::registry::{CapabilityRegistry, ComponentRegistry};
-use crate::types::{Component, ComponentInvoker, ComponentMetadata, ComponentState, Function};
+use crate::context::{PROPAGATION_CONTEXT, PropagationContext};
+use crate::types::{
+    Component, ComponentInvoker, ComponentMetadata, ComponentState, Function, PROPAGATED_HEADERS,
+};
 
 // Component host: wasmtime engine + registries, provides instantiation + invocation.
 #[derive(Clone)]
@@ -66,7 +69,7 @@ impl ComponentHost {
         component_name: &str,
         function_name: &str,
         args: Vec<serde_json::Value>,
-        env_vars: &[(&str, &str)],
+        env_vars: &[(String, String)],
     ) -> Result<serde_json::Value> {
         let spec = self
             .component_registry
@@ -92,7 +95,7 @@ impl ComponentHost {
     pub(crate) async fn instantiate(
         &self,
         component_name: &str,
-        env_vars: &[(&str, &str)],
+        env_vars: &[(String, String)],
     ) -> Result<(Store<ComponentState>, wasmtime::component::Instance)> {
         let spec = self
             .component_registry
@@ -134,10 +137,24 @@ impl ComponentInvoker for ComponentHost {
         component_name: &'a str,
         function_name: &'a str,
         args: Vec<serde_json::Value>,
+        context: Option<HashMap<String, String>>,
+        env: Option<HashMap<String, String>>,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send + 'a>,
     > {
-        Box::pin(self.invoke(component_name, function_name, args, &[]))
+        Box::pin(async move {
+            let env_pairs: Vec<(String, String)> =
+                env.map(|m| m.into_iter().collect()).unwrap_or_default();
+            let fut = self.invoke(component_name, function_name, args, &env_pairs);
+            match context {
+                Some(entries) => {
+                    let ctx = PropagationContext { entries };
+                    PROPAGATION_CONTEXT.scope(Some(ctx), fut).await
+                }
+                // None: inherit upstream propagation context if present.
+                None => fut.await,
+            }
+        })
     }
 }
 
@@ -169,9 +186,24 @@ impl WasiHttpView for ComponentState {
 
     fn send_request(
         &mut self,
-        request: hyper::Request<HyperOutgoingBody>,
+        mut request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
+        // Propagate context entries to outgoing HTTP requests if present.
+        let ctx_entries: Option<HashMap<String, String>> = PROPAGATION_CONTEXT
+            .try_with(|ctx| ctx.as_ref().map(|c| c.entries.clone()))
+            .ok()
+            .flatten();
+        if let Some(entries) = ctx_entries {
+            for key in PROPAGATED_HEADERS {
+                if let Some(val) = entries.get(*key)
+                    && let Ok(hv) = val.parse()
+                {
+                    request.headers_mut().insert(*key, hv);
+                }
+            }
+        }
+
         let is_grpc = request
             .headers()
             .get("content-type")
@@ -335,7 +367,7 @@ impl Invoker {
         bytes: &[u8],
         capabilities: &[String],
         capability_registry: &CapabilityRegistry,
-        env_vars: &[(&str, &str)],
+        env_vars: &[(String, String)],
     ) -> Result<(Store<ComponentState>, wasmtime::component::Instance)> {
         let component_bytes = bytes.to_vec();
         let linker = self.create_linker(capabilities, capability_registry)?;
@@ -437,7 +469,7 @@ impl Invoker {
         capability_registry: &CapabilityRegistry,
         function: Function,
         args: Vec<serde_json::Value>,
-        env_vars: &[(&str, &str)],
+        env_vars: &[(String, String)],
     ) -> Result<serde_json::Value> {
         let function_name = function.function_name();
 

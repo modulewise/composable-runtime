@@ -1,0 +1,28 @@
+[capability.otel]
+type = "otel"
+endpoint = "http://localhost:4317"
+protocol = "grpc"
+
+[capability.otel.resource]
+"service.name" = "otel-capability-example"
+"service.version" = "0.1.0"
+
+[server.http]
+type = "http"
+port = 8080
+otlp-endpoint = "http://localhost:4317"
+
+[server.http.route.test]
+path = "/test"
+component = "guest"
+function = "run"
+
+[component.guest]
+uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
+imports = ["otel", "clocks", "random"]
+
+[capability.clocks]
+type = "wasi:clocks"
+
+[capability.random]
+type = "wasi:random"

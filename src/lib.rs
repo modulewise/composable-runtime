@@ -8,11 +8,12 @@ pub use composition::registry::{CapabilityStateHasData, HostCapability, HostCapa
 pub use config::types::{
     CategoryClaim, Condition, ConfigHandler, DefinitionLoader, Operator, PropertyMap, Selector,
 };
+pub use context::{PROPAGATION_CONTEXT, PropagationContext};
 pub use runtime::{Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{
     CapabilityDefinition, Component, ComponentDefinition, ComponentInvoker, ComponentMetadata,
-    ComponentState, Function, FunctionParam, MessagePublisher,
+    ComponentState, Function, FunctionParam, MessagePublisher, PROPAGATED_HEADERS,
 };
 
 // exposed for testing, hidden from docs
@@ -22,6 +23,7 @@ pub mod composition;
 pub mod types;
 
 pub(crate) mod config;
+pub(crate) mod context;
 #[cfg(feature = "messaging")]
 mod messaging;
 mod runtime;

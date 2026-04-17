@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 use composable_runtime::{ComponentInvoker, ConfigHandler, MessagePublisher, Service};
 
 use crate::config::{self, HttpServerConfigHandler, ServerConfig, SharedConfig};
+use crate::server::HttpServer;
 
 /// HTTP Server support for the composable runtime.
 ///
@@ -72,19 +73,16 @@ impl Service for HttpService {
         }
 
         let mut tasks = self.tasks.lock().unwrap();
-        for server in servers {
-            let invoker = Arc::clone(&invoker);
-            let publisher = publisher.clone();
+        for config in servers {
+            let name = config.name.clone();
+            let port = config.port;
+            let server = HttpServer::new(config, Arc::clone(&invoker), publisher.clone())?;
+
+            tracing::info!(server = %name, port, "starting HTTP server");
+
             let shutdown = self.shutdown_rx.clone();
-            let name = server.name.clone();
-            let port = server.port;
-
-            tracing::info!(server = %name, port, routes = server.routes.len(), "starting HTTP server");
-
             tasks.push(tokio::spawn(async move {
-                if let Err(e) =
-                    crate::server::run(port, server.routes, invoker, publisher, shutdown).await
-                {
+                if let Err(e) = server.run(shutdown).await {
                     tracing::error!(server = %name, "HTTP server error: {e}");
                 }
             }));

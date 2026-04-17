@@ -170,7 +170,8 @@ async fn test_host_capability_invoked() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoke("guest", "get-value", vec![])
+        .invoker()
+        .invoke("guest", "get-value", vec![], None, None)
         .await
         .expect("Failed to invoke");
 
@@ -264,7 +265,8 @@ async fn test_host_capability_with_config() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoke("guest", "calc", vec![])
+        .invoker()
+        .invoke("guest", "calc", vec![], None, None)
         .await
         .expect("Failed to invoke");
 
@@ -299,7 +301,8 @@ async fn test_host_capability_with_default_config() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoke("guest", "calc", vec![])
+        .invoker()
+        .invoke("guest", "calc", vec![], None, None)
         .await
         .expect("Failed to invoke");
 
@@ -397,7 +400,8 @@ async fn test_host_capability_with_state() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoke("guest", "count-twice", vec![])
+        .invoker()
+        .invoke("guest", "count-twice", vec![], None, None)
         .await
         .expect("Failed to invoke");
 
@@ -432,14 +436,16 @@ async fn test_host_capability_state_isolated_per_instance() {
 
     // First invocation
     let result1 = runtime
-        .invoke("guest", "count-twice", vec![])
+        .invoker()
+        .invoke("guest", "count-twice", vec![], None, None)
         .await
         .expect("Failed to invoke");
     assert_eq!(result1, serde_json::json!(2));
 
     // Second invocation - should start fresh (new instance, new state)
     let result2 = runtime
-        .invoke("guest", "count-twice", vec![])
+        .invoker()
+        .invoke("guest", "count-twice", vec![], None, None)
         .await
         .expect("Failed to invoke");
     assert_eq!(result2, serde_json::json!(2));
@@ -540,7 +546,7 @@ async fn test_duplicate_capability_state_type_fails() {
         .expect("Failed to create runtime");
 
     // State is created during instantiation, not during build
-    let result = runtime.instantiate("guest").await;
+    let result = runtime.instantiate("guest", None).await;
 
     // Should fail because both capabilities try to register SharedState
     match result {
