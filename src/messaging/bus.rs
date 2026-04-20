@@ -11,7 +11,7 @@ use crate::types::ComponentInvoker;
 use super::activator::Activator;
 use super::channel::{Channel, ChannelRegistry, ReplyPublisher};
 use super::dispatcher::Dispatcher;
-use super::message::Message;
+use crate::message::Message;
 
 // Type-erasure boundary so MessagingService can hold heterogeneous buses.
 pub(crate) trait Bus: Send + Sync {
@@ -24,6 +24,11 @@ pub(crate) trait Bus: Send + Sync {
     fn add_subscription(&self, config: SubscriptionConfig);
 
     fn set_invoker(&self, invoker: Arc<dyn ComponentInvoker>);
+
+    // Set the shared reply publisher that uses ephemeral reply channels.
+    // The bus composes this with its own registry to build the
+    // `ReplyPublisher` it gives to activators.
+    fn set_reply_publisher(&self, publisher: Arc<dyn ReplyPublisher>);
 
     fn start(&self) -> Result<()>;
 
@@ -58,6 +63,7 @@ pub(crate) struct GenericBus<C: Channel, F: ChannelFactory<C>> {
     registry: Arc<ChannelRegistry<C>>,
     subscriptions: Mutex<Vec<SubscriptionConfig>>,
     invoker: Mutex<Option<Arc<dyn ComponentInvoker>>>,
+    shared_reply_publisher: Mutex<Option<Arc<dyn ReplyPublisher>>>,
     cancel: CancellationToken,
     handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
@@ -72,6 +78,7 @@ where
             registry: Arc::new(ChannelRegistry::new()),
             subscriptions: Mutex::new(Vec::new()),
             invoker: Mutex::new(None),
+            shared_reply_publisher: Mutex::new(None),
             cancel: CancellationToken::new(),
             handles: Mutex::new(Vec::new()),
         }
@@ -105,6 +112,10 @@ where
         *self.invoker.lock().unwrap() = Some(invoker);
     }
 
+    fn set_reply_publisher(&self, publisher: Arc<dyn ReplyPublisher>) {
+        *self.shared_reply_publisher.lock().unwrap() = Some(publisher);
+    }
+
     fn start(&self) -> Result<()> {
         let invoker = self
             .invoker
@@ -113,7 +124,16 @@ where
             .clone()
             .ok_or_else(|| anyhow::anyhow!("Bus: invoker not set before start()"))?;
 
-        let reply_publisher = Arc::clone(&self.registry) as Arc<dyn ReplyPublisher>;
+        // Compose the shared reply publisher with this bus's own registry.
+        let shared = self.shared_reply_publisher.lock().unwrap().clone();
+        let bus_registry = Arc::clone(&self.registry) as Arc<dyn ReplyPublisher>;
+        let reply_publisher: Arc<dyn ReplyPublisher> = match shared {
+            Some(shared) => Arc::new(CompositeReplyPublisher {
+                ephemeral: shared,
+                managed: bus_registry,
+            }),
+            None => bus_registry,
+        };
         let subscriptions: Vec<_> = self.subscriptions.lock().unwrap().drain(..).collect();
 
         for sub in subscriptions {
@@ -195,3 +215,28 @@ impl ChannelFactory<super::channel::LocalChannel> for LocalChannelFactory {
 }
 
 pub(crate) type LocalBus = GenericBus<super::channel::LocalChannel, LocalChannelFactory>;
+
+// Composes ephemeral reply channels with bus-managed channels into a single
+// `ReplyPublisher`.
+struct CompositeReplyPublisher {
+    ephemeral: Arc<dyn ReplyPublisher>,
+    managed: Arc<dyn ReplyPublisher>,
+}
+
+impl ReplyPublisher for CompositeReplyPublisher {
+    fn publish<'a>(
+        &'a self,
+        channel: &'a str,
+        msg: Message,
+    ) -> Pin<Box<dyn Future<Output = Result<(), super::channel::PublishError>> + Send + 'a>> {
+        Box::pin(async move {
+            match self.ephemeral.publish(channel, msg.clone()).await {
+                Ok(()) => Ok(()),
+                Err(super::channel::PublishError::Closed(_)) => {
+                    self.managed.publish(channel, msg).await
+                }
+                Err(e) => Err(e),
+            }
+        })
+    }
+}

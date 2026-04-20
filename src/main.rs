@@ -73,6 +73,10 @@ enum Command {
         /// Content type
         #[arg(long, default_value = "text/plain")]
         content_type: String,
+
+        /// Wait up to N seconds for a reply. Omit for fire-and-forget.
+        #[arg(long)]
+        reply_timeout: Option<u64>,
     },
     /// Inspect the dependency graph
     Graph {
@@ -136,6 +140,7 @@ async fn main() -> Result<()> {
             channel,
             body,
             content_type,
+            reply_timeout,
         } => {
             tracing_subscriber::fmt()
                 .with_env_filter(
@@ -150,9 +155,24 @@ async fn main() -> Result<()> {
             let publisher = runtime.publisher();
             let headers =
                 std::collections::HashMap::from([("content-type".to_string(), content_type)]);
-            publisher
-                .publish(&channel, body.into_bytes(), headers)
-                .await?;
+
+            match reply_timeout {
+                None => {
+                    publisher
+                        .publish(&channel, body.into_bytes(), headers)
+                        .await?;
+                }
+                Some(secs) => {
+                    let handle = publisher
+                        .publish_request(&channel, body.into_bytes(), headers)
+                        .await?;
+                    let reply =
+                        tokio::time::timeout(std::time::Duration::from_secs(secs), handle.take())
+                            .await
+                            .map_err(|_| anyhow::anyhow!("no reply received within {secs}s"))??;
+                    println!("{}", String::from_utf8_lossy(reply.body()));
+                }
+            }
 
             runtime.shutdown().await;
         }

@@ -13,4 +13,4 @@ if [ ! -f "$GREETER" ]; then
   ../hello-world/build.sh
 fi
 
-composable publish config.toml --channel names --body "${1:-World}"
+composable publish config.toml --channel names --body "${1:-World}" --reply-timeout 1

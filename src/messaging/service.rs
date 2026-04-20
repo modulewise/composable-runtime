@@ -7,11 +7,12 @@ use anyhow::Result;
 
 use crate::config::types::{CategoryClaim, ConfigHandler, PropertyMap};
 use crate::context::PROPAGATION_CONTEXT;
+use crate::message::{Message, MessageBuilder, MessagePublisher, header};
 use crate::service::Service;
-use crate::types::{ComponentInvoker, MessagePublisher, PROPAGATED_HEADERS};
+use crate::types::{ComponentInvoker, PROPAGATED_HEADERS};
 
 use super::bus::{Bus, LocalBus, LocalChannelFactory, SubscriptionConfig};
-use super::message::MessageBuilder;
+use super::reply::ReplyHandler;
 
 // Claims the `subscription` property on the `component` category.
 struct MessagingConfigHandler {
@@ -61,6 +62,7 @@ pub(crate) struct MessagingService {
     // Currently one default bus using LocalChannel.
     // Future: HashMap<String, Arc<dyn Bus>> populated from [bus.*] config.
     bus: Arc<dyn Bus>,
+    reply_handler: ReplyHandler,
 }
 
 impl MessagingService {
@@ -68,12 +70,14 @@ impl MessagingService {
         Self {
             subscriptions: Arc::new(Mutex::new(Vec::new())),
             bus: Arc::new(LocalBus::new(LocalChannelFactory)),
+            reply_handler: ReplyHandler::new(),
         }
     }
 
     pub(crate) fn publisher(&self) -> Arc<dyn MessagePublisher> {
         Arc::new(BusPublisher {
             bus: Arc::clone(&self.bus),
+            reply_handler: self.reply_handler.clone(),
         })
     }
 }
@@ -94,6 +98,7 @@ impl Service for MessagingService {
         for sub in subscriptions {
             self.bus.add_subscription(sub);
         }
+        self.bus.set_reply_publisher(self.reply_handler.registry());
         self.bus.start()
     }
 
@@ -105,6 +110,31 @@ impl Service for MessagingService {
 // Implements MessagePublisher by delegating to the bus.
 struct BusPublisher {
     bus: Arc<dyn Bus>,
+    reply_handler: ReplyHandler,
+}
+
+impl BusPublisher {
+    // Build a message from body + headers, merging propagated context.
+    fn build_message(body: Vec<u8>, headers: HashMap<String, String>) -> Message {
+        let mut builder = MessageBuilder::new(body);
+        // Merge propagated context entries into outgoing message headers.
+        if let Some(entries) = PROPAGATION_CONTEXT
+            .try_with(|ctx| ctx.as_ref().map(|c| c.entries.clone()))
+            .ok()
+            .flatten()
+        {
+            for key in PROPAGATED_HEADERS {
+                if let Some(val) = entries.get(*key) {
+                    builder = builder.header(*key, val.as_str());
+                }
+            }
+        }
+        // Caller-supplied headers may override propagated entries.
+        for (key, value) in headers {
+            builder = builder.header(key, value);
+        }
+        builder.build()
+    }
 }
 
 impl MessagePublisher for BusPublisher {
@@ -115,25 +145,26 @@ impl MessagePublisher for BusPublisher {
         headers: HashMap<String, String>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            let mut builder = MessageBuilder::new(body);
-            // Merge propagated context entries into outgoing message headers.
-            if let Some(entries) = PROPAGATION_CONTEXT
-                .try_with(|ctx| ctx.as_ref().map(|c| c.entries.clone()))
-                .ok()
-                .flatten()
-            {
-                for key in PROPAGATED_HEADERS {
-                    if let Some(val) = entries.get(*key) {
-                        builder = builder.header(*key, val.as_str());
-                    }
-                }
-            }
-            // Caller-supplied headers may override propagated entries.
-            for (key, value) in headers {
-                builder = builder.header(key, value);
-            }
-            let msg = builder.build();
+            let msg = Self::build_message(body, headers);
             self.bus.publish(channel, msg).await
+        })
+    }
+
+    fn publish_request<'a>(
+        &'a self,
+        channel: &'a str,
+        body: Vec<u8>,
+        mut headers: HashMap<String, String>,
+    ) -> crate::message::ReplyFuture<'a> {
+        Box::pin(async move {
+            let return_address = self.reply_handler.return_address();
+            headers.insert(
+                header::REPLY_TO.to_string(),
+                return_address.channel().to_string(),
+            );
+            let msg = Self::build_message(body, headers);
+            self.bus.publish(channel, msg).await?;
+            Ok(return_address)
         })
     }
 }

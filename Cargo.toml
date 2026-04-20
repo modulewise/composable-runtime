@@ -13,7 +13,7 @@ keywords = ["wasm"]
 members = [".", "crates/http-server", "crates/interceptor", "crates/opentelemetry"]
 
 [workspace.package]
-version = "0.5.0-alpha.2"
+version = "0.5.0-alpha.3"
 license = "Apache-2.0"
 repository = "https://github.com/modulewise/composable-runtime"
 edition = "2024"
@@ -42,7 +42,7 @@ wit-parser = "0.245"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-composable-interceptor = { version = "0.5.0-alpha.2", path = "crates/interceptor" }
+composable-interceptor = { version = "0.5.0-alpha.3", path = "crates/interceptor" }
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 oci-client = "0.16"

@@ -12,7 +12,7 @@ keywords = ["wasm"]
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
-composable-runtime = { version = "0.5.0-alpha.2", path = "../..", features = ["messaging"] }
+composable-runtime = { version = "0.5.0-alpha.3", path = "../..", features = ["messaging"] }
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util.workspace = true

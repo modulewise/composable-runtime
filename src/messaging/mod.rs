@@ -6,10 +6,9 @@ mod activator;
 mod bus;
 mod channel;
 mod dispatcher;
-mod message;
+mod reply;
 pub(crate) mod service;
 
 pub use channel::Channel;
-pub use message::{Message, MessageBuilder, header};
 
 pub(crate) use service::MessagingService;

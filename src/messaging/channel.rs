@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time;
 
-use super::message::Message;
+use crate::message::Message;
 
 // Default channel capacity.
 const DEFAULT_CAPACITY: usize = 256;
@@ -508,7 +508,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::messaging::message::MessageBuilder;
+    use crate::message::MessageBuilder;
 
     #[tokio::test]
     async fn publish_no_consumers_returns_error() {

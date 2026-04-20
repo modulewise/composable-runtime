@@ -283,13 +283,3 @@ pub trait ComponentInvoker: Send + Sync {
         env: Option<HashMap<String, String>>,
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
 }
-
-/// Publish messages to channels by name.
-pub trait MessagePublisher: Send + Sync {
-    fn publish<'a>(
-        &'a self,
-        channel: &'a str,
-        body: Vec<u8>,
-        headers: HashMap<String, String>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
-}

@@ -11,7 +11,7 @@ keywords = ["wasm", "opentelemetry"]
 
 [dependencies]
 anyhow.workspace = true
-composable-runtime = { version = "0.5.0-alpha.2", path = "../..", default-features = false }
+composable-runtime = { version = "0.5.0-alpha.3", path = "../..", default-features = false }
 indexmap = "2"
 opentelemetry.workspace = true
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "http-proto", "reqwest-client", "trace", "logs"] }

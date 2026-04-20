@@ -77,7 +77,7 @@ where
     fn dispatch_message(
         &self,
         tasks: &mut JoinSet<()>,
-        msg: super::Message,
+        msg: crate::message::Message,
         receipt: C::ConsumeReceipt,
     ) {
         let handler = Arc::clone(&self.handler);
@@ -107,10 +107,10 @@ mod tests {
     use tokio::sync::Semaphore;
 
     use super::*;
+    use crate::message::{Message, MessageBuilder};
     use crate::messaging::channel::{
         ConsumeError, LocalChannel, Overflow, PublishError, ReceiptError,
     };
-    use crate::messaging::message::{Message, MessageBuilder};
 
     fn init_tracing() {
         let _ = tracing_subscriber::fmt()
