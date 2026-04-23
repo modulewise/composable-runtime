@@ -1,7 +1,14 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::Result;
 use uuid::Uuid;
+
+/// Return type for [`MessagePublisher::publish_request`].
+pub type ReplyFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Box<dyn ReturnAddress>>> + Send + 'a>>;
 
 /// Well-known header keys.
 pub mod header {
@@ -256,6 +263,34 @@ impl MessageBuilder {
             body: self.body,
         }
     }
+}
+
+/// Publish messages to channels by name.
+pub trait MessagePublisher: Send + Sync {
+    /// Publish a message to the named channel.
+    fn publish<'a>(
+        &'a self,
+        channel: &'a str,
+        body: Vec<u8>,
+        headers: HashMap<String, String>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
+
+    /// Publish a request message and use the return address to await the reply.
+    fn publish_request<'a>(
+        &'a self,
+        channel: &'a str,
+        body: Vec<u8>,
+        headers: HashMap<String, String>,
+    ) -> ReplyFuture<'a>;
+}
+
+/// Return address for a request-reply exchange.
+pub trait ReturnAddress: Send {
+    /// The ephemeral channel name placed in the outgoing `reply-to` header.
+    fn channel(&self) -> &str;
+
+    /// Await the reply. Cleans up the ephemeral channel after receiving.
+    fn take(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<Message>> + Send>>;
 }
 
 #[cfg(test)]

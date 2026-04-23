@@ -7,9 +7,9 @@ use std::sync::Arc;
 use crate::composition::graph::ComponentGraph;
 use crate::composition::registry::{HostCapability, HostCapabilityFactory, build_registries};
 use crate::config::types::{ConfigHandler, DefinitionLoader};
-use crate::service::Service;
 #[cfg(feature = "messaging")]
-use crate::types::MessagePublisher;
+use crate::message::MessagePublisher;
+use crate::service::Service;
 use crate::types::{Component, ComponentInvoker};
 
 mod grpc;

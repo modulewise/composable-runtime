@@ -9,11 +9,12 @@ pub use config::types::{
     CategoryClaim, Condition, ConfigHandler, DefinitionLoader, Operator, PropertyMap, Selector,
 };
 pub use context::{PROPAGATION_CONTEXT, PropagationContext};
+pub use message::{Message, MessageBuilder, MessagePublisher, ReturnAddress, header};
 pub use runtime::{Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{
     CapabilityDefinition, Component, ComponentDefinition, ComponentInvoker, ComponentMetadata,
-    ComponentState, Function, FunctionParam, MessagePublisher, PROPAGATED_HEADERS,
+    ComponentState, Function, FunctionParam, PROPAGATED_HEADERS,
 };
 
 // exposed for testing, hidden from docs
@@ -24,10 +25,11 @@ pub mod types;
 
 pub(crate) mod config;
 pub(crate) mod context;
+pub(crate) mod message;
 #[cfg(feature = "messaging")]
 mod messaging;
 mod runtime;
 pub(crate) mod service;
 
 #[cfg(feature = "messaging")]
-pub use messaging::{Channel, Message, MessageBuilder, header};
+pub use messaging::Channel;
