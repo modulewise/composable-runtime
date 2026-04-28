@@ -10,6 +10,7 @@ function = "greet"
 [server.api.route.bonjour]
 path = "/bonjour"
 channel = "names"
+reply-timeout-ms = 1000
 
 [component.hello]
 uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"

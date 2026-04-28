@@ -37,6 +37,7 @@ enum Target {
     },
     Channel {
         channel: String,
+        reply_timeout_ms: Option<u64>,
     },
 }
 
@@ -89,8 +90,12 @@ impl Route {
                     body: body.clone(),
                 }
             }
-            RouteTarget::Channel { channel } => Target::Channel {
+            RouteTarget::Channel {
+                channel,
+                reply_timeout_ms,
+            } => Target::Channel {
                 channel: channel.clone(),
+                reply_timeout_ms: *reply_timeout_ms,
             },
         };
 
@@ -167,7 +172,13 @@ impl Router {
                 self.invoke_component(component, function, body.as_deref(), params, req)
                     .await
             }
-            Target::Channel { channel } => self.publish_to_channel(channel, req).await,
+            Target::Channel {
+                channel,
+                reply_timeout_ms,
+            } => {
+                self.publish_to_channel(channel, req, *reply_timeout_ms)
+                    .await
+            }
         }
     }
 
@@ -346,6 +357,7 @@ impl Router {
         &self,
         channel: &str,
         req: Request<Incoming>,
+        reply_timeout_ms: Option<u64>,
     ) -> Response<Full<Bytes>> {
         let publisher = match &self.publisher {
             Some(p) => p,
@@ -379,17 +391,61 @@ impl Router {
         let mut headers = HashMap::new();
         headers.insert("content-type".to_string(), content_type);
 
-        match publisher.publish(channel, body_bytes, headers).await {
-            Ok(()) => Response::builder()
-                .status(StatusCode::ACCEPTED)
-                .body(Full::new(Bytes::new()))
-                .unwrap(),
-            Err(e) => Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Full::new(Bytes::from(format!(
-                    "failed to publish to channel '{channel}': {e}"
-                ))))
-                .unwrap(),
+        match reply_timeout_ms {
+            None => match publisher.publish(channel, body_bytes, headers).await {
+                Ok(()) => Response::builder()
+                    .status(StatusCode::ACCEPTED)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap(),
+                Err(e) => Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Full::new(Bytes::from(format!(
+                        "failed to publish to channel '{channel}': {e}"
+                    ))))
+                    .unwrap(),
+            },
+            Some(timeout_ms) => {
+                let handle = match publisher
+                    .publish_request(channel, body_bytes, headers)
+                    .await
+                {
+                    Ok(h) => h,
+                    Err(e) => {
+                        return Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Full::new(Bytes::from(format!(
+                                "failed to publish to channel '{channel}': {e}"
+                            ))))
+                            .unwrap();
+                    }
+                };
+
+                let timeout = std::time::Duration::from_millis(timeout_ms);
+                match tokio::time::timeout(timeout, handle.take()).await {
+                    Ok(Ok(reply)) => {
+                        let reply_content_type = reply
+                            .headers()
+                            .content_type()
+                            .unwrap_or("application/octet-stream")
+                            .to_string();
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", reply_content_type)
+                            .body(Full::new(Bytes::copy_from_slice(reply.body())))
+                            .unwrap()
+                    }
+                    Ok(Err(e)) => Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Full::new(Bytes::from(format!("reply error: {e}"))))
+                        .unwrap(),
+                    Err(_) => Response::builder()
+                        .status(StatusCode::GATEWAY_TIMEOUT)
+                        .body(Full::new(Bytes::from(format!(
+                            "no reply received within {timeout_ms}ms"
+                        ))))
+                        .unwrap(),
+                }
+            }
         }
     }
 }
