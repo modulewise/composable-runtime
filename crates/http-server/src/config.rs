@@ -26,7 +26,11 @@ pub enum RouteTarget {
         body: Option<String>,
     },
     /// Publish the request body to a channel.
-    Channel { channel: String },
+    Channel {
+        channel: String,
+        /// If set, use request-reply, else fire-and-forget.
+        reply_timeout_ms: Option<u64>,
+    },
 }
 
 /// Parsed HTTP server definition.
@@ -74,7 +78,15 @@ impl ConfigHandler for HttpServerConfigHandler {
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
         HashMap::from([(
             "server",
-            ["type", "port", "route", "otlp-endpoint", "otlp-protocol"].as_slice(),
+            [
+                "type",
+                "port",
+                "route",
+                "otlp-endpoint",
+                "otlp-protocol",
+                "reply-timeout-ms",
+            ]
+            .as_slice(),
         )])
     }
 
@@ -203,6 +215,19 @@ fn parse_routes(server_name: &str, properties: &mut PropertyMap) -> Result<Vec<R
         let function = get_optional_string(&route_props, "function", &ctx)?;
         let channel = get_optional_string(&route_props, "channel", &ctx)?;
         let body = get_optional_string(&route_props, "body", &ctx)?;
+        let reply_timeout_ms = match route_props.get("reply-timeout-ms") {
+            Some(serde_json::Value::Number(n)) => Some(
+                n.as_u64()
+                    .ok_or_else(|| ctx("'reply-timeout-ms'", "must be a non-negative integer"))?,
+            ),
+            Some(got) => {
+                return Err(ctx(
+                    "'reply-timeout-ms'",
+                    &format!("must be a number, got {got}"),
+                ));
+            }
+            None => None,
+        };
 
         let has_component = component.is_some() || function.is_some();
         let has_channel = channel.is_some();
@@ -218,7 +243,10 @@ fn parse_routes(server_name: &str, properties: &mut PropertyMap) -> Result<Vec<R
             if body.is_some() {
                 return Err(ctx("", "'body' is not valid on channel routes"));
             }
-            RouteTarget::Channel { channel }
+            RouteTarget::Channel {
+                channel,
+                reply_timeout_ms,
+            }
         } else {
             let component = component
                 .ok_or_else(|| ctx("", "missing 'component' (or 'channel' for channel routes)"))?;
@@ -534,8 +562,12 @@ mod tests {
         let servers = config.lock().unwrap();
         assert_eq!(servers[0].routes[0].method, "POST");
         match &servers[0].routes[0].target {
-            RouteTarget::Channel { channel } => {
+            RouteTarget::Channel {
+                channel,
+                reply_timeout_ms,
+            } => {
                 assert_eq!(channel, "incoming-events");
+                assert!(reply_timeout_ms.is_none());
             }
             other => panic!("expected Channel target, got {other:?}"),
         }
