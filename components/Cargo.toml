@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "http/client",
+]
+resolver = "3"
+
+[workspace.dependencies]
+wit-bindgen = "0.57"
