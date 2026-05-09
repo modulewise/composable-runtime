@@ -62,7 +62,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1
+        uses: cargo-bins/cargo-binstall@v1.19.1
 
       - name: Install build tools
         run: |
@@ -108,7 +108,7 @@ jobs:
           licenses: ${{ steps.meta.outputs.license }}
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign component
         run: |

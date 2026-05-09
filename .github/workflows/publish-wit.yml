@@ -63,7 +63,7 @@ jobs:
           echo "license=$license" >> "$GITHUB_OUTPUT"
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@v1
+        uses: cargo-bins/cargo-binstall@v1.19.1
 
       - name: Install wkg
         run: cargo binstall wkg --no-confirm
@@ -92,7 +92,7 @@ jobs:
           licenses: ${{ steps.meta.outputs.license }}
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign WIT package
         run: |
