@@ -1,0 +1,5 @@
+[metadata]
+description = "WIT package defining the composable:http interfaces"
+license = "Apache-2.0"
+homepage = "https://github.com/modulewise/composable-runtime/tree/main/components/http"
+repository = "https://github.com/modulewise/composable-runtime"

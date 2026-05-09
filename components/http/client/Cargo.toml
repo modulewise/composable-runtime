@@ -2,6 +2,10 @@
 name = "http-client"
 version = "0.1.0"
 edition = "2024"
+description = "HTTP client component implementing the composable:http/client interface"
+homepage = "https://github.com/modulewise/composable-runtime/tree/main/components/http"
+license = "Apache-2.0"
+repository = "https://github.com/modulewise/composable-runtime"
 
 [lib]
 crate-type = ["cdylib"]
