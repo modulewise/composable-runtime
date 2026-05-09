@@ -1,0 +1,100 @@
+name: Publish WIT package
+
+on:
+  push:
+    tags:
+      - 'wit-*-v[0-9]+.[0-9]+.[0-9]+-?**'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Parse tag
+        id: parse
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          rest="${tag#wit-}"
+          name="${rest%-v*}"
+          version="${rest##*-v}"
+          wit_dir="components/${name}/wit"
+          wkg_toml="components/${name}/wkg.toml"
+          package_wit="${wit_dir}/package.wit"
+          for f in "$wit_dir" "$wkg_toml" "$package_wit"; do
+            if [ ! -e "$f" ]; then
+              echo "Required path not found: $f" >&2
+              exit 1
+            fi
+          done
+          # Namespace from `package <ns>:<name>@<version>;` declaration
+          ns=$(sed -nE 's/^package ([a-z][a-z0-9-]*):.*$/\1/p' "$package_wit" | head -1)
+          if [ -z "$ns" ]; then
+            echo "Failed to extract namespace from $package_wit" >&2
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "namespace=$ns" >> "$GITHUB_OUTPUT"
+          echo "wkg_toml=$wkg_toml" >> "$GITHUB_OUTPUT"
+
+      - name: Read package metadata
+        id: meta
+        run: |
+          file="${{ steps.parse.outputs.wkg_toml }}"
+          description=$(yq -p toml -o yaml -r '.metadata.description // ""' "$file")
+          homepage=$(yq -p toml -o yaml -r '.metadata.homepage // ""' "$file")
+          repository=$(yq -p toml -o yaml -r '.metadata.repository // ""' "$file")
+          license=$(yq -p toml -o yaml -r '.metadata.license // ""' "$file")
+          for field in description homepage repository license; do
+            if [ -z "${!field}" ]; then
+              echo "wkg.toml is missing '$field' under [metadata]" >&2
+              exit 1
+            fi
+          done
+          echo "description=$description" >> "$GITHUB_OUTPUT"
+          echo "homepage=$homepage" >> "$GITHUB_OUTPUT"
+          echo "source=$repository" >> "$GITHUB_OUTPUT"
+          echo "license=$license" >> "$GITHUB_OUTPUT"
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1
+
+      - name: Install wkg
+        run: cargo binstall wkg --no-confirm
+
+      - name: Build WIT package
+        working-directory: components/${{ steps.parse.outputs.name }}
+        run: wkg wit build --output /tmp/wit-package.wasm
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish WIT to GitHub Container Registry
+        id: publish
+        uses: bytecodealliance/wkg-github-action@v5
+        with:
+          file: /tmp/wit-package.wasm
+          oci-reference-without-tag: ghcr.io/modulewise/wit/${{ steps.parse.outputs.namespace }}/${{ steps.parse.outputs.name }}
+          version: ${{ steps.parse.outputs.version }}
+          description: ${{ steps.meta.outputs.description }}
+          source: ${{ steps.meta.outputs.source }}
+          homepage: ${{ steps.meta.outputs.homepage }}
+          licenses: ${{ steps.meta.outputs.license }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4
+
+      - name: Sign WIT package
+        run: |
+          cosign sign --yes \
+            ghcr.io/modulewise/wit/${{ steps.parse.outputs.namespace }}/${{ steps.parse.outputs.name }}@${{ steps.publish.outputs.digest }}
