@@ -119,7 +119,7 @@ impl DefaultMapper {
 
 impl Mapper for DefaultMapper {
     fn map(&self, msg: &Message) -> Result<Invocation, String> {
-        let args = if self.params.is_empty() {
+        let mut args = if self.params.is_empty() {
             vec![]
         } else {
             let value = Self::parse_body(msg)?;
@@ -143,6 +143,20 @@ impl Mapper for DefaultMapper {
                 vec![value]
             }
         };
+
+        // If a param expects a `string` but the mapped value is not already a
+        // JSON string, stringify it.
+        for (param, arg) in self.params.iter().zip(args.iter_mut()) {
+            let expects_string =
+                param.json_schema.get("type").and_then(|t| t.as_str()) == Some("string");
+            if expects_string && !matches!(arg, serde_json::Value::String(_)) {
+                *arg = serde_json::Value::String(
+                    serde_json::to_string(arg)
+                        .map_err(|e| format!("failed to stringify body for string param: {e}"))?,
+                );
+            }
+        }
+
         Ok(Invocation {
             function_key: self.function_key.clone(),
             args,
@@ -822,5 +836,61 @@ mod tests {
         assert_eq!(reply.headers().content_type(), Some("text/plain"));
         // greet("World") -> "Hello, World", serialized as raw text bytes
         assert_eq!(reply.body(), b"Hello, World");
+    }
+
+    // Send a JSON body that is *not* a string to a single string-typed param.
+    // DefaultMapper should stringify it rather than fail on WIT type mismatch.
+    async fn stringify_test(body: &[u8], expected_inner: &str) {
+        let wasm = string_function_wasm();
+        let toml_content = format!(
+            r#"
+            [component.guest]
+            uri = "{}"
+            "#,
+            wasm.path().display()
+        );
+        let toml = create_toml_file(&toml_content);
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+
+        let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
+        let replies = Arc::new(LocalChannel::with_defaults());
+        registry.register("replies", replies.clone());
+
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            None,
+            Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
+        )
+        .unwrap();
+
+        let msg = MessageBuilder::new(body.to_vec())
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::REPLY_TO, "replies")
+            .build();
+
+        let consumer = {
+            let ch = replies.clone();
+            tokio::spawn(async move { ch.consume("test").await })
+        };
+        tokio::task::yield_now().await;
+
+        let result = activator.handle(msg).await;
+        assert!(result.is_ok(), "handle failed: {:?}", result.err());
+
+        let (reply, _) = consumer.await.unwrap().unwrap();
+        // greet receives the stringified form
+        let expected = format!("\"Hello, {}\"", expected_inner);
+        assert_eq!(reply.body(), expected.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn string_param_stringifies_object_body() {
+        stringify_test(br#"{"id":"abc","n":42}"#, r#"{\"id\":\"abc\",\"n\":42}"#).await;
+    }
+
+    #[tokio::test]
+    async fn string_param_stringifies_number_body() {
+        stringify_test(b"42", "42").await;
     }
 }
