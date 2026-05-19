@@ -419,8 +419,8 @@ impl Parser {
                         json!({
                             "type": "array",
                             "prefixItems": item_schemas,
-                            "items": false,
-                            "minItems": len
+                            "minItems": len,
+                            "maxItems": len
                         })
                     }
                     wit_parser::TypeDefKind::Flags(flags) => {
@@ -792,7 +792,7 @@ mod tests {
         let too_long = json!(["a", "b", "c"]);
         assert!(
             validator.validate(&too_long).is_err(),
-            "3-element value should fail items=false"
+            "3-element value should fail maxItems"
         );
 
         let wrong_type = json!(["a", 42]);
