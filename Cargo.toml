@@ -69,6 +69,7 @@ wit-component = "0.245"
 wit-parser.workspace = true
 
 [dev-dependencies]
+jsonschema = { version = "0.46", default-features = false }
 tempfile.workspace = true
 wat.workspace = true
 

@@ -415,11 +415,12 @@ impl Parser {
                             .iter()
                             .map(|t| Self::wit_type_to_json_schema(*t, resolve))
                             .collect();
+                        let len = item_schemas.len();
                         json!({
                             "type": "array",
-                            "items": item_schemas,
-                            "minItems": item_schemas.len(),
-                            "maxItems": item_schemas.len()
+                            "prefixItems": item_schemas,
+                            "items": false,
+                            "minItems": len
                         })
                     }
                     wit_parser::TypeDefKind::Flags(flags) => {
@@ -464,5 +465,340 @@ impl Parser {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wit_parser::{Resolve, UnresolvedPackageGroup};
+
+    // Parse the WIT text, register it in a Resolve, and return that Resolve
+    // along with the Type for the named alias `t` declared in the single
+    // interface of the WIT.
+    fn parse_named_type(wit_text: &str) -> (Resolve, Type) {
+        let group = UnresolvedPackageGroup::parse("test.wit", wit_text).unwrap();
+        let mut resolve = Resolve::default();
+        resolve.push_group(group).unwrap();
+
+        let (_iface_id, iface) = resolve
+            .interfaces
+            .iter()
+            .next()
+            .expect("expected at least one interface");
+        let type_id = iface
+            .types
+            .get("t")
+            .copied()
+            .expect("expected type alias `t` in interface");
+        let ty = Type::Id(type_id);
+        (resolve, ty)
+    }
+
+    // Parse WIT, emit the schema for the named alias `t`, meta-validate, return it.
+    fn emit_schema(wit_text: &str) -> serde_json::Value {
+        let (resolve, ty) = parse_named_type(wit_text);
+        let schema = Parser::wit_type_to_json_schema(ty, &resolve);
+        assert_schema_passes_meta_validation(&schema);
+        schema
+    }
+
+    // Ensure the emitted schema is valid against the JSON Schema meta-schema.
+    fn assert_schema_passes_meta_validation(schema: &serde_json::Value) {
+        if let Err(e) = jsonschema::validator_for(schema) {
+            panic!("emitted schema rejected by jsonschema validator: {e}\nschema: {schema:#}");
+        }
+    }
+
+    fn assert_accepts(schema: &serde_json::Value, value: &serde_json::Value) {
+        let v = jsonschema::validator_for(schema).expect("failed to build validator");
+        if let Err(e) = v.validate(value) {
+            panic!("expected accept but got {e}\nschema: {schema:#}\nvalue: {value:#}");
+        }
+    }
+
+    fn assert_rejects(schema: &serde_json::Value, value: &serde_json::Value) {
+        let v = jsonschema::validator_for(schema).expect("failed to build validator");
+        if v.validate(value).is_ok() {
+            panic!("expected reject but got accept\nschema: {schema:#}\nvalue: {value:#}");
+        }
+    }
+
+    // --- primitives ---
+
+    #[test]
+    fn primitives_emit_expected_schemas() {
+        // string
+        assert_eq!(
+            emit_schema("package test:p; interface i { type t = string; }"),
+            json!({"type": "string"})
+        );
+        // boolean
+        assert_eq!(
+            emit_schema("package test:p; interface i { type t = bool; }"),
+            json!({"type": "boolean"})
+        );
+        // u32 carries minimum/maximum bounds.
+        let u32_schema = emit_schema("package test:p; interface i { type t = u32; }");
+        assert_eq!(u32_schema["type"], "number");
+        assert_eq!(u32_schema["minimum"], 0);
+        assert_eq!(u32_schema["maximum"], 4_294_967_295_u64);
+        // s32 carries signed bounds.
+        let s32_schema = emit_schema("package test:p; interface i { type t = s32; }");
+        assert_eq!(s32_schema["minimum"], -2_147_483_648_i64);
+        assert_eq!(s32_schema["maximum"], 2_147_483_647);
+        // char is length-1 string.
+        let char_schema = emit_schema("package test:p; interface i { type t = char; }");
+        assert_eq!(char_schema["type"], "string");
+        assert_eq!(char_schema["minLength"], 1);
+        assert_eq!(char_schema["maxLength"], 1);
+    }
+
+    // --- list ---
+
+    #[test]
+    fn list_uses_singular_items_schema() {
+        let schema = emit_schema("package test:p; interface i { type t = list<u32>; }");
+        assert_eq!(schema["type"], "array");
+        assert_eq!(schema["items"]["type"], "number");
+        assert_accepts(&schema, &json!([1, 2, 3]));
+        assert_rejects(&schema, &json!([1, "x"]));
+    }
+
+    // --- record ---
+
+    #[test]
+    fn record_has_properties_required_and_no_additional() {
+        let schema = emit_schema(
+            r#"
+            package test:p;
+            interface i {
+                record point { x: s32, y: s32 }
+                type t = point;
+            }
+            "#,
+        );
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"]["x"]["type"], "number");
+        assert_eq!(schema["properties"]["y"]["type"], "number");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(required.contains(&"x") && required.contains(&"y"));
+        assert_accepts(&schema, &json!({"x": 1, "y": 2}));
+        assert_rejects(&schema, &json!({"x": 1}));
+        assert_rejects(&schema, &json!({"x": 1, "y": 2, "z": 3}));
+    }
+
+    // --- variant ---
+
+    #[test]
+    fn variant_emits_oneof_of_per_case() {
+        let schema = emit_schema(
+            r#"
+            package test:p;
+            interface i {
+                variant shape {
+                    circle(f64),
+                    square,
+                }
+                type t = shape;
+            }
+            "#,
+        );
+        let cases = schema["oneOf"].as_array().unwrap();
+        assert_eq!(cases.len(), 2);
+        assert_accepts(&schema, &json!({"type": "circle", "value": 1.5}));
+        assert_accepts(&schema, &json!({"type": "square"}));
+        assert_rejects(&schema, &json!({"type": "triangle"}));
+        assert_rejects(&schema, &json!({"type": "square", "value": 1}));
+    }
+
+    // --- enum ---
+
+    #[test]
+    fn enum_emits_string_with_enum_values() {
+        let schema = emit_schema(
+            r#"
+            package test:p;
+            interface i {
+                enum color { red, green, blue }
+                type t = color;
+            }
+            "#,
+        );
+        assert_eq!(schema["type"], "string");
+        let values: Vec<&str> = schema["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(values, vec!["red", "green", "blue"]);
+        assert_accepts(&schema, &json!("red"));
+        assert_rejects(&schema, &json!("purple"));
+    }
+
+    // --- option ---
+
+    #[test]
+    fn option_emits_oneof_with_inner_and_null() {
+        let schema = emit_schema("package test:p; interface i { type t = option<string>; }");
+        let arms = schema["oneOf"].as_array().unwrap();
+        assert_eq!(arms.len(), 2);
+        assert_accepts(&schema, &json!("hello"));
+        assert_accepts(&schema, &json!(null));
+        assert_rejects(&schema, &json!(42));
+    }
+
+    // --- result ---
+
+    #[test]
+    fn result_emits_oneof_of_ok_and_error_objects() {
+        let schema = emit_schema("package test:p; interface i { type t = result<u32, string>; }");
+        let arms = schema["oneOf"].as_array().unwrap();
+        assert_eq!(arms.len(), 2);
+        assert_accepts(&schema, &json!({"ok": 5}));
+        assert_accepts(&schema, &json!({"error": "oops"}));
+        assert_rejects(&schema, &json!({"ok": 5, "error": "oops"}));
+        assert_rejects(&schema, &json!({"value": 5}));
+    }
+
+    // --- flags ---
+
+    #[test]
+    fn flags_emit_array_of_enum_strings_unique() {
+        let schema = emit_schema(
+            r#"
+            package test:p;
+            interface i {
+                flags perm { read, write, execute }
+                type t = perm;
+            }
+            "#,
+        );
+        assert_eq!(schema["type"], "array");
+        assert_eq!(schema["uniqueItems"], true);
+        assert_eq!(schema["items"]["type"], "string");
+        let values: Vec<&str> = schema["items"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(values, vec!["read", "write", "execute"]);
+        assert_accepts(&schema, &json!(["read", "write"]));
+        assert_rejects(&schema, &json!(["read", "read"]));
+        assert_rejects(&schema, &json!(["delete"]));
+    }
+
+    // --- nested composition ---
+
+    #[test]
+    fn record_with_list_of_tuples_field() {
+        let schema = emit_schema(
+            r#"
+            package test:p;
+            interface i {
+                record response { headers: list<tuple<string, string>> }
+                type t = response;
+            }
+            "#,
+        );
+        assert_accepts(&schema, &json!({"headers": [["a", "1"], ["b", "2"]]}));
+        assert_rejects(&schema, &json!({"headers": [["a"]]}));
+        assert_rejects(&schema, &json!({"headers": [["a", 1]]}));
+    }
+
+    #[test]
+    fn option_of_record() {
+        let schema = emit_schema(
+            r#"
+            package test:p;
+            interface i {
+                record user { id: string, age: u32 }
+                type t = option<user>;
+            }
+            "#,
+        );
+        assert_accepts(&schema, &json!(null));
+        assert_accepts(&schema, &json!({"id": "abc", "age": 30}));
+        assert_rejects(&schema, &json!({"id": "abc"}));
+    }
+
+    #[test]
+    fn list_of_record_with_variant_field() {
+        let schema = emit_schema(
+            r#"
+            package test:p;
+            interface i {
+                variant event { created, deleted(string) }
+                record entry { name: string, evt: event }
+                type t = list<entry>;
+            }
+            "#,
+        );
+        assert_accepts(
+            &schema,
+            &json!([
+                {"name": "a", "evt": {"type": "created"}},
+                {"name": "b", "evt": {"type": "deleted", "value": "x"}}
+            ]),
+        );
+        assert_rejects(&schema, &json!([{"name": "a", "evt": {"type": "unknown"}}]));
+    }
+
+    #[test]
+    fn tuple_inside_list_passes_meta_validation() {
+        let wit = r#"
+            package test:schemas;
+            interface i {
+                type t = list<tuple<string, string>>;
+            }
+        "#;
+        let (resolve, ty) = parse_named_type(wit);
+        let schema = Parser::wit_type_to_json_schema(ty, &resolve);
+        assert_schema_passes_meta_validation(&schema);
+    }
+
+    #[test]
+    fn tuple_schema_enforces_shape() {
+        let wit = r#"
+            package test:schemas;
+            interface i {
+                type t = tuple<string, string>;
+            }
+        "#;
+        let (resolve, ty) = parse_named_type(wit);
+        let schema = Parser::wit_type_to_json_schema(ty, &resolve);
+        let validator = jsonschema::validator_for(&schema).expect("emitted schema should be valid");
+
+        let good = json!(["a", "b"]);
+        assert!(
+            validator.validate(&good).is_ok(),
+            "valid 2-string tuple rejected: schema={schema:#}"
+        );
+
+        let too_short = json!(["a"]);
+        assert!(
+            validator.validate(&too_short).is_err(),
+            "1-element value should fail minItems"
+        );
+
+        let too_long = json!(["a", "b", "c"]);
+        assert!(
+            validator.validate(&too_long).is_err(),
+            "3-element value should fail items=false"
+        );
+
+        let wrong_type = json!(["a", 42]);
+        assert!(
+            validator.validate(&wrong_type).is_err(),
+            "non-string in position 1 should fail prefixItems"
+        );
     }
 }
