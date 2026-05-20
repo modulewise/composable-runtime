@@ -2,7 +2,9 @@
 uri = "./lib/configured-greeter.wasm"
 imports = ["translator"]
 config.locale = "${process:env:LOCALE|en-US}"
-subscription = "names"
+
+[subscription.names]
+component = "greeter"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"

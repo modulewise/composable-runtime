@@ -36,8 +36,10 @@ pub(crate) trait Bus: Send + Sync {
 }
 
 pub(crate) struct SubscriptionConfig {
-    pub component_name: String,
     pub channel_name: String,
+    pub component_name: String,
+    pub function_key: Option<String>,
+    pub mapping: crate::mapping::MappingConfig,
 }
 
 // Creates channel instances. The swappable part of a bus.
@@ -147,7 +149,8 @@ where
             let activator = Activator::new(
                 Arc::clone(&invoker),
                 &sub.component_name,
-                None,
+                sub.function_key,
+                sub.mapping,
                 Some(Arc::clone(&reply_publisher)),
             )
             .map_err(|e| anyhow::anyhow!(e))?;

@@ -1,10 +1,15 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::types::{Component, ComponentInvoker, FunctionParam, PROPAGATED_HEADERS};
+use crate::context::{PROPAGATION_CONTEXT, PropagationContext};
+#[cfg(test)]
+use crate::mapping::ParamMapping;
+use crate::mapping::{MappingConfig, MessageMapper};
+use crate::types::{Component, ComponentInvoker, PROPAGATED_HEADERS};
 
 use super::channel::ReplyPublisher;
-use crate::message::{Message, MessageBuilder, header};
+use crate::message::{Message, MessageHeaders};
 
 /// Handler for messages, used by dispatcher.
 ///
@@ -16,159 +21,11 @@ pub trait Handler: Send + Sync {
     fn handle(&self, msg: Message) -> impl Future<Output = Result<(), String>> + Send;
 }
 
-/// Maps a message to a component function invocation.
-pub trait Mapper: Send + Sync {
-    fn map(&self, msg: &Message) -> Result<Invocation, String>;
-}
-
-/// A resolved function call: function key and JSON arguments.
-pub struct Invocation {
-    pub function_key: String,
-    pub args: Vec<serde_json::Value>,
-}
-
-/// Config-driven mapper. Resolves the target function and translates the
-/// message body into arguments. If no function key is provided, the component
-/// must export exactly one function.
-///
-/// For JSON object bodies, maps fields to function parameters by name. For
-/// single-parameter functions with a non-object body (or text/plain), passes
-/// the value directly as the sole argument.
-pub struct DefaultMapper {
-    function_key: String,
-    params: Vec<FunctionParam>,
-}
-
-impl DefaultMapper {
-    // Create from a component, optionally specifying the target function.
-    // If `function_key` is `None`, the component must export exactly one
-    // function.
-    fn from_component(component: &Component, function_key: Option<String>) -> Result<Self, String> {
-        let function_key = match function_key {
-            Some(key) => key,
-            None => {
-                let functions = &component.functions;
-                if functions.len() != 1 {
-                    return Err(format!(
-                        "default mapping currently requires exactly 1 exported function, \
-                         '{}' has {}",
-                        component.metadata.name,
-                        functions.len()
-                    ));
-                }
-                functions.keys().next().unwrap().clone()
-            }
-        };
-
-        let function = component.functions.get(&function_key).ok_or_else(|| {
-            format!(
-                "function '{}' not found in '{}'",
-                function_key, component.metadata.name
-            )
-        })?;
-
-        Ok(Self {
-            function_key,
-            params: function.params().to_vec(),
-        })
-    }
-
-    // Parse the message body according to content-type.
-    fn parse_body(msg: &Message) -> Result<serde_json::Value, String> {
-        let content_type = msg.headers().content_type().unwrap_or("application/json");
-        match content_type {
-            "application/json" => serde_json::from_slice(msg.body())
-                .map_err(|e| format!("failed to parse body as JSON: {e}")),
-            "text/plain" => {
-                let text = std::str::from_utf8(msg.body())
-                    .map_err(|e| format!("body is not valid UTF-8: {e}"))?;
-                Ok(serde_json::Value::String(text.to_string()))
-            }
-            other => Err(format!("unsupported content-type: {other}")),
-        }
-    }
-
-    // Map a JSON object body to positional arguments by matching parameter
-    // names. Returns an error for missing required parameters and uses null
-    // for missing optional ones.
-    fn map_named(
-        params: &[FunctionParam],
-        obj: &serde_json::Map<String, serde_json::Value>,
-    ) -> Result<Vec<serde_json::Value>, String> {
-        let mut args = Vec::with_capacity(params.len());
-        for param in params {
-            match obj.get(&param.name) {
-                Some(value) => args.push(value.clone()),
-                None if param.is_optional => args.push(serde_json::Value::Null),
-                None => {
-                    let expected_type = param
-                        .json_schema
-                        .get("type")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("unknown");
-                    return Err(format!(
-                        "missing required parameter '{}' (expected {})",
-                        param.name, expected_type
-                    ));
-                }
-            }
-        }
-        Ok(args)
-    }
-}
-
-impl Mapper for DefaultMapper {
-    fn map(&self, msg: &Message) -> Result<Invocation, String> {
-        let mut args = if self.params.is_empty() {
-            vec![]
-        } else {
-            let value = Self::parse_body(msg)?;
-
-            // JSON object body with named parameters: map by name.
-            if let serde_json::Value::Object(ref obj) = value {
-                if self.params.len() > 1 || obj.contains_key(&self.params[0].name) {
-                    Self::map_named(&self.params, obj)?
-                } else {
-                    // Single param, no name match: pass whole object (record type).
-                    vec![value]
-                }
-            } else {
-                // Non-object body (bare value or text): single param only.
-                if self.params.len() > 1 {
-                    return Err(format!(
-                        "non-object body cannot be mapped to {} parameters",
-                        self.params.len()
-                    ));
-                }
-                vec![value]
-            }
-        };
-
-        // If a param expects a `string` but the mapped value is not already a
-        // JSON string, stringify it.
-        for (param, arg) in self.params.iter().zip(args.iter_mut()) {
-            let expects_string =
-                param.json_schema.get("type").and_then(|t| t.as_str()) == Some("string");
-            if expects_string && !matches!(arg, serde_json::Value::String(_)) {
-                *arg = serde_json::Value::String(
-                    serde_json::to_string(arg)
-                        .map_err(|e| format!("failed to stringify body for string param: {e}"))?,
-                );
-            }
-        }
-
-        Ok(Invocation {
-            function_key: self.function_key.clone(),
-            args,
-        })
-    }
-}
-
 /// Handler that invokes a Wasm component per message.
 ///
-/// For domain components (mapped mode), uses a `Mapper` to translate the
-/// message into a function call. For components exporting the WIT `handler`
-/// interface (direct mode), bypasses the mapper entirely.
+/// For domain components (mapped mode), uses a `MessageMapper` to translate
+/// the message into a function call. For components exporting the WIT
+/// `handler` interface (direct mode), bypasses the mapper entirely.
 pub struct Activator {
     invoker: Arc<dyn ComponentInvoker>,
     component_name: String,
@@ -178,19 +35,20 @@ pub struct Activator {
 
 enum InvocationMode {
     Direct,
-    Mapped { mapper: Box<dyn Mapper> },
+    Mapped { mapper: Box<MessageMapper> },
 }
 
 impl Activator {
     /// Create an activator for the named component.
     ///
-    /// If `mapper` is `None`, creates a `DefaultMapper` that requires the
-    /// component to export exactly one function. The default mapper also
-    /// currently requires the target function to have 0 or 1 parameters.
+    /// `function_key` selects the target export; if `None`, the component
+    /// must export exactly one function. `config` carries the four
+    /// mapping-related blocks (see [`MappingConfig`]).
     pub fn new(
         invoker: Arc<dyn ComponentInvoker>,
         component_name: &str,
-        mapper: Option<Box<dyn Mapper>>,
+        function_key: Option<String>,
+        config: MappingConfig,
         reply_publisher: Option<Arc<dyn ReplyPublisher>>,
     ) -> Result<Self, String> {
         let component = invoker
@@ -200,11 +58,13 @@ impl Activator {
         let mode = if Self::exports_handler_interface(component) {
             InvocationMode::Direct
         } else {
-            let mapper = match mapper {
-                Some(m) => m,
-                None => Box::new(DefaultMapper::from_component(component, None)?),
-            };
-            InvocationMode::Mapped { mapper }
+            InvocationMode::Mapped {
+                mapper: Box::new(MessageMapper::from_component(
+                    component,
+                    function_key,
+                    config,
+                )?),
+            }
         };
 
         Ok(Self {
@@ -228,48 +88,55 @@ impl Handler for Activator {
         match &self.mode {
             InvocationMode::Direct => Err("direct handler mode not yet implemented".to_string()),
             InvocationMode::Mapped { mapper } => {
-                let invocation = mapper.map(&msg)?;
-                let mut context = std::collections::HashMap::new();
+                let invocation = mapper.to_invocation(&msg)?;
+
+                // Collect propagated headers from the inbound message.
+                let mut propagated: HashMap<String, String> = HashMap::new();
                 for key in PROPAGATED_HEADERS {
                     if let Some(val) = msg.headers().get::<&str>(key) {
-                        context.insert((*key).to_string(), val.to_string());
+                        propagated.insert((*key).to_string(), val.to_string());
                     }
                 }
-                let context = (!context.is_empty()).then_some(context);
-                let result = self
-                    .invoker
-                    .invoke(
-                        &self.component_name,
-                        &invocation.function_key,
-                        invocation.args,
-                        context,
-                        None,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
+
+                // Scope the propagation context for the invocation. Downstream
+                // code (e.g. host imports for outbound HTTP) reads via the
+                // task-local. The explicit scope here is the boundary.
+                let invoke_fut = self.invoker.invoke(
+                    &self.component_name,
+                    invocation.function_key.as_str(),
+                    invocation.args,
+                    None,
+                );
+                let result = if propagated.is_empty() {
+                    invoke_fut.await
+                } else {
+                    let ctx = PropagationContext {
+                        entries: propagated.clone(),
+                    };
+                    PROPAGATION_CONTEXT.scope(Some(ctx), invoke_fut).await
+                }
+                .map_err(|e| e.to_string())?;
 
                 if let Some(reply_to) = msg.headers().reply_to() {
                     let publisher = self.reply_publisher.as_ref().ok_or_else(|| {
                         format!("reply-to '{reply_to}' requested but no reply publisher available")
                     })?;
-                    let content_type = msg.headers().content_type();
-                    let body = match content_type {
-                        Some("text/plain") => match &result {
-                            serde_json::Value::String(s) => s.as_bytes().to_vec(),
-                            other => other.to_string().into_bytes(),
-                        },
-                        _ => serde_json::to_vec(&result)
-                            .map_err(|e| format!("failed to serialize reply: {e}"))?,
-                    };
-                    let mut builder = MessageBuilder::new(body);
+
+                    // Reply propagation: the propagated context plus content-type
+                    // and correlation-id echoed from the inbound message.
+                    if let Some(ct) = msg.headers().content_type() {
+                        propagated.insert(MessageHeaders::CONTENT_TYPE.to_string(), ct.to_string());
+                    }
                     if let Some(corr_id) = msg.headers().correlation_id() {
-                        builder = builder.header(header::CORRELATION_ID, corr_id);
+                        propagated.insert(
+                            MessageHeaders::CORRELATION_ID.to_string(),
+                            corr_id.to_string(),
+                        );
                     }
-                    if let Some(ct) = content_type {
-                        builder = builder.header(header::CONTENT_TYPE, ct);
-                    }
+
+                    let reply = mapper.from_invocation_result(&result, propagated)?;
                     publisher
-                        .publish(reply_to, builder.build())
+                        .publish(reply_to, reply)
                         .await
                         .map_err(|e| format!("failed to publish reply: {e}"))?;
                 } else {
@@ -460,13 +327,14 @@ mod tests {
             invoker,
             "guest",
             None,
+            MappingConfig::default(),
             Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
         )
         .unwrap();
 
         let msg = MessageBuilder::new(b"21".to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::REPLY_TO, "replies")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::REPLY_TO, "replies")
             .build();
 
         let consumer = {
@@ -496,10 +364,10 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(invoker, "guest", None, None) {
-            Ok(_) => panic!("expected error for multi-function component without mapper"),
+        match Activator::new(invoker, "guest", None, MappingConfig::default(), None) {
+            Ok(_) => panic!("expected error for multi-function component without function key"),
             Err(err) => assert!(
-                err.contains("default mapping currently requires exactly 1 exported function"),
+                err.contains("must specify a 'function'"),
                 "unexpected error: {err}"
             ),
         }
@@ -518,7 +386,7 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(invoker, "nonexistent", None, None) {
+        match Activator::new(invoker, "nonexistent", None, MappingConfig::default(), None) {
             Ok(_) => panic!("expected error for nonexistent component"),
             Err(err) => assert!(
                 err.contains("component 'nonexistent' not found"),
@@ -528,7 +396,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn custom_mapper_is_used() {
+    async fn param_mapping_substitutes_from_message_body() {
         let wasm = single_function_wasm();
         let toml_content = format!(
             r#"
@@ -540,30 +408,31 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        struct TestMapper;
-        impl Mapper for TestMapper {
-            fn map(&self, _msg: &Message) -> Result<Invocation, String> {
-                Ok(Invocation {
-                    function_key: "double".to_string(),
-                    args: vec![serde_json::json!(7)],
-                })
-            }
-        }
-
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
+        // Mapping remaps the message shape onto the function's param.
+        // The body has `n` but `double` expects `value`. The mapping bridges.
+        let mapping: ParamMapping = [("value".to_string(), serde_json::json!("{body.n}"))]
+            .into_iter()
+            .collect();
+
         let activator = Activator::new(
             invoker,
             "guest",
-            Some(Box::new(TestMapper)),
+            None,
+            MappingConfig {
+                param_mapping: Some(mapping),
+                ..Default::default()
+            },
             Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
         )
         .unwrap();
 
-        let msg = MessageBuilder::new(b"ignored".to_vec())
-            .header(header::REPLY_TO, "replies")
+        let msg = MessageBuilder::new(br#"{"n": 7}"#.to_vec())
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::REPLY_TO, "replies")
             .build();
 
         let consumer = {
@@ -576,7 +445,7 @@ mod tests {
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
 
         let (reply, _) = consumer.await.unwrap().unwrap();
-        // TestMapper sends 7 to double -> 14
+        // double(7) = 14
         assert_eq!(reply.body(), b"14");
     }
 
@@ -601,14 +470,15 @@ mod tests {
             invoker,
             "guest",
             None,
+            MappingConfig::default(),
             Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
         )
         .unwrap();
 
         let msg = MessageBuilder::new(b"\"World\"".to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::REPLY_TO, "replies")
-            .header(header::CORRELATION_ID, "corr-1")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::REPLY_TO, "replies")
+            .header(MessageHeaders::CORRELATION_ID, "corr-1")
             .build();
 
         let consumer = {
@@ -667,13 +537,14 @@ mod tests {
             invoker,
             "guest",
             None,
+            MappingConfig::default(),
             Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
         )
         .unwrap();
 
         let msg = MessageBuilder::new(br#"{"a": 17, "b": 25}"#.to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::REPLY_TO, "replies")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::REPLY_TO, "replies")
             .build();
 
         let consumer = {
@@ -703,18 +574,19 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        let activator = Activator::new(invoker, "guest", None, None).unwrap();
+        let activator =
+            Activator::new(invoker, "guest", None, MappingConfig::default(), None).unwrap();
 
         // Only provide "a", missing "b"
         let msg = MessageBuilder::new(br#"{"a": 5}"#.to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
             .build();
 
         let result = activator.handle(msg).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.contains("missing required parameter 'b'"),
+            err.contains("missing required arg 'b'"),
             "unexpected error: {err}"
         );
     }
@@ -740,13 +612,14 @@ mod tests {
             invoker,
             "guest",
             None,
+            MappingConfig::default(),
             Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
         )
         .unwrap();
 
         let msg = MessageBuilder::new(br#"{"value": 21}"#.to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::REPLY_TO, "replies")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::REPLY_TO, "replies")
             .build();
 
         let consumer = {
@@ -776,10 +649,11 @@ mod tests {
         let toml = create_toml_file(&toml_content);
         let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
 
-        let activator = Activator::new(invoker, "guest", None, None).unwrap();
+        let activator =
+            Activator::new(invoker, "guest", None, MappingConfig::default(), None).unwrap();
 
         let msg = MessageBuilder::new(b"42".to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
             .build();
 
         let result = activator.handle(msg).await;
@@ -812,14 +686,15 @@ mod tests {
             invoker,
             "guest",
             None,
+            MappingConfig::default(),
             Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
         )
         .unwrap();
 
         let msg = MessageBuilder::new(b"World".to_vec())
-            .header(header::CONTENT_TYPE, "text/plain")
-            .header(header::REPLY_TO, "replies")
-            .header(header::CORRELATION_ID, "corr-2")
+            .header(MessageHeaders::CONTENT_TYPE, "text/plain")
+            .header(MessageHeaders::REPLY_TO, "replies")
+            .header(MessageHeaders::CORRELATION_ID, "corr-2")
             .build();
 
         let consumer = {
@@ -860,13 +735,14 @@ mod tests {
             invoker,
             "guest",
             None,
+            MappingConfig::default(),
             Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
         )
         .unwrap();
 
         let msg = MessageBuilder::new(body.to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::REPLY_TO, "replies")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::REPLY_TO, "replies")
             .build();
 
         let consumer = {
@@ -892,5 +768,145 @@ mod tests {
     #[tokio::test]
     async fn string_param_stringifies_number_body() {
         stringify_test(b"42", "42").await;
+    }
+
+    // With a mapping configured, the body is passed to map_args unwrapped:
+    // a non-object body that the template path can't reach must error out
+    // (not be silently wrapped as it would be without a mapping).
+    #[tokio::test]
+    async fn param_mapping_with_non_object_body_errors() {
+        let wasm = single_function_wasm();
+        let toml_content = format!(
+            r#"
+            [component.guest]
+            uri = "{}"
+            "#,
+            wasm.path().display()
+        );
+        let toml = create_toml_file(&toml_content);
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+
+        let mapping: ParamMapping = [("value".to_string(), serde_json::json!("{body.n}"))]
+            .into_iter()
+            .collect();
+
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            None,
+            MappingConfig {
+                param_mapping: Some(mapping),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        // Bare number body, but the mapping template references `n` which has
+        // no path inside a non-object value.
+        let msg = MessageBuilder::new(b"42".to_vec())
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .build();
+
+        let result = activator.handle(msg).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("unknown path"), "unexpected error: {err}");
+    }
+
+    // When a mapping references a path that doesn't exist in the message body,
+    // the error names the missing path so the author can correct the template.
+    #[tokio::test]
+    async fn param_mapping_with_missing_path_errors() {
+        let wasm = single_function_wasm();
+        let toml_content = format!(
+            r#"
+            [component.guest]
+            uri = "{}"
+            "#,
+            wasm.path().display()
+        );
+        let toml = create_toml_file(&toml_content);
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+
+        let mapping: ParamMapping = [("value".to_string(), serde_json::json!("{body.nope}"))]
+            .into_iter()
+            .collect();
+
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            None,
+            MappingConfig {
+                param_mapping: Some(mapping),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+
+        let msg = MessageBuilder::new(br#"{"n": 7}"#.to_vec())
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .build();
+
+        let result = activator.handle(msg).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("body.nope"),
+            "expected error to mention missing path 'body.nope', got: {err}"
+        );
+    }
+
+    // The result_mapping maps the WIT return value into the reply body.
+    // Here a path-only template wraps the scalar return in an object.
+    #[tokio::test]
+    async fn result_mapping_transforms_reply_body() {
+        let wasm = single_function_wasm();
+        let toml_content = format!(
+            r#"
+            [component.guest]
+            uri = "{}"
+            "#,
+            wasm.path().display()
+        );
+        let toml = create_toml_file(&toml_content);
+        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+
+        let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
+        let replies = Arc::new(LocalChannel::with_defaults());
+        registry.register("replies", replies.clone());
+
+        // Static body template: ignores the WIT return value and emits this.
+        let result_mapping = serde_json::json!({ "body": { "status": "ok", "label": "doubled" } });
+
+        let activator = Activator::new(
+            invoker,
+            "guest",
+            None,
+            MappingConfig {
+                result_mapping: Some(result_mapping),
+                ..Default::default()
+            },
+            Some(Arc::clone(&registry) as Arc<dyn ReplyPublisher>),
+        )
+        .unwrap();
+
+        let msg = MessageBuilder::new(b"21".to_vec())
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::REPLY_TO, "replies")
+            .build();
+
+        let consumer = {
+            let ch = replies.clone();
+            tokio::spawn(async move { ch.consume("test").await })
+        };
+        tokio::task::yield_now().await;
+
+        let result = activator.handle(msg).await;
+        assert!(result.is_ok(), "handle failed: {:?}", result.err());
+
+        let (reply, _) = consumer.await.unwrap().unwrap();
+        assert_eq!(reply.body(), br#"{"label":"doubled","status":"ok"}"#);
     }
 }

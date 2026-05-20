@@ -3,6 +3,7 @@ type = "http"
 port = 8080
 
 [server.api.route.hello]
+method = "POST"
 path = "/hello"
 channel = "names"
 

@@ -9,7 +9,12 @@ pub use config::types::{
     CategoryClaim, Condition, ConfigHandler, DefinitionLoader, Operator, PropertyMap, Selector,
 };
 pub use context::{PROPAGATION_CONTEXT, PropagationContext};
-pub use message::{Message, MessageBuilder, MessagePublisher, ReturnAddress, header};
+pub use mapping::{
+    Invocation, MappingConfig, MessageMapper, ParamEncoding, ParamMapping, ResultDecoding,
+};
+pub use message::{
+    Message, MessageBuilder, MessageHeaders, MessagePublisher, PropagatedHeader, ReturnAddress,
+};
 pub use runtime::{Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{
@@ -25,10 +30,12 @@ pub mod types;
 
 pub(crate) mod config;
 pub(crate) mod context;
+pub mod mapping;
 pub(crate) mod message;
 #[cfg(feature = "messaging")]
 mod messaging;
 mod runtime;
+pub mod schema;
 pub(crate) mod service;
 
 #[cfg(feature = "messaging")]

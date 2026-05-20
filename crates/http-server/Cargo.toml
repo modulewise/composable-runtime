@@ -12,10 +12,12 @@ keywords = ["wasm"]
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
-composable-runtime = { version = "0.5.0-alpha.3", path = "../..", features = ["messaging"] }
+composable-runtime = { version = "0.5.0-alpha.4", path = "../..", features = ["messaging"] }
+form_urlencoded = "1"
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util.workspace = true
+jsonschema.workspace = true
 opentelemetry.workspace = true
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime", "trace"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "http-proto", "reqwest-client", "trace"] }

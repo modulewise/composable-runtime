@@ -1,3 +1,5 @@
 [component.greeter]
 uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
-subscription = "names"
+
+[subscription.names]
+component = "greeter"

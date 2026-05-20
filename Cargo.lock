@@ -681,14 +681,16 @@ dependencies = [
 
 [[package]]
 name = "composable-http-server"
-version = "0.5.0-alpha.3"
+version = "0.5.0-alpha.4"
 dependencies = [
  "anyhow",
  "clap",
  "composable-runtime",
+ "form_urlencoded",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "jsonschema",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -702,7 +704,7 @@ dependencies = [
 
 [[package]]
 name = "composable-interceptor"
-version = "0.5.0-alpha.3"
+version = "0.5.0-alpha.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -717,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "composable-otel"
-version = "0.5.0-alpha.3"
+version = "0.5.0-alpha.4"
 dependencies = [
  "anyhow",
  "composable-runtime",
@@ -734,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "composable-runtime"
-version = "0.5.0-alpha.3"
+version = "0.5.0-alpha.4"
 dependencies = [
  "anyhow",
  "clap",

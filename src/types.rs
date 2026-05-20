@@ -274,12 +274,17 @@ pub trait ComponentInvoker: Send + Sync {
     fn list_components(&self, selector: Option<&crate::config::types::Selector>)
     -> Vec<&Component>;
 
+    /// Invoke a component function.
+    ///
+    /// Propagation context (e.g. W3C tracecontext) is read from the ambient
+    /// task-local [`PROPAGATION_CONTEXT`](crate::PROPAGATION_CONTEXT). Callers
+    /// that need to establish or extend propagation must wrap the call with
+    /// `PROPAGATION_CONTEXT.scope(...).await` at their boundary.
     fn invoke<'a>(
         &'a self,
         component_name: &'a str,
         function_name: &'a str,
         args: Vec<serde_json::Value>,
-        context: Option<HashMap<String, String>>,
         env: Option<HashMap<String, String>>,
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
 }
