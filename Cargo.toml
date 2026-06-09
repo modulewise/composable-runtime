@@ -13,7 +13,7 @@ keywords = ["wasm"]
 members = [".", "crates/http-server", "crates/interceptor", "crates/opentelemetry"]
 
 [workspace.package]
-version = "0.5.0-alpha.3"
+version = "0.5.0-alpha.4"
 license = "Apache-2.0"
 repository = "https://github.com/modulewise/composable-runtime"
 edition = "2024"
@@ -24,6 +24,7 @@ clap = { version = "4.6", features = ["derive"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server-graceful", "tokio"] }
+jsonschema = { version = "0.46", default-features = false }
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", default-features = false }
 opentelemetry_sdk = "0.31"
@@ -42,7 +43,7 @@ wit-parser = "0.245"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-composable-interceptor = { version = "0.5.0-alpha.3", path = "crates/interceptor" }
+composable-interceptor = { version = "0.5.0-alpha.4", path = "crates/interceptor" }
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 oci-client = "0.16"
@@ -69,7 +70,7 @@ wit-component = "0.245"
 wit-parser.workspace = true
 
 [dev-dependencies]
-jsonschema = { version = "0.46", default-features = false }
+jsonschema.workspace = true
 tempfile.workspace = true
 wat.workspace = true
 

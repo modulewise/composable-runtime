@@ -19,7 +19,7 @@ use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::composition::registry::{CapabilityRegistry, ComponentRegistry};
-use crate::context::{PROPAGATION_CONTEXT, PropagationContext};
+use crate::context::PROPAGATION_CONTEXT;
 use crate::types::{
     Component, ComponentInvoker, ComponentMetadata, ComponentState, Function, PROPAGATED_HEADERS,
 };
@@ -137,7 +137,6 @@ impl ComponentInvoker for ComponentHost {
         component_name: &'a str,
         function_name: &'a str,
         args: Vec<serde_json::Value>,
-        context: Option<HashMap<String, String>>,
         env: Option<HashMap<String, String>>,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send + 'a>,
@@ -145,15 +144,8 @@ impl ComponentInvoker for ComponentHost {
         Box::pin(async move {
             let env_pairs: Vec<(String, String)> =
                 env.map(|m| m.into_iter().collect()).unwrap_or_default();
-            let fut = self.invoke(component_name, function_name, args, &env_pairs);
-            match context {
-                Some(entries) => {
-                    let ctx = PropagationContext { entries };
-                    PROPAGATION_CONTEXT.scope(Some(ctx), fut).await
-                }
-                // None: inherit upstream propagation context if present.
-                None => fut.await,
-            }
+            self.invoke(component_name, function_name, args, &env_pairs)
+                .await
         })
     }
 }

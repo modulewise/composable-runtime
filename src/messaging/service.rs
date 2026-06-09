@@ -6,53 +6,133 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use crate::config::types::{CategoryClaim, ConfigHandler, PropertyMap};
-use crate::context::PROPAGATION_CONTEXT;
-use crate::message::{Message, MessageBuilder, MessagePublisher, header};
+use crate::message::{Message, MessageBuilder, MessageHeaders, MessagePublisher};
 use crate::service::Service;
-use crate::types::{ComponentInvoker, PROPAGATED_HEADERS};
+use crate::types::ComponentInvoker;
 
 use super::bus::{Bus, LocalBus, LocalChannelFactory, SubscriptionConfig};
 use super::reply::ReplyHandler;
 
-// Claims the `subscription` property on the `component` category.
+// Claims the `[subscription.*]` category. Each entry connects a component to
+// a channel. The entry's `channel` field defaults to the subscription name.
+// An optional `mapping` declares how the message body maps to the target
+// function's WIT args.
 struct MessagingConfigHandler {
     subscriptions: Arc<Mutex<Vec<SubscriptionConfig>>>,
 }
 
 impl ConfigHandler for MessagingConfigHandler {
     fn claimed_categories(&self) -> Vec<CategoryClaim> {
-        vec![]
+        vec![CategoryClaim::all("subscription")]
     }
 
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
-        HashMap::from([("component", ["subscription"].as_slice())])
+        HashMap::from([(
+            "subscription",
+            [
+                "channel",
+                "component",
+                "function",
+                "param-mapping",
+                "param-encoding",
+                "result-decoding",
+                "result-mapping",
+            ]
+            .as_slice(),
+        )])
     }
 
     fn handle_category(
         &mut self,
         category: &str,
-        _name: &str,
-        _properties: PropertyMap,
-    ) -> Result<()> {
-        anyhow::bail!("MessagingConfigHandler does not own category '{category}'")
-    }
-
-    fn handle_properties(
-        &mut self,
-        _category: &str,
         name: &str,
-        properties: PropertyMap,
+        mut properties: PropertyMap,
     ) -> Result<()> {
-        if let Some(value) = properties.get("subscription") {
-            let channel_name = value
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("subscription must be a string"))?
-                .to_string();
-            self.subscriptions.lock().unwrap().push(SubscriptionConfig {
-                component_name: name.to_string(),
-                channel_name,
-            });
+        if category != "subscription" {
+            anyhow::bail!("MessagingConfigHandler does not own category '{category}'");
         }
+
+        let component_name = match properties.remove("component") {
+            Some(serde_json::Value::String(s)) => s,
+            Some(other) => {
+                anyhow::bail!("Subscription '{name}': 'component' must be a string, got {other}");
+            }
+            None => {
+                anyhow::bail!("Subscription '{name}' is missing required 'component'");
+            }
+        };
+
+        let channel_name = match properties.remove("channel") {
+            Some(serde_json::Value::String(s)) => s,
+            Some(other) => {
+                anyhow::bail!("Subscription '{name}': 'channel' must be a string, got {other}");
+            }
+            None => name.to_string(),
+        };
+
+        let function_key = match properties.remove("function") {
+            Some(serde_json::Value::String(s)) => Some(s),
+            Some(other) => {
+                anyhow::bail!("Subscription '{name}': 'function' must be a string, got {other}");
+            }
+            None => None,
+        };
+
+        let param_mapping = match properties.remove("param-mapping") {
+            Some(serde_json::Value::Object(map)) => Some(map.into_iter().collect()),
+            Some(other) => {
+                anyhow::bail!(
+                    "Subscription '{name}': 'param-mapping' must be an object, got {other}"
+                );
+            }
+            None => None,
+        };
+
+        let param_encoding = match properties.remove("param-encoding") {
+            Some(serde_json::Value::Object(map)) => Some(
+                crate::mapping::ParamEncoding::parse(&map)
+                    .map_err(|e| anyhow::anyhow!("Subscription '{name}': 'param-encoding': {e}"))?,
+            ),
+            Some(other) => {
+                anyhow::bail!(
+                    "Subscription '{name}': 'param-encoding' must be an object, got {other}"
+                );
+            }
+            None => None,
+        };
+
+        // The `result-mapping` is a single template Value (not a
+        // name => template map like `param-mapping`), so any JSON shape is
+        // accepted: object/array templates with `{path}` placeholders, a
+        // path-only template string, or a literal scalar. The `map_result`
+        // function validates substitution at runtime.
+        let result_mapping = properties.remove("result-mapping");
+
+        let result_decoding = match properties.remove("result-decoding") {
+            Some(serde_json::Value::Object(map)) => {
+                Some(crate::mapping::ResultDecoding::parse(&map).map_err(|e| {
+                    anyhow::anyhow!("Subscription '{name}': 'result-decoding': {e}")
+                })?)
+            }
+            Some(other) => {
+                anyhow::bail!(
+                    "Subscription '{name}': 'result-decoding' must be an object, got {other}"
+                );
+            }
+            None => None,
+        };
+
+        self.subscriptions.lock().unwrap().push(SubscriptionConfig {
+            channel_name,
+            component_name,
+            function_key,
+            mapping: crate::mapping::MappingConfig {
+                param_mapping,
+                param_encoding,
+                result_decoding,
+                result_mapping,
+            },
+        });
         Ok(())
     }
 }
@@ -113,58 +193,108 @@ struct BusPublisher {
     reply_handler: ReplyHandler,
 }
 
-impl BusPublisher {
-    // Build a message from body + headers, merging propagated context.
-    fn build_message(body: Vec<u8>, headers: HashMap<String, String>) -> Message {
-        let mut builder = MessageBuilder::new(body);
-        // Merge propagated context entries into outgoing message headers.
-        if let Some(entries) = PROPAGATION_CONTEXT
-            .try_with(|ctx| ctx.as_ref().map(|c| c.entries.clone()))
-            .ok()
-            .flatten()
-        {
-            for key in PROPAGATED_HEADERS {
-                if let Some(val) = entries.get(*key) {
-                    builder = builder.header(*key, val.as_str());
-                }
-            }
-        }
-        // Caller-supplied headers may override propagated entries.
-        for (key, value) in headers {
-            builder = builder.header(key, value);
-        }
-        builder.build()
-    }
-}
-
 impl MessagePublisher for BusPublisher {
     fn publish<'a>(
         &'a self,
         channel: &'a str,
-        body: Vec<u8>,
-        headers: HashMap<String, String>,
+        message: Message,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move {
-            let msg = Self::build_message(body, headers);
-            self.bus.publish(channel, msg).await
-        })
+        Box::pin(async move { self.bus.publish(channel, message).await })
     }
 
     fn publish_request<'a>(
         &'a self,
         channel: &'a str,
-        body: Vec<u8>,
-        mut headers: HashMap<String, String>,
+        message: Message,
     ) -> crate::message::ReplyFuture<'a> {
         Box::pin(async move {
             let return_address = self.reply_handler.return_address();
-            headers.insert(
-                header::REPLY_TO.to_string(),
-                return_address.channel().to_string(),
-            );
-            let msg = Self::build_message(body, headers);
+            let msg = MessageBuilder::from_message(message)
+                .header(MessageHeaders::REPLY_TO, return_address.channel())
+                .build();
             self.bus.publish(channel, msg).await?;
             Ok(return_address)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_handler() -> (MessagingConfigHandler, Arc<Mutex<Vec<SubscriptionConfig>>>) {
+        let subs = Arc::new(Mutex::new(Vec::new()));
+        (
+            MessagingConfigHandler {
+                subscriptions: Arc::clone(&subs),
+            },
+            subs,
+        )
+    }
+
+    #[test]
+    fn subscription_parses_result_decoding() {
+        let (mut handler, subs) = make_handler();
+        let mut props = PropertyMap::new();
+        props.insert(
+            "component".to_string(),
+            serde_json::json!("transport-client"),
+        );
+        props.insert(
+            "result-decoding".to_string(),
+            serde_json::json!({ "body": "{headers.content-type}" }),
+        );
+        handler
+            .handle_category("subscription", "events", props)
+            .unwrap();
+        let subs = subs.lock().unwrap();
+        assert_eq!(subs.len(), 1);
+        assert!(subs[0].mapping.result_decoding.is_some());
+    }
+
+    #[test]
+    fn subscription_result_decoding_non_object_is_error() {
+        let (mut handler, _subs) = make_handler();
+        let mut props = PropertyMap::new();
+        props.insert("component".to_string(), serde_json::json!("c"));
+        props.insert("result-decoding".to_string(), serde_json::json!("bad"));
+        let err = handler
+            .handle_category("subscription", "x", props)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("must be an object"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn subscription_parses_param_encoding() {
+        let (mut handler, subs) = make_handler();
+        let mut props = PropertyMap::new();
+        props.insert(
+            "component".to_string(),
+            serde_json::json!("transport-client"),
+        );
+        props.insert(
+            "param-encoding".to_string(),
+            serde_json::json!({ "body": "{headers.content-type}" }),
+        );
+        handler
+            .handle_category("subscription", "events", props)
+            .unwrap();
+        let subs = subs.lock().unwrap();
+        assert_eq!(subs.len(), 1);
+        assert!(subs[0].mapping.param_encoding.is_some());
+    }
+
+    #[test]
+    fn subscription_param_encoding_non_object_is_error() {
+        let (mut handler, _subs) = make_handler();
+        let mut props = PropertyMap::new();
+        props.insert("component".to_string(), serde_json::json!("c"));
+        props.insert("param-encoding".to_string(), serde_json::json!("bad"));
+        let err = handler
+            .handle_category("subscription", "x", props)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("must be an object"), "unexpected error: {err}");
     }
 }

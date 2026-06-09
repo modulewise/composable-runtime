@@ -58,11 +58,13 @@ type = "http"
 port = 8888
 
 [server.api.route.hello]
+method = "GET"
 path = "/hello/{name}"
 component = "hello"
 function = "greet"
 
 [server.api.route.bonjour]
+method = "POST"
 path = "/bonjour"
 channel = "names"
 
@@ -72,5 +74,7 @@ uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm
 [component.bonjour]
 uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
 config.greeting = "Bonjour"
-subscription = "names"
+
+[subscription.names]
+component = "bonjour"
 ```

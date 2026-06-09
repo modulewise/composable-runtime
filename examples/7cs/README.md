@@ -222,14 +222,18 @@ type = "http"
 port = 8080
 
 [server.api.route.hello]
+method = "POST"
 path = "/hello"
+content-type = "text/plain"
 channel = "names"
 
 [component.greeter]
 uri = "./lib/configured-greeter.wasm"
 imports = ["translator"]
 config.locale = "nl-NL"
-subscription = "names"
+
+[subscription.names]
+component = "greeter"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
@@ -285,7 +289,9 @@ Notice the greeter can now be configured with a `LOCALE` env var or fallback to 
 uri = "./lib/configured-greeter.wasm"
 imports = ["translator"]
 config.locale = "${process:env:LOCALE|en-US}"
-subscription = "names"
+
+[subscription.names]
+component = "greeter"
 
 [component.translator]
 uri = "./lib/capable-translator.wasm"
@@ -301,7 +307,9 @@ type = "http"
 port = 8080
 
 [server.api.route.hello]
+method = "POST"
 path = "/hello"
+content-type = "text/plain"
 channel = "names"
 
 [capability.http-client]

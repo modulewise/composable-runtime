@@ -1,6 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use composable_runtime::{Component, ComponentGraph, FunctionParam, Runtime, Selector};
+use composable_runtime::{
+    Component, ComponentGraph, FunctionParam, MessageBuilder, MessageHeaders, PROPAGATION_CONTEXT,
+    PropagationContext, Runtime, Selector,
+};
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
@@ -153,19 +156,16 @@ async fn main() -> Result<()> {
             runtime.start()?;
 
             let publisher = runtime.publisher();
-            let headers =
-                std::collections::HashMap::from([("content-type".to_string(), content_type)]);
+            let msg = MessageBuilder::new(body.into_bytes())
+                .header(MessageHeaders::CONTENT_TYPE, content_type)
+                .build();
 
             match reply_timeout {
                 None => {
-                    publisher
-                        .publish(&channel, body.into_bytes(), headers)
-                        .await?;
+                    publisher.publish(&channel, msg).await?;
                 }
                 Some(secs) => {
-                    let handle = publisher
-                        .publish_request(&channel, body.into_bytes(), headers)
-                        .await?;
+                    let handle = publisher.publish_request(&channel, msg).await?;
                     let reply =
                         tokio::time::timeout(std::time::Duration::from_secs(secs), handle.take())
                             .await
@@ -219,10 +219,16 @@ async fn run_invoke(
     let final_args =
         parse_invoke_args(args, function.params()).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let result = runtime
-        .invoker()
-        .invoke(component_name, func_name, final_args, context, env)
-        .await?;
+    // Scope the propagation context at the CLI entry point if --ctx provided.
+    let invoker = runtime.invoker();
+    let invoke_fut = invoker.invoke(component_name, func_name, final_args, env);
+    let result = match context {
+        Some(entries) if !entries.is_empty() => {
+            let ctx = PropagationContext { entries };
+            PROPAGATION_CONTEXT.scope(Some(ctx), invoke_fut).await
+        }
+        _ => invoke_fut.await,
+    }?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
@@ -399,7 +405,6 @@ async fn handle_command(
                                                 component_name,
                                                 func_name,
                                                 final_args,
-                                                None,
                                                 env.cloned(),
                                             )
                                             .await

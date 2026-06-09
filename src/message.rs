@@ -6,19 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use uuid::Uuid;
 
+use crate::context::PROPAGATION_CONTEXT;
+use crate::types::PROPAGATED_HEADERS;
+
 /// Return type for [`MessagePublisher::publish_request`].
 pub type ReplyFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Box<dyn ReturnAddress>>> + Send + 'a>>;
-
-/// Well-known header keys.
-pub mod header {
-    pub const ID: &str = "id";
-    pub const TIMESTAMP: &str = "timestamp";
-    pub const TTL: &str = "ttl";
-    pub const CONTENT_TYPE: &str = "content-type";
-    pub const REPLY_TO: &str = "reply-to";
-    pub const CORRELATION_ID: &str = "correlation-id";
-}
 
 /// Header value types.
 #[derive(Debug, Clone, PartialEq)]
@@ -122,9 +115,22 @@ pub struct MessageHeaders {
 }
 
 impl MessageHeaders {
+    /// Unique message identifier.
+    pub const ID: &str = "id";
+    /// Message creation time (Unix epoch milliseconds).
+    pub const TIMESTAMP: &str = "timestamp";
+    /// Message time-to-live in milliseconds.
+    pub const TTL: &str = "ttl";
+    /// MIME type of the body.
+    pub const CONTENT_TYPE: &str = "content-type";
+    /// Return address for replies.
+    pub const REPLY_TO: &str = "reply-to";
+    /// Correlation identifier linking related messages.
+    pub const CORRELATION_ID: &str = "correlation-id";
+
     /// Unique message identifier. Always present on a constructed [`Message`].
     pub fn id(&self) -> &str {
-        match self.map.get(header::ID) {
+        match self.map.get(MessageHeaders::ID) {
             Some(HeaderValue::String(s)) => s.as_str(),
             _ => unreachable!("MessageBuilder guarantees id is present"),
         }
@@ -133,7 +139,7 @@ impl MessageHeaders {
     /// Message creation time (Unix epoch milliseconds). Always present on a
     /// constructed [`Message`].
     pub fn timestamp(&self) -> u64 {
-        match self.map.get(header::TIMESTAMP) {
+        match self.map.get(MessageHeaders::TIMESTAMP) {
             Some(HeaderValue::Integer(n)) => *n as u64,
             _ => unreachable!("MessageBuilder guarantees timestamp is present"),
         }
@@ -141,22 +147,22 @@ impl MessageHeaders {
 
     /// Time-to-live in milliseconds.
     pub fn ttl(&self) -> Option<u64> {
-        self.get(header::TTL)
+        self.get(MessageHeaders::TTL)
     }
 
     /// MIME type of the body.
     pub fn content_type(&self) -> Option<&str> {
-        self.get(header::CONTENT_TYPE)
+        self.get(MessageHeaders::CONTENT_TYPE)
     }
 
     /// Return address for replies.
     pub fn reply_to(&self) -> Option<&str> {
-        self.get(header::REPLY_TO)
+        self.get(MessageHeaders::REPLY_TO)
     }
 
     /// Links related messages across a conversation or task.
     pub fn correlation_id(&self) -> Option<&str> {
-        self.get(header::CORRELATION_ID)
+        self.get(MessageHeaders::CORRELATION_ID)
     }
 
     /// Get a header value by key.
@@ -228,6 +234,15 @@ impl MessageBuilder {
         }
     }
 
+    /// Create a builder pre-populated from an existing [`Message`].
+    /// Subsequent [`header`](Self::header) calls override the inherited values.
+    pub fn from_message(message: Message) -> Self {
+        Self {
+            headers: message.headers.map,
+            body: message.body,
+        }
+    }
+
     /// Set a header.
     pub fn header(mut self, key: impl Into<String>, value: impl Into<HeaderValue>) -> Self {
         self.headers.insert(key.into(), value.into());
@@ -241,21 +256,42 @@ impl MessageBuilder {
     }
 
     /// Build the [`Message`].
+    ///
+    /// If the calling task has a [`PropagationContext`] set, propagation
+    /// headers (e.g. `traceparent`) are merged in unless the caller has
+    /// already provided them (caller-supplied headers take precedence).
     pub fn build(mut self) -> Message {
-        if !self.headers.contains_key(header::ID) {
+        if !self.headers.contains_key(MessageHeaders::ID) {
             self.headers.insert(
-                header::ID.to_string(),
+                MessageHeaders::ID.to_string(),
                 HeaderValue::String(Uuid::new_v4().to_string()),
             );
         }
 
-        if !self.headers.contains_key(header::TIMESTAMP) {
+        if !self.headers.contains_key(MessageHeaders::TIMESTAMP) {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as i64;
-            self.headers
-                .insert(header::TIMESTAMP.to_string(), HeaderValue::Integer(now));
+            self.headers.insert(
+                MessageHeaders::TIMESTAMP.to_string(),
+                HeaderValue::Integer(now),
+            );
+        }
+
+        if let Some(entries) = PROPAGATION_CONTEXT
+            .try_with(|ctx| ctx.as_ref().map(|c| c.entries.clone()))
+            .ok()
+            .flatten()
+        {
+            for key in PROPAGATED_HEADERS {
+                if !self.headers.contains_key(*key)
+                    && let Some(val) = entries.get(*key)
+                {
+                    self.headers
+                        .insert((*key).to_string(), HeaderValue::String(val.clone()));
+                }
+            }
         }
 
         Message {
@@ -271,17 +307,11 @@ pub trait MessagePublisher: Send + Sync {
     fn publish<'a>(
         &'a self,
         channel: &'a str,
-        body: Vec<u8>,
-        headers: HashMap<String, String>,
+        message: Message,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 
     /// Publish a request message and use the return address to await the reply.
-    fn publish_request<'a>(
-        &'a self,
-        channel: &'a str,
-        body: Vec<u8>,
-        headers: HashMap<String, String>,
-    ) -> ReplyFuture<'a>;
+    fn publish_request<'a>(&'a self, channel: &'a str, message: Message) -> ReplyFuture<'a>;
 }
 
 /// Return address for a request-reply exchange.
@@ -291,6 +321,58 @@ pub trait ReturnAddress: Send {
 
     /// Await the reply. Cleans up the ephemeral channel after receiving.
     fn take(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<Message>> + Send>>;
+}
+
+/// One entry in a surface-level header-propagation list.
+///
+/// Parsed from a config string. `"foo"` means both source and target have the
+/// same name (`foo`). `"foo as bar"` is a rename (source `foo`, target `bar`).
+/// Whitespace around the names and the `as` keyword is tolerated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropagatedHeader {
+    source: String,
+    target: Option<String>,
+}
+
+impl PropagatedHeader {
+    /// Parse a propagate entry from its config-string form.
+    ///
+    /// Accepts `"<source>"` or `"<source> as <target>"` (rename).
+    /// Returns an error for empty source, empty target, or malformed input.
+    pub fn parse(s: &str) -> std::result::Result<Self, String> {
+        if s.trim().is_empty() {
+            return Err("propagate entry is empty".to_string());
+        }
+        if let Some((src, tgt)) = s.split_once(" as ") {
+            let source = src.trim().to_string();
+            let target = tgt.trim().to_string();
+            if source.is_empty() {
+                return Err(format!("propagate entry '{s}' has empty source"));
+            }
+            if target.is_empty() {
+                return Err(format!("propagate entry '{s}' has empty target"));
+            }
+            Ok(Self {
+                source,
+                target: Some(target),
+            })
+        } else {
+            Ok(Self {
+                source: s.trim().to_string(),
+                target: None,
+            })
+        }
+    }
+
+    /// The source name (the side being read from).
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// The target name. Equals `source` when no rename was specified.
+    pub fn target(&self) -> &str {
+        self.target.as_deref().unwrap_or(&self.source)
+    }
 }
 
 #[cfg(test)]
@@ -309,7 +391,7 @@ mod tests {
     #[test]
     fn builder_preserves_user_provided_id() {
         let msg = MessageBuilder::new(b"hello".to_vec())
-            .header(header::ID, "custom-id-1")
+            .header(MessageHeaders::ID, "custom-id-1")
             .build();
 
         assert_eq!(msg.headers().id(), "custom-id-1");
@@ -318,10 +400,10 @@ mod tests {
     #[test]
     fn builder_with_well_known_headers() {
         let msg = MessageBuilder::new(b"{}".to_vec())
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::CORRELATION_ID, "corr-1")
-            .header(header::TTL, 5000_i64)
-            .header(header::REPLY_TO, "reply-chan")
+            .header(MessageHeaders::CONTENT_TYPE, "application/json")
+            .header(MessageHeaders::CORRELATION_ID, "corr-1")
+            .header(MessageHeaders::TTL, 5000_i64)
+            .header(MessageHeaders::REPLY_TO, "reply-chan")
             .build();
 
         assert_eq!(msg.headers().content_type(), Some("application/json"));
@@ -381,7 +463,7 @@ mod tests {
     fn builder_with_hashmap_headers() {
         let mut user_headers = HashMap::new();
         user_headers.insert(
-            header::CONTENT_TYPE.to_string(),
+            MessageHeaders::CONTENT_TYPE.to_string(),
             HeaderValue::from("text/plain"),
         );
         user_headers.insert("x-custom".to_string(), HeaderValue::from("value"));
@@ -398,15 +480,57 @@ mod tests {
     #[test]
     fn headers_iter() {
         let msg = MessageBuilder::new(b"".to_vec())
-            .header(header::CONTENT_TYPE, "text/plain")
+            .header(MessageHeaders::CONTENT_TYPE, "text/plain")
             .build();
 
         // At minimum: id, timestamp, content-type
         assert!(msg.headers().len() >= 3);
 
         let keys: Vec<&str> = msg.headers().iter().map(|(k, _)| k).collect();
-        assert!(keys.contains(&header::ID));
-        assert!(keys.contains(&header::TIMESTAMP));
-        assert!(keys.contains(&header::CONTENT_TYPE));
+        assert!(keys.contains(&MessageHeaders::ID));
+        assert!(keys.contains(&MessageHeaders::TIMESTAMP));
+        assert!(keys.contains(&MessageHeaders::CONTENT_TYPE));
+    }
+
+    #[test]
+    fn propagated_header_identity() {
+        let p = PropagatedHeader::parse("X-Request-Id").unwrap();
+        assert_eq!(p.source(), "X-Request-Id");
+        assert_eq!(p.target(), "X-Request-Id");
+    }
+
+    #[test]
+    fn propagated_header_rename() {
+        let p = PropagatedHeader::parse("X-Request-Id as request-id").unwrap();
+        assert_eq!(p.source(), "X-Request-Id");
+        assert_eq!(p.target(), "request-id");
+    }
+
+    #[test]
+    fn propagated_header_tolerates_whitespace() {
+        let p = PropagatedHeader::parse("  foo  as  bar  ").unwrap();
+        assert_eq!(p.source(), "foo");
+        assert_eq!(p.target(), "bar");
+    }
+
+    #[test]
+    fn propagated_header_empty_input_errors() {
+        assert!(PropagatedHeader::parse("").is_err());
+        assert!(PropagatedHeader::parse("   ").is_err());
+    }
+
+    #[test]
+    fn propagated_header_empty_source_or_target_errors() {
+        assert!(PropagatedHeader::parse(" as bar").is_err());
+        assert!(PropagatedHeader::parse("foo as ").is_err());
+    }
+
+    #[test]
+    fn propagated_header_as_in_name_not_treated_as_separator() {
+        // `as` only separates when surrounded by spaces. A name containing
+        // `as` substring without surrounding spaces should not split.
+        let p = PropagatedHeader::parse("classification").unwrap();
+        assert_eq!(p.source(), "classification");
+        assert_eq!(p.target(), "classification");
     }
 }

@@ -171,7 +171,7 @@ async fn test_host_capability_invoked() {
 
     let result = runtime
         .invoker()
-        .invoke("guest", "get-value", vec![], None, None)
+        .invoke("guest", "get-value", vec![], None)
         .await
         .expect("Failed to invoke");
 
@@ -266,7 +266,7 @@ async fn test_host_capability_with_config() {
 
     let result = runtime
         .invoker()
-        .invoke("guest", "calc", vec![], None, None)
+        .invoke("guest", "calc", vec![], None)
         .await
         .expect("Failed to invoke");
 
@@ -302,7 +302,7 @@ async fn test_host_capability_with_default_config() {
 
     let result = runtime
         .invoker()
-        .invoke("guest", "calc", vec![], None, None)
+        .invoke("guest", "calc", vec![], None)
         .await
         .expect("Failed to invoke");
 
@@ -401,7 +401,7 @@ async fn test_host_capability_with_state() {
 
     let result = runtime
         .invoker()
-        .invoke("guest", "count-twice", vec![], None, None)
+        .invoke("guest", "count-twice", vec![], None)
         .await
         .expect("Failed to invoke");
 
@@ -437,7 +437,7 @@ async fn test_host_capability_state_isolated_per_instance() {
     // First invocation
     let result1 = runtime
         .invoker()
-        .invoke("guest", "count-twice", vec![], None, None)
+        .invoke("guest", "count-twice", vec![], None)
         .await
         .expect("Failed to invoke");
     assert_eq!(result1, serde_json::json!(2));
@@ -445,7 +445,7 @@ async fn test_host_capability_state_isolated_per_instance() {
     // Second invocation - should start fresh (new instance, new state)
     let result2 = runtime
         .invoker()
-        .invoke("guest", "count-twice", vec![], None, None)
+        .invoke("guest", "count-twice", vec![], None)
         .await
         .expect("Failed to invoke");
     assert_eq!(result2, serde_json::json!(2));

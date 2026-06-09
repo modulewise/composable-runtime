@@ -30,16 +30,15 @@ composable publish config.toml --channel names --body Bob
 
 ## How It Works
 
-1. **Subscription**: The `subscription` property on a component tells the runtime to create a channel and subscribe the component to it. When a message arrives, the runtime invokes the component's exported function with the message body as the argument.
+1. **Subscription**: A `[subscription.<name>]` block declares that a component should be subscribed to a channel. The `channel` field defaults to the subscription's name. When a message arrives on the channel, the runtime invokes the component's function with the message body as the argument. Optional fields: `function` (required when the component exports more than one), and the four mapping blocks - `param-mapping`, `param-encoding`, `result-decoding`, `result-mapping` - which apply in pipeline order to bridge the Message and the WIT call. See the [mapping module docs](../../src/mapping.rs) for details.
 2. **Publishing**: `composable publish` starts the runtime, publishes a single message to the named channel, waits for processing, and exits.
-
-> [!NOTE]
-> At this time, the component must export exactly one function, but more configuration options will be available for subscriptions soon, including the target function.
 
 ## Configuration
 
 ```toml
 [component.greeter]
 uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
-subscription = "names"
+
+[subscription.names]
+component = "greeter"
 ```

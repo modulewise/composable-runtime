@@ -63,6 +63,7 @@ port = 8080
 otlp-endpoint = "http://localhost:4317"
 
 [server.http.route.test]
+method = "GET"
 path = "/test"
 component = "guest"
 function = "run"
