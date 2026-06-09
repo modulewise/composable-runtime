@@ -104,6 +104,13 @@ impl ConfigHandler for CapabilityConfigHandler {
         HashMap::from([("capability", ["type", "scope"].as_slice())])
     }
 
+    fn accepts_unclaimed_properties(&self, category: &str) -> bool {
+        // Capability config blocks carry arbitrary type-specific keys
+        // (forwarded to the registered capability implementation as
+        // direct configuration).
+        category == "capability"
+    }
+
     fn handle_category(
         &mut self,
         category: &str,

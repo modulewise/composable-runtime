@@ -11,6 +11,7 @@ function = "greet"
 [server.api.route.bonjour]
 method = "POST"
 path = "/bonjour"
+content-type = "text/plain"
 channel = "names"
 reply-timeout-ms = 1000
 

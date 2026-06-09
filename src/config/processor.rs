@@ -161,6 +161,23 @@ fn dispatch(
         let (core_properties, claimed_by_handler) =
             split_properties(def.properties, &def.category, owner_idx, &property_claims);
 
+        // Reject any top-level property not claimed by any registered handler,
+        // unless the owner handler accepts unclaimed properties as pass-through
+        // configuration (e.g. capability handlers forwarding type-specific keys).
+        if !handlers[owner_idx].accepts_unclaimed_properties(&def.category) {
+            for key in core_properties.keys() {
+                let lookup = (def.category.clone(), key.clone());
+                if !property_claims.contains_key(&lookup) {
+                    return Err(anyhow::anyhow!(
+                        "Category '{}' definition '{}' has unknown property '{}'",
+                        def.category,
+                        def.name,
+                        key
+                    ));
+                }
+            }
+        }
+
         handlers[owner_idx].handle_category(&def.category, &def.name, core_properties)?;
 
         for (handler_idx, properties) in claimed_by_handler {

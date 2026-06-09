@@ -268,6 +268,16 @@ pub trait ConfigHandler {
         HashMap::new()
     }
 
+    /// Whether this handler accepts properties not declared in
+    /// `claimed_properties` as pass-through configuration. Defaults to
+    /// `false`: the framework rejects any property not claimed by some
+    /// handler. Handlers that intentionally consume arbitrary keys (e.g.
+    /// capability handlers that forward unknown keys to capability-specific
+    /// config) override this to return `true` for the relevant categories.
+    fn accepts_unclaimed_properties(&self, _category: &str) -> bool {
+        false
+    }
+
     /// Handle a definition in an owned category.
     /// Properties claimed by other handlers will be excluded.
     fn handle_category(
