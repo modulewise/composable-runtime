@@ -3,19 +3,16 @@
 //! When a component-backed operation declares `param-mapping` or
 //! `result-mapping`, the surface-facing input/output schema may diverge from
 //! the raw WIT signature. This module derives the surface-facing schema from
-//! the templates by resolving each reference against the WIT-side types. The
-//! derived schema carries the full WIT type information (numeric ranges,
-//! enum values, descriptions on records, etc.) so consumers see a precise
-//! contract.
+//! the templates by resolving each reference against the WIT-side types.
 //!
 //! When the operation config also declares an explicit `input-schema` or
 //! `output-schema`, structural alignment validation ensures the explicit
 //! schema conforms to the same contract: shape (property names, nesting,
 //! array/object/scalar kind) must match the derived schema. Type metadata
-//! on the explicit side may add richness (description, constraints) and may
-//! be looser than the derived type only when surface-side coercion can
-//! safely bridge the difference (e.g. declaring `string` at a numeric
-//! position => coerce_value stringifies at serialization time).
+//! on the explicit side may enrich (description, constraints, etc.) and may be
+//! looser than the derived type only when surface-side coercion can safely
+//! bridge the difference (e.g. declaring `string` at a numeric position =>
+//! coerce_value stringifies at serialization time).
 
 use serde_json::{Map, Value, json};
 
@@ -115,8 +112,7 @@ fn resolve_path<'a>(schema: &'a Value, path: &[PathSegment]) -> Result<&'a Value
                         )
                     })?;
                 } else if let Some(items) = current.get("items") {
-                    // List: index value is informational; the item type is uniform.
-                    let _ = idx;
+                    // List: index is not relevant; the item type is uniform.
                     current = items;
                 } else {
                     return Err(format!(
@@ -147,7 +143,7 @@ fn unwrap_singular_oneof(schema: &Value) -> Result<&Value, String> {
         return Ok(schema);
     };
     if arms.len() != 2 {
-        return Ok(schema); // variant or unfamiliar shape — leave as is
+        return Ok(schema); // variant or unfamiliar shape: leave as is
     }
     // option<T>: one arm is type:"null".
     let is_null = |s: &Value| s.get("type").and_then(|t| t.as_str()) == Some("null");
@@ -323,13 +319,12 @@ fn schema_for_encoded_position(spec: &ContentTypeSpec) -> Value {
 ///
 /// Returns `Ok(None)` when result-mapping declares no body content: body slot
 /// absent, or body explicitly set to `""` or `null`. These all mean "no body"
-/// (zero bytes at runtime; surface should omit `outputSchema`).
+/// (zero bytes at runtime; the surface should advertise no result schema).
 ///
 /// Returns `Ok(Some(schema))` when result-mapping declares a body template.
-/// The body template's structure (object/array/scalar literal) defines the
-/// output shape. Leaves that are references (`{<path>}`) resolve to the WIT
-/// result's schema at that path. Literal leaves get a schema matching their
-/// JSON type.
+/// The template's shape becomes the output schema's shape; each `{<path>}`
+/// reference resolves to the WIT result's schema at that path, and literal
+/// values get a schema matching their JSON type.
 pub fn derive_output_schema(
     function: &Function,
     config: &MappingConfig,
@@ -715,8 +710,6 @@ fn align(declared: &Value, derived: &Value, path: &str) -> Result<(), String> {
         // Looser-declared coercion: declaring "string" at a non-string
         // position is bridged by coerce_value. The reverse is unsafe.
         (Some("string"), Some(_)) => {}
-        // Any null-typed position aligns trivially.
-        (Some("null"), Some("null")) => {}
         // Mismatch.
         (Some(d), Some(s)) => {
             return Err(format!(
@@ -725,9 +718,10 @@ fn align(declared: &Value, derived: &Value, path: &str) -> Result<(), String> {
             ));
         }
         (None, _) | (_, None) => {
-            // If either side lacks an explicit type, accept (e.g. an empty
-            // schema as a passthrough). Reject only on declared-without-type
-            // when derived has structural detail to enforce.
+            // Either side without an explicit `type` is accepted. This is
+            // needed for positions whose schema is `{}` (any) because the
+            // content-type is determined at runtime; the user-declared schema
+            // at such a position cannot be checked structurally.
         }
     }
 

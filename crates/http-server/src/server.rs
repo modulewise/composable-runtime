@@ -85,7 +85,6 @@ enum CompiledTarget {
     Component {
         component_name: String,
         mapper: Arc<MessageMapper>,
-        function_name_for_span: String,
     },
     Channel {
         channel: String,
@@ -202,7 +201,6 @@ impl Route {
                 let target = CompiledTarget::Component {
                     component_name: component.clone(),
                     mapper: Arc::new(mapper),
-                    function_name_for_span: function.clone(),
                 };
                 (target, Some(request_schema_spec), resolved_response_schema)
             }
@@ -417,11 +415,9 @@ impl Router {
             CompiledTarget::Component {
                 component_name,
                 mapper,
-                function_name_for_span,
             } => {
                 self.invoke_component(
                     component_name,
-                    function_name_for_span,
                     Arc::clone(mapper),
                     message,
                     route.response_schema.as_ref(),
@@ -448,7 +444,6 @@ impl Router {
     async fn invoke_component(
         &self,
         component_name: &str,
-        function_name: &str,
         mapper: Arc<MessageMapper>,
         message: Message,
         response_schema: Option<&ResponseSchema>,
@@ -472,7 +467,7 @@ impl Router {
             let parent_cx = propagator.extract(&propagated);
             let tracer = tp.tracer("composable-http-server");
             tracer
-                .span_builder(format!("{component_name}/{function_name}"))
+                .span_builder(format!("{component_name}/{}", mapper.function_key()))
                 .with_kind(SpanKind::Server)
                 .start_with_context(&tracer, &parent_cx)
         });

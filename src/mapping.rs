@@ -94,14 +94,15 @@ pub struct Invocation {
     pub args: Vec<Value>,
 }
 
-// How to determine the content-type for one `result-decoding` entry.
+// How to determine the content-type for one `result-decoding` or
+// `param-encoding` entry.
 #[derive(Debug, Clone)]
 pub(crate) enum ContentTypeSpec {
     // A hardcoded content-type value (e.g. `"application/json"`).
     Literal(String),
-    // A path into the WIT result whose value at runtime supplies the
-    // content-type string. The path's first segment is a top-level field
-    // of the WIT result; subsequent segments traverse that field.
+    // A path into the source whose value at runtime supplies the
+    // content-type string. The source is the WIT result for
+    // result-decoding, or the assembled WIT args for param-encoding.
     Path(Vec<PathSegment>),
 }
 
@@ -235,7 +236,7 @@ fn validate_param_encoding_path(
 
 // Apply result-decoding to a WIT result. First resolves every content-type
 // spec against the original wit_result, then decodes each named field and
-// replace its byte-array value with the decoded value.
+// replaces its byte-array value with the decoded value.
 //
 // Returns a new `Value` with the decoded fields in place. Runtime errors:
 //   - content-type path is missing or null at runtime
@@ -328,7 +329,7 @@ fn value_to_bytes(v: &Value) -> Option<Vec<u8>> {
 
 // Apply param-encoding to assembled WIT args. First resolves every
 // content-type spec against the original assembled args, then encodes each
-// named arg and replace its value with the byte array.
+// named arg and replaces its value with the byte array.
 //
 // The `args` parameter is the positional args list (one per WIT param);
 // `param_names` is the WIT param names in the same order, used to resolve
@@ -480,7 +481,7 @@ impl MessageMapper {
         // Resolution-time validation for result-decoding:
         // - Each key must reference a `list<u8>` field on the WIT result.
         // - Each Path spec must reference an existing path on the WIT result.
-        // - Each Literal spec must be a recognized content-type.
+        // - Each Literal spec must be a supported content-type.
         if let Some(decoding) = &result_decoding {
             let result_schema = function.result().ok_or_else(|| {
                 format!(
@@ -1594,10 +1595,9 @@ mod tests {
     }
 
     #[test]
-    fn result_decoding_phase_one_uses_original_wit_result() {
-        // Two entries: decoding field A references field B for its content-type;
-        // decoding field B references field A. Both should resolve using the
-        // original (undecoded) wit_result.
+    fn result_decoding_handles_multiple_fields() {
+        // Two byte-array fields are each decoded using their own content-type
+        // path. Both decoded values appear in the final result.
         let decoding = ResultDecoding::parse(
             json!({
                 "a": "{ct_a}",
