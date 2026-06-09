@@ -224,6 +224,7 @@ port = 8080
 [server.api.route.hello]
 method = "POST"
 path = "/hello"
+content-type = "text/plain"
 channel = "names"
 
 [component.greeter]
@@ -308,6 +309,7 @@ port = 8080
 [server.api.route.hello]
 method = "POST"
 path = "/hello"
+content-type = "text/plain"
 channel = "names"
 
 [capability.http-client]
