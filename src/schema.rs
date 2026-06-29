@@ -339,6 +339,10 @@ pub fn derive_output_schema(
         let Some(wit_result) = function.result() else {
             return Ok(None);
         };
+        // Invocation unwraps `result<T, E>` (surfacing the err arm as an error,
+        // not body) and `option<T>`, so the advertised schema must describe the
+        // unwrapped ok/some value to match the reply body.
+        let wit_result = unwrap_singular_oneof(wit_result)?;
         return Ok(Some(match result_decoding {
             None => wit_result.clone(),
             Some(decoding) => apply_decoding_to_schema(wit_result, decoding),

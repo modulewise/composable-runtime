@@ -15,6 +15,7 @@ config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Expo
 
 [capability.http]
 type = "wasi:http"
+h2c-for-grpc = true
 
 [capability.wasip2]
 type = "wasi:p2"

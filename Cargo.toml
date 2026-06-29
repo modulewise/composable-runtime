@@ -34,11 +34,11 @@ tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-wasm-encoder = "0.245"
-wasmparser = "0.245"
-wasmtime = "42"
-wat = "1.245"
-wit-parser = "0.245"
+wasm-encoder = "0.251"
+wasmparser = "0.251"
+wasmtime = "46"
+wat = "1.251"
+wit-parser = "0.251"
 
 [dependencies]
 anyhow.workspace = true
@@ -58,15 +58,15 @@ toml = "1"
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid.workspace = true
-wac-graph = "0.9"
-wac-types = "0.9"
+wac-graph = "0.10"
+wac-types = "0.10"
 wasm-pkg-client = "0.15"
 wasmtime = { workspace = true }
-wasmtime-wasi = "42"
-wasmtime-wasi-config = "42"
-wasmtime-wasi-http = "42"
-wasmtime-wasi-io = "42"
-wit-component = "0.245"
+wasmtime-wasi = "46"
+wasmtime-wasi-config = "46"
+wasmtime-wasi-http = "46"
+wasmtime-wasi-io = "46"
+wit-component = "0.251"
 wit-parser.workspace = true
 
 [dev-dependencies]

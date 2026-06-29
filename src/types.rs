@@ -35,10 +35,32 @@ pub struct ComponentDefinition {
     pub labels: HashMap<String, String>,
 }
 
+/// Per-store `wasi:http` hooks, configured from the `wasi:http` capability
+/// properties. The `WasiHttpHooks` trait impl lives in `runtime::host`.
+#[derive(Default)]
+pub(crate) struct HttpHooks {
+    /// When set, outgoing `application/grpc` requests are sent over cleartext
+    /// HTTP/2 (h2c, prior knowledge) instead of HTTP/1.1. Enabled by the
+    /// `h2c-for-grpc` capability property.
+    pub(crate) h2c_for_grpc: bool,
+}
+
+impl HttpHooks {
+    pub(crate) fn from_properties(props: &HashMap<String, serde_json::Value>) -> Self {
+        Self {
+            h2c_for_grpc: props
+                .get("h2c-for-grpc")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }
+    }
+}
+
 /// State passed to Wasm components during execution.
 pub struct ComponentState {
     pub wasi_ctx: wasmtime_wasi::WasiCtx,
     pub wasi_http_ctx: Option<wasmtime_wasi_http::WasiHttpCtx>,
+    pub(crate) http_hooks: HttpHooks,
     pub resource_table: wasmtime_wasi::ResourceTable,
     pub(crate) extensions: HashMap<TypeId, Box<dyn Any + Send>>,
 }
@@ -106,22 +128,22 @@ impl Interface {
         &self.full_name
     }
 
-    /// Get the namespace (e.g., "wasi" from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the namespace (e.g., "wasi" from "wasi:http/outgoing-handler@0.2.12").
     pub fn namespace(&self) -> &str {
         &self.namespace
     }
 
-    /// Get the package (e.g., "http" from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the package (e.g., "http" from "wasi:http/outgoing-handler@0.2.12").
     pub fn package(&self) -> &str {
         &self.package
     }
 
-    /// Get the interface name (e.g., "outgoing-handler" from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the interface name (e.g., "outgoing-handler" from "wasi:http/outgoing-handler@0.2.12").
     pub fn interface_name(&self) -> &str {
         &self.interface
     }
 
-    /// Get the version (e.g., Some("0.2.6") from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the version (e.g., Some("0.2.12") from "wasi:http/outgoing-handler@0.2.12").
     pub fn version(&self) -> Option<&str> {
         self.version.as_deref()
     }
