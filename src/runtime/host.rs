@@ -10,18 +10,20 @@ use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
 use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
 use wasmtime_wasi::sockets::{WasiSockets, WasiSocketsView};
 use wasmtime_wasi::{ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
-use wasmtime_wasi_http::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::body::HyperOutgoingBody;
-use wasmtime_wasi_http::types::{
-    HostFutureIncomingResponse, OutgoingRequestConfig, default_send_request,
+use wasmtime_wasi_http::WasiHttpCtx;
+use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
+use wasmtime_wasi_http::p2::types::{HostFutureIncomingResponse, OutgoingRequestConfig};
+use wasmtime_wasi_http::p2::{
+    HttpResult, WasiHttpCtxView, WasiHttpHooks, WasiHttpView, default_send_request,
 };
-use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 use wasmtime_wasi_io::IoView;
 
 use crate::composition::registry::{CapabilityRegistry, ComponentRegistry};
 use crate::context::PROPAGATION_CONTEXT;
 use crate::types::{
-    Component, ComponentInvoker, ComponentMetadata, ComponentState, Function, PROPAGATED_HEADERS,
+    Component, ComponentInvoker, ComponentMetadata, ComponentState, Function, HttpHooks,
+    PROPAGATED_HEADERS,
 };
 
 // Component host: wasmtime engine + registries, provides instantiation + invocation.
@@ -166,16 +168,18 @@ impl WasiView for ComponentState {
 }
 
 impl WasiHttpView for ComponentState {
-    fn ctx(&mut self) -> &mut WasiHttpCtx {
-        self.wasi_http_ctx
-            .as_mut()
-            .expect("Component requires 'http' capability, so HTTP context should be available")
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            ctx: self.wasi_http_ctx.as_mut().expect(
+                "Component requires 'http' capability, so HTTP context should be available",
+            ),
+            table: &mut self.resource_table,
+            hooks: &mut self.http_hooks,
+        }
     }
+}
 
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.resource_table
-    }
-
+impl WasiHttpHooks for HttpHooks {
     fn send_request(
         &mut self,
         mut request: hyper::Request<HyperOutgoingBody>,
@@ -202,9 +206,9 @@ impl WasiHttpView for ComponentState {
             .and_then(|v| v.to_str().ok())
             .is_some_and(|ct| ct.starts_with("application/grpc"));
 
-        if is_grpc {
+        if self.h2c_for_grpc && is_grpc {
             if request.uri().scheme_str() == Some("https") {
-                tracing::error!("gRPC over TLS (https) is not yet supported");
+                tracing::error!("h2c-for-grpc does not support TLS (https)");
                 return Err(ErrorCode::HttpProtocolError.into());
             }
             Ok(super::grpc::send_grpc_request(request, config))
@@ -282,7 +286,7 @@ impl Invoker {
                             )?;
                         }
                         "http" => {
-                            wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
+                            wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
                             // io is a transitive dep
                             wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
                         }
@@ -409,13 +413,17 @@ impl Invoker {
             }
         }
 
-        // Check if HTTP context needed
-        let needs_http = capabilities.iter().any(|capability_name| {
+        // Find the wasi:http capability (if any); its properties configure the
+        // HTTP context and hooks.
+        let http_capability = capabilities.iter().find_map(|capability_name| {
             capability_registry
                 .get_capability(capability_name)
-                .and_then(|cap| cap.kind.strip_prefix("wasi:"))
-                == Some("http")
+                .filter(|cap| cap.kind.strip_prefix("wasi:") == Some("http"))
         });
+        let needs_http = http_capability.is_some();
+        let http_hooks = http_capability
+            .map(|cap| HttpHooks::from_properties(&cap.properties))
+            .unwrap_or_default();
 
         // Collect capability states before creating ComponentState
         let mut extensions = HashMap::new();
@@ -444,6 +452,7 @@ impl Invoker {
                 None
             },
             resource_table: ResourceTable::new(),
+            http_hooks,
             extensions,
         };
 
@@ -723,6 +732,45 @@ fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
             Ok(Val::List(items))
         }
 
+        // Objects map to map<string, V>
+        (serde_json::Value::Object(obj), wasmtime::component::Type::Map(map_type)) => {
+            let key_type = map_type.key();
+            let value_type = map_type.value();
+            if !matches!(key_type, wasmtime::component::Type::String) {
+                return Err(anyhow::anyhow!(
+                    "JSON object can only map to a WIT map with string keys"
+                ));
+            }
+            let mut entries = Vec::new();
+            for (key, value) in obj {
+                let val = json_to_val(value, &value_type).map_err(|e| {
+                    anyhow::anyhow!("Error converting map value for key '{key}': {e}")
+                })?;
+                entries.push((Val::String(key.clone()), val));
+            }
+            Ok(Val::Map(entries))
+        }
+
+        // Arrays of [key, value] pairs map to map<non-string, V>
+        (serde_json::Value::Array(arr), wasmtime::component::Type::Map(map_type)) => {
+            let key_type = map_type.key();
+            let value_type = map_type.value();
+            let mut entries = Vec::new();
+            for (index, item) in arr.iter().enumerate() {
+                let pair = item.as_array().filter(|p| p.len() == 2).ok_or_else(|| {
+                    anyhow::anyhow!("Map entry at index {index} must be a [key, value] pair")
+                })?;
+                let key = json_to_val(&pair[0], &key_type).map_err(|e| {
+                    anyhow::anyhow!("Error converting map key at index {index}: {e}")
+                })?;
+                let val = json_to_val(&pair[1], &value_type).map_err(|e| {
+                    anyhow::anyhow!("Error converting map value at index {index}: {e}")
+                })?;
+                entries.push((key, val));
+            }
+            Ok(Val::Map(entries))
+        }
+
         // Arrays map to tuples
         (serde_json::Value::Array(arr), wasmtime::component::Type::Tuple(tuple_type)) => {
             let tuple_types: Vec<_> = tuple_type.types().collect();
@@ -909,6 +957,26 @@ fn val_to_json(val: &Val) -> serde_json::Value {
         Val::List(items) => {
             let json_items: Vec<serde_json::Value> = items.iter().map(val_to_json).collect();
             serde_json::Value::Array(json_items)
+        }
+
+        Val::Map(entries) => {
+            // map<string, V> -> JSON object; map<non-string, V> -> array of
+            // [key, val] pairs (preserving non-string keys).
+            if entries.iter().all(|(k, _)| matches!(k, Val::String(_))) {
+                let mut obj = serde_json::Map::new();
+                for (k, v) in entries {
+                    if let Val::String(key) = k {
+                        obj.insert(key.clone(), val_to_json(v));
+                    }
+                }
+                serde_json::Value::Object(obj)
+            } else {
+                let pairs: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|(k, v)| serde_json::Value::Array(vec![val_to_json(k), val_to_json(v)]))
+                    .collect();
+                serde_json::Value::Array(pairs)
+            }
         }
 
         Val::Record(fields) => {

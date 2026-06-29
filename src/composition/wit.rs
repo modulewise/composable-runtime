@@ -255,6 +255,20 @@ impl Parser {
                     wit_parser::TypeDefKind::List(element_type) => {
                         Self::validate_wit_type_for_json_rpc(*element_type, resolve)
                     }
+                    wit_parser::TypeDefKind::Map(key_type, value_type) => {
+                        // WIT restricts map keys to primitives.
+                        // Both key and value still need to be representable.
+                        Self::validate_wit_type_for_json_rpc(*key_type, resolve)?;
+                        Self::validate_wit_type_for_json_rpc(*value_type, resolve)
+                    }
+                    wit_parser::TypeDefKind::FixedLengthList(..) => {
+                        // Rejected on a surfaced (JSON-RPC invoked) signature:
+                        // wasmtime does not yet support fixed-length lists in
+                        // its public value-conversion (Val) API.
+                        // Inter-component use is ok.
+                        // See https://github.com/bytecodealliance/wasmtime/issues/12279
+                        Err(anyhow::anyhow!("fixed-length lists are not yet supported"))
+                    }
                     wit_parser::TypeDefKind::Tuple(tuple) => {
                         for tuple_type in &tuple.types {
                             Self::validate_wit_type_for_json_rpc(*tuple_type, resolve)?;
@@ -408,6 +422,28 @@ impl Parser {
                             "type": "array",
                             "items": Self::wit_type_to_json_schema(*element_type, resolve)
                         })
+                    }
+                    wit_parser::TypeDefKind::Map(key_type, value_type) => {
+                        let value_schema = Self::wit_type_to_json_schema(*value_type, resolve);
+                        if matches!(key_type, Type::String) {
+                            // map<string, V> -> JSON object keyed by string.
+                            json!({
+                                "type": "object",
+                                "additionalProperties": value_schema
+                            })
+                        } else {
+                            // map<non-string, V> -> array of [key, val] pairs.
+                            let key_schema = Self::wit_type_to_json_schema(*key_type, resolve);
+                            json!({
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "prefixItems": [key_schema, value_schema],
+                                    "minItems": 2,
+                                    "maxItems": 2
+                                }
+                            })
+                        }
                     }
                     wit_parser::TypeDefKind::Tuple(tuple) => {
                         let item_schemas: Vec<serde_json::Value> = tuple

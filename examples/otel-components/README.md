@@ -90,7 +90,7 @@ let runtime = Runtime::builder()
 
 ### Option 2: Component as Adapter (`grpc-to-http`)
 
-This endpoint is a wasm component that translates gRPC calls into `wasi:http` requests. The runtime's built-in HTTP support (using h2c for `application/grpc`) handles the actual connection.
+This endpoint is a wasm component that translates gRPC calls into `wasi:http` requests. The runtime's built-in HTTP support handles the connection using h2c (cleartext HTTP/2) for `application/grpc` requests. This is enabled via `h2c-for-grpc = true` in the `wasi:http` capability.
 
 ```toml
 # config-with-components.toml
@@ -112,6 +112,7 @@ config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Expo
 
 [capability.http]
 type = "wasi:http"
+h2c-for-grpc = true
 
 [capability.wasip2]
 type = "wasi:p2"

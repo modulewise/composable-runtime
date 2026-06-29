@@ -4,9 +4,9 @@
 //! the runtime uses HTTP/2 instead of HTTP/1.1. Currently only plaintext HTTP/2
 //! (h2c / prior knowledge) is supported; gRPC over TLS requires a future update.
 
-use wasmtime_wasi_http::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::body::HyperOutgoingBody;
-use wasmtime_wasi_http::types::{
+use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
+use wasmtime_wasi_http::p2::types::{
     HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig,
 };
 
@@ -55,7 +55,7 @@ async fn send_grpc_request_handler(
     )
     .await
     .map_err(|_| ErrorCode::ConnectionTimeout)?
-    .map_err(wasmtime_wasi_http::hyper_request_error)?;
+    .map_err(wasmtime_wasi_http::p2::hyper_request_error)?;
 
     let worker = wasmtime_wasi::runtime::spawn(async move {
         if let Err(e) = conn.await {
@@ -78,9 +78,9 @@ async fn send_grpc_request_handler(
     let resp = timeout(config.first_byte_timeout, sender.send_request(request))
         .await
         .map_err(|_| ErrorCode::ConnectionReadTimeout)?
-        .map_err(wasmtime_wasi_http::hyper_request_error)?
+        .map_err(wasmtime_wasi_http::p2::hyper_request_error)?
         .map(|body| {
-            body.map_err(wasmtime_wasi_http::hyper_request_error)
+            body.map_err(wasmtime_wasi_http::p2::hyper_request_error)
                 .boxed_unsync()
         });
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -71,6 +72,10 @@ struct GreetingConfigHandler {
 impl ConfigHandler for GreetingConfigHandler {
     fn claimed_categories(&self) -> Vec<CategoryClaim> {
         vec![CategoryClaim::all("greeting")]
+    }
+
+    fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
+        HashMap::from([("greeting", ["message"].as_slice())])
     }
 
     fn handle_category(
