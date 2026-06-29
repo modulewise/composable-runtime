@@ -128,22 +128,22 @@ impl Interface {
         &self.full_name
     }
 
-    /// Get the namespace (e.g., "wasi" from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the namespace (e.g., "wasi" from "wasi:http/outgoing-handler@0.2.12").
     pub fn namespace(&self) -> &str {
         &self.namespace
     }
 
-    /// Get the package (e.g., "http" from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the package (e.g., "http" from "wasi:http/outgoing-handler@0.2.12").
     pub fn package(&self) -> &str {
         &self.package
     }
 
-    /// Get the interface name (e.g., "outgoing-handler" from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the interface name (e.g., "outgoing-handler" from "wasi:http/outgoing-handler@0.2.12").
     pub fn interface_name(&self) -> &str {
         &self.interface
     }
 
-    /// Get the version (e.g., Some("0.2.6") from "wasi:http/outgoing-handler@0.2.6").
+    /// Get the version (e.g., Some("0.2.12") from "wasi:http/outgoing-handler@0.2.12").
     pub fn version(&self) -> Option<&str> {
         self.version.as_deref()
     }
