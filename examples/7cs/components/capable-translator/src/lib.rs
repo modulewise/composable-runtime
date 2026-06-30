@@ -6,7 +6,7 @@ wit_bindgen::generate!({
 
 use wasi::http::client::send;
 use wasi::http::types::{Fields, Method, Request, Response, Scheme};
-use wit_bindgen::rt::async_support::{StreamReader, StreamResult, spawn_local};
+use wit_bindgen::rt::async_support::spawn_local;
 
 struct Translator;
 
@@ -64,7 +64,7 @@ async fn call_translate_api(text: &str, locale: &str) -> Result<String, String> 
     }
 
     let (body_stream, _trailers) = Response::consume_body(response, send_result);
-    let bytes = drain(body_stream).await;
+    let bytes = body_stream.collect().await;
 
     let resp_text = String::from_utf8(bytes).map_err(|e| format!("UTF-8 error: {e}"))?;
     // Response is {"translated": "..."}
@@ -74,18 +74,6 @@ async fn call_translate_api(text: &str, locale: &str) -> Result<String, String> 
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| format!("unexpected response: {resp_text}"))
-}
-
-async fn drain(mut body: StreamReader<u8>) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let (result, chunk) = body.read(Vec::with_capacity(8192)).await;
-        out.extend_from_slice(&chunk);
-        if matches!(result, StreamResult::Dropped) {
-            break;
-        }
-    }
-    out
 }
 
 export!(Translator);
