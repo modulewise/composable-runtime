@@ -34,10 +34,10 @@ The interceptor is generated with `--match` patterns to selectively intercept on
 ```
 
 1. Generates the interceptor with selective `--match` patterns
-2. Builds all three Rust components using `cargo component`
+2. Builds all three Rust components with `cargo build` + `wasm-tools component new`
 3. Fetches a WASI logging-to-stdout adapter via `wkg oci pull`
 4. Composes the logger with the WASI adapter using `wac plug`
-5. Composes the interceptor with both targets and the adapted logger into `composed.wasm`
+5. Composes the interceptor with both targets and the adapted logger into `lib/composed.wasm`
 
 ## Run
 

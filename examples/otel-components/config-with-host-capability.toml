@@ -1,9 +1,9 @@
 [component.guest]
-uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
+uri = "./lib/guest.wasm"
 imports = ["otel"]
 
 [component.otel]
-uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
+uri = "./lib/otel-to-grpc.wasm"
 imports = ["grpc", "wasip2"]
 
 [capability.grpc]

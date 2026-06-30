@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "jco componentize greeter.js --wit ../../wit --world-name greeter-world --disable all -o greeter.wasm"
+    "build": "jco componentize greeter.js --wit ../../wit --world-name greeter-world --disable all -o ../lib/greeter.wasm"
   },
   "devDependencies": {
     "@bytecodealliance/jco": "^1.15.0",

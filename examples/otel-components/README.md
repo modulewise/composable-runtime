@@ -59,11 +59,11 @@ This endpoint is implemented as a [host capability](grpc-capability). The host m
 # config-with-host-capability.toml
 
 [component.guest]
-uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
+uri = "./lib/guest.wasm"
 imports = ["otel"]
 
 [component.otel]
-uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
+uri = "./lib/otel-to-grpc.wasm"
 imports = ["grpc", "wasip2"]
 
 [capability.grpc]
@@ -96,15 +96,15 @@ This endpoint is a wasm component that translates gRPC calls into `wasi:http` re
 # config-with-components.toml
 
 [component.guest]
-uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
+uri = "./lib/guest.wasm"
 imports = ["otel"]
 
 [component.otel]
-uri = "./target/wasm32-wasip2/release/otel_to_grpc.wasm"
+uri = "./lib/otel-to-grpc.wasm"
 imports = ["grpc", "wasip2"]
 
 [component.grpc]
-uri = "./target/wasm32-unknown-unknown/release/grpc_to_http.wasm"
+uri = "./lib/grpc-to-http.wasm"
 imports = ["http"]
 config.url = "http://localhost:4317"
 config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"

@@ -40,7 +40,7 @@ Edit `config.toml` to customize the greeting:
 
 ```toml
 [component.greeter]
-uri = "./greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
+uri = "./lib/greeter.wasm"
 config.greeting = "Aloha"
 ```
 

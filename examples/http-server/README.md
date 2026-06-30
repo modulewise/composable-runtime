@@ -69,10 +69,10 @@ path = "/bonjour"
 channel = "names"
 
 [component.hello]
-uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
+uri = "../hello-world/lib/greeter.wasm"
 
 [component.bonjour]
-uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
+uri = "../hello-world/lib/greeter.wasm"
 config.greeting = "Bonjour"
 
 [subscription.names]

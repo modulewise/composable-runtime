@@ -6,5 +6,5 @@ type = "greeting"
 uppercase = true
 
 [component.greeter]
-uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
+uri = "./lib/greeter.wasm"
 imports = ["greeting"]

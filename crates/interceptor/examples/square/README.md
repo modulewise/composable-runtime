@@ -24,8 +24,8 @@ world calculator-world {
 
 1. Generates the interceptor component from the WIT world using `cargo run` (interceptor CLI)
 2. Builds the Python calculator target using `componentize-py`
-3. Builds the Rust squarer advice using `cargo component`
-4. Composes all three into `composed.wasm` using `wac plug`
+3. Builds the Rust squarer advice with `cargo build` + `wasm-tools component new`
+4. Composes all three into `lib/composed.wasm` using `wac plug`
 
 ## Run
 

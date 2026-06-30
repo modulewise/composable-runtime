@@ -2,9 +2,14 @@
 
 set -e
 
-cargo component build --target wasm32-unknown-unknown --release
+for project in greeter logger; do
+  cargo build -p "$project" --target wasm32-unknown-unknown --release
+  wasm-tools component new \
+    "target/wasm32-unknown-unknown/release/${project}.wasm" \
+    -o "lib/${project}.wasm"
+done
 
-if [[ ! -f wasi-logging-to-stdout.wasm ]]; then
+if [[ ! -f lib/wasi-logging-to-stdout.wasm ]]; then
   echo "Fetching WASI logging adapter..."
-  wkg oci pull -o wasi-logging-to-stdout.wasm ghcr.io/componentized/logging/to-stdout:v0.2.1
+  wkg oci pull -o lib/wasi-logging-to-stdout.wasm ghcr.io/componentized/logging/to-stdout:v0.2.1
 fi

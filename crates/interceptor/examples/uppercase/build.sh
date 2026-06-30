@@ -8,17 +8,20 @@ echo "Generating interceptor..."
 cargo run --manifest-path ../../Cargo.toml -- \
   --wit ../wit \
   --world greeter-world \
-  --output interceptor.wasm
+  --output lib/interceptor.wasm
 
 echo "Building greeter (JavaScript)..."
 (cd greeter; npm install && npm run build)
 
 echo "Building uppercaser (Rust)..."
-(cd uppercaser; cargo component build --target wasm32-unknown-unknown --release)
+(cd uppercaser; cargo build --target wasm32-unknown-unknown --release)
+wasm-tools component new \
+  uppercaser/target/wasm32-unknown-unknown/release/uppercaser.wasm \
+  -o lib/uppercaser.wasm
 
 echo "Composing..."
 wac plug \
-  --plug greeter/greeter.wasm \
-  --plug uppercaser/target/wasm32-unknown-unknown/release/uppercaser.wasm \
-  interceptor.wasm \
-  -o composed.wasm
+  --plug lib/greeter.wasm \
+  --plug lib/uppercaser.wasm \
+  lib/interceptor.wasm \
+  -o lib/composed.wasm

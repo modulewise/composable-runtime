@@ -4,6 +4,9 @@ set -e
 
 wkg wit fetch
 
-cargo component build -p guest --target wasm32-unknown-unknown --release
+cargo build -p guest --target wasm32-unknown-unknown --release
+wasm-tools component new \
+  target/wasm32-unknown-unknown/release/guest.wasm \
+  -o lib/guest.wasm
 
 cargo build -p host --release

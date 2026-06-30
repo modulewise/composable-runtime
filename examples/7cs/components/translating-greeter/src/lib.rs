@@ -1,6 +1,7 @@
 wit_bindgen::generate!({
     path: "../../wit",
     world: "translating-greeter",
+    async: false,
     generate_all
 });
 
