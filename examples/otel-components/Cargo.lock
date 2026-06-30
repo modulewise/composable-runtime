@@ -729,6 +729,7 @@ dependencies = [
  "clap",
  "composable-interceptor",
  "http",
+ "http-body",
  "http-body-util",
  "hyper",
  "oci-client",
