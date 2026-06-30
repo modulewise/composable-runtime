@@ -5,18 +5,18 @@ world simple-greeter {
 }
 
 world translating-greeter {
-  export greet: func(name: string) -> string;
+  export greet: async func(name: string) -> string;
   import translator;
 }
 
 world configured-greeter {
-  export greet: func(name: string) -> string;
+  export greet: async func(name: string) -> string;
   import translator;
   import wasi:config/store@0.2.0-rc.1;
 }
 
 interface translator {
-  translate: func(text: string, locale: string) -> string;
+  translate: async func(text: string, locale: string) -> string;
 }
 
 world simple-translator {
@@ -25,7 +25,7 @@ world simple-translator {
 
 world capable-translator {
   export translator;
-  import wasi:http/outgoing-handler@0.2.6;
+  import wasi:http/client@0.3.0;
 }
 
 world logging-advice {

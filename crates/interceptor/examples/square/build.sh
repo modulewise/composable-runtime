@@ -8,21 +8,24 @@ echo "Generating interceptor..."
 cargo run --manifest-path ../../Cargo.toml -- \
   --wit ../wit \
   --world calculator-world \
-  --output interceptor.wasm
+  --output lib/interceptor.wasm
 
 echo "Building calculator (Python)..."
 (cd calculator && uvx componentize-py \
   --wit-path ../../wit \
   --world calculator-world \
   componentize calculator \
-  -o calculator.wasm)
+  -o ../lib/calculator.wasm)
 
 echo "Building squarer (Rust)..."
-(cd squarer; cargo component build --target wasm32-unknown-unknown --release)
+(cd squarer; cargo build --target wasm32-unknown-unknown --release)
+wasm-tools component new \
+  squarer/target/wasm32-unknown-unknown/release/squarer.wasm \
+  -o lib/squarer.wasm
 
 echo "Composing..."
 wac plug \
-  --plug calculator/calculator.wasm \
-  --plug squarer/target/wasm32-unknown-unknown/release/squarer.wasm \
-  interceptor.wasm \
-  -o composed.wasm
+  --plug lib/calculator.wasm \
+  --plug lib/squarer.wasm \
+  lib/interceptor.wasm \
+  -o lib/composed.wasm

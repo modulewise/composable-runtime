@@ -388,8 +388,18 @@ pub fn encode_functype(
         .map(|ty| encode_valtype(resolve, &ty, enc, type_map))
         .transpose()?;
 
+    let is_async = matches!(
+        func.kind,
+        FunctionKind::AsyncFreestanding
+            | FunctionKind::AsyncMethod(_)
+            | FunctionKind::AsyncStatic(_)
+    );
+
     let index = enc.type_count();
-    enc.ty().function().params(params).result(result);
+    let mut functype = enc.ty().function();
+    // `async_` must be set before params.
+    functype.async_(is_async);
+    functype.params(params).result(result);
     Ok(index)
 }
 

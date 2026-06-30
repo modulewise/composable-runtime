@@ -20,12 +20,17 @@ Publish a name via `publish.sh` (it will build the greeter component if not alre
 
 Output:
 ```
-... invocation complete component=greeter function=greet result="Hello, Alice!"
+Hello, Alice!
 ```
 
-You can also run `composable publish` directly:
+You can also run `composable publish` directly (`reply-timeout` ensures a reply Message is returned):
+```bash
+composable publish config.toml --channel names --body Bob --reply-timeout 1
 ```
-composable publish config.toml --channel names --body Bob
+
+Output:
+```
+Hello, Bob!
 ```
 
 ## How It Works
@@ -37,7 +42,7 @@ composable publish config.toml --channel names --body Bob
 
 ```toml
 [component.greeter]
-uri = "../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm"
+uri = "../hello-world/lib/greeter.wasm"
 
 [subscription.names]
 component = "greeter"

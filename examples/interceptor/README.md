@@ -35,15 +35,15 @@ Output:
 
 ```toml
 [component.greeter]
-uri = "./target/wasm32-unknown-unknown/release/greeter.wasm"
+uri = "./lib/greeter.wasm"
 interceptors = ["logging-advice"]
 
 [component.logging-advice]
-uri = "./target/wasm32-unknown-unknown/release/logger.wasm"
+uri = "./lib/logger.wasm"
 imports = ["stdout-logger"]
 
 [component.stdout-logger]
-uri = "./wasi-logging-to-stdout.wasm"
+uri = "./lib/wasi-logging-to-stdout.wasm"
 imports = ["wasip2"]
 
 [capability.wasip2]

@@ -7,7 +7,7 @@ if ! command -v composable &>/dev/null; then
   exit 1
 fi
 
-GREETER=../hello-world/greeter/target/wasm32-unknown-unknown/release/greeter.wasm
+GREETER=../hello-world/lib/greeter.wasm
 
 if [ ! -f "$GREETER" ]; then
   ../hello-world/build.sh

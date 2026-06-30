@@ -7,7 +7,7 @@ wit_bindgen::generate!({
 struct Translator;
 
 impl exports::modulewise::examples::translator::Guest for Translator {
-    fn translate(text: String, locale: String) -> String {
+    async fn translate(text: String, locale: String) -> String {
         let lang = locale.split(['_', '-']).next().unwrap_or("");
         match lang {
             "de" => text.replace("Hello", "Hallo"),

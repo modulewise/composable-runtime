@@ -10,25 +10,28 @@ cargo run --manifest-path ../../Cargo.toml -- \
   --match add \
   --wit ../wit \
   --world multi-world \
-  --output interceptor.wasm
+  --output lib/interceptor.wasm
 
 echo "Building components..."
-cargo component build --target wasm32-unknown-unknown --release
+cargo build --target wasm32-unknown-unknown --release
+for project in calculator greeter logger; do
+  wasm-tools component new \
+    "target/wasm32-unknown-unknown/release/${project}.wasm" \
+    -o "lib/${project}.wasm"
+done
 
-if [[ ! -f wasi-logging-to-stdout.wasm ]]; then
+if [[ ! -f lib/wasi-logging-to-stdout.wasm ]]; then
   echo "Fetching WASI logging adapter..."
-  wkg oci pull -o wasi-logging-to-stdout.wasm ghcr.io/componentized/logging/to-stdout:v0.2.1
+  wkg oci pull -o lib/wasi-logging-to-stdout.wasm ghcr.io/componentized/logging/to-stdout:v0.2.1
 fi
 
-COMPONENTS="target/wasm32-unknown-unknown/release"
-
 echo "Composing..."
-wac plug -o stdout-logger.wasm \
-  --plug wasi-logging-to-stdout.wasm \
-  "$COMPONENTS/logger.wasm"
+wac plug -o lib/stdout-logger.wasm \
+  --plug lib/wasi-logging-to-stdout.wasm \
+  lib/logger.wasm
 
-wac plug -o composed.wasm \
-  --plug "$COMPONENTS/calculator.wasm" \
-  --plug "$COMPONENTS/greeter.wasm" \
-  --plug stdout-logger.wasm \
-  interceptor.wasm
+wac plug -o lib/composed.wasm \
+  --plug lib/calculator.wasm \
+  --plug lib/greeter.wasm \
+  --plug lib/stdout-logger.wasm \
+  lib/interceptor.wasm

@@ -69,14 +69,14 @@ component = "guest"
 function = "run"
 
 [component.guest]
-uri = "./target/wasm32-unknown-unknown/release/guest.wasm"
+uri = "./lib/guest.wasm"
 imports = ["otel", "clocks", "random"]
 
 [capability.clocks]
-type = "wasi:clocks"
+type = "wasi:clocks-p2"
 
 [capability.random]
-type = "wasi:random"
+type = "wasi:random-p2"
 ```
 
 - `[capability.otel]`: configures the OTLP exporter (endpoint, protocol, resource attributes), and exports `wasi:otel/logs` and `wasi:otel/tracing` for guest components.

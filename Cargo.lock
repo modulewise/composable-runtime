@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "composable-http-server"
-version = "0.5.0-alpha.4"
+version = "0.5.0-alpha.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "composable-interceptor"
-version = "0.5.0-alpha.4"
+version = "0.5.0-alpha.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "composable-otel"
-version = "0.5.0-alpha.4"
+version = "0.5.0-alpha.5"
 dependencies = [
  "anyhow",
  "composable-runtime",
@@ -752,11 +752,13 @@ dependencies = [
 
 [[package]]
 name = "composable-runtime"
-version = "0.5.0-alpha.4"
+version = "0.5.0-alpha.5"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
  "composable-interceptor",
+ "http",
  "http-body-util",
  "hyper",
  "jsonschema",
@@ -6114,6 +6116,7 @@ dependencies = [
  "async-trait",
  "bitflags",
  "bumpalo",
+ "bytes",
  "cc",
  "cfg-if",
  "encoding_rs",
@@ -6398,6 +6401,7 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",

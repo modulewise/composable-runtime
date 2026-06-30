@@ -364,46 +364,29 @@ fn create_capability_registry(
     Ok(CapabilityRegistry::new(capabilities))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasiVersion {
+    P2,
+    P3,
+}
+
+// Split a wasi capability kind into its base and version.
+// A bare kind (no `-pN` suffix) resolves to the latest version.
+pub(crate) fn split_wasi_kind(kind: &str) -> (&str, WasiVersion) {
+    if let Some(base) = kind.strip_suffix("-p2") {
+        (base, WasiVersion::P2)
+    } else if let Some(base) = kind.strip_suffix("-p3") {
+        (base, WasiVersion::P3)
+    } else {
+        (kind, WasiVersion::P3)
+    }
+}
+
 fn get_interfaces_for_capability(kind: &str) -> Vec<String> {
-    match kind {
-        "wasi:cli" => vec![
-            "wasi:cli/stdin@0.2.12".to_string(),
-            "wasi:cli/stdout@0.2.12".to_string(),
-            "wasi:cli/stderr@0.2.12".to_string(),
-            "wasi:cli/environment@0.2.12".to_string(),
-        ],
-        "wasi:clocks" => vec![
-            "wasi:clocks/monotonic-clock@0.2.12".to_string(),
-            "wasi:clocks/wall-clock@0.2.12".to_string(),
-        ],
-        "wasi:http" => vec![
-            "wasi:http/outgoing-handler@0.2.12".to_string(),
-            "wasi:http/types@0.2.12".to_string(),
-            // io is a transitive dep
-            "wasi:io/error@0.2.12".to_string(),
-            "wasi:io/poll@0.2.12".to_string(),
-            "wasi:io/streams@0.2.12".to_string(),
-        ],
-        "wasi:io" => vec![
-            "wasi:io/error@0.2.12".to_string(),
-            "wasi:io/poll@0.2.12".to_string(),
-            "wasi:io/streams@0.2.12".to_string(),
-        ],
-        "wasi:random" => vec![
-            "wasi:random/random@0.2.12".to_string(),
-            "wasi:random/insecure@0.2.12".to_string(),
-            "wasi:random/insecure-seed@0.2.12".to_string(),
-        ],
-        "wasi:sockets" => vec![
-            "wasi:sockets/tcp@0.2.12".to_string(),
-            "wasi:sockets/udp@0.2.12".to_string(),
-            "wasi:sockets/network@0.2.12".to_string(),
-            "wasi:sockets/instance-network@0.2.12".to_string(),
-            "wasi:sockets/ip-name-lookup@0.2.12".to_string(),
-            "wasi:sockets/tcp-create-socket@0.2.12".to_string(),
-            "wasi:sockets/udp-create-socket@0.2.12".to_string(),
-        ],
-        "wasi:p2" => vec![
+    // `wasi:p2` is a bundle alias (hardcoded version), so it is matched
+    // exactly rather than through split_wasi_kind.
+    if kind == "wasi:p2" {
+        return vec![
             "wasi:cli/environment@0.2.12".to_string(),
             "wasi:cli/exit@0.2.12".to_string(),
             "wasi:cli/stderr@0.2.12".to_string(),
@@ -424,6 +407,78 @@ fn get_interfaces_for_capability(kind: &str) -> Vec<String> {
             "wasi:random/random@0.2.12".to_string(),
             "wasi:random/insecure@0.2.12".to_string(),
             "wasi:random/insecure-seed@0.2.12".to_string(),
+            "wasi:sockets/tcp@0.2.12".to_string(),
+            "wasi:sockets/udp@0.2.12".to_string(),
+            "wasi:sockets/network@0.2.12".to_string(),
+            "wasi:sockets/instance-network@0.2.12".to_string(),
+            "wasi:sockets/ip-name-lookup@0.2.12".to_string(),
+            "wasi:sockets/tcp-create-socket@0.2.12".to_string(),
+            "wasi:sockets/udp-create-socket@0.2.12".to_string(),
+        ];
+    }
+
+    let (base, version) = split_wasi_kind(kind);
+    match (base, version) {
+        ("wasi:cli", WasiVersion::P3) => vec![
+            "wasi:cli/environment@0.3.0".to_string(),
+            "wasi:cli/exit@0.3.0".to_string(),
+            "wasi:cli/stdin@0.3.0".to_string(),
+            "wasi:cli/stdout@0.3.0".to_string(),
+            "wasi:cli/stderr@0.3.0".to_string(),
+            "wasi:cli/terminal-input@0.3.0".to_string(),
+            "wasi:cli/terminal-output@0.3.0".to_string(),
+            "wasi:cli/terminal-stdin@0.3.0".to_string(),
+            "wasi:cli/terminal-stdout@0.3.0".to_string(),
+            "wasi:cli/terminal-stderr@0.3.0".to_string(),
+            "wasi:cli/types@0.3.0".to_string(),
+        ],
+        ("wasi:cli", WasiVersion::P2) => vec![
+            "wasi:cli/stdin@0.2.12".to_string(),
+            "wasi:cli/stdout@0.2.12".to_string(),
+            "wasi:cli/stderr@0.2.12".to_string(),
+            "wasi:cli/environment@0.2.12".to_string(),
+        ],
+        ("wasi:clocks", WasiVersion::P3) => vec![
+            "wasi:clocks/monotonic-clock@0.3.0".to_string(),
+            "wasi:clocks/system-clock@0.3.0".to_string(),
+            "wasi:clocks/timezone@0.3.0".to_string(),
+            "wasi:clocks/types@0.3.0".to_string(),
+        ],
+        ("wasi:clocks", WasiVersion::P2) => vec![
+            "wasi:clocks/monotonic-clock@0.2.12".to_string(),
+            "wasi:clocks/wall-clock@0.2.12".to_string(),
+        ],
+        ("wasi:http", WasiVersion::P3) => vec![
+            "wasi:http/client@0.3.0".to_string(),
+            "wasi:http/types@0.3.0".to_string(),
+        ],
+        ("wasi:http", WasiVersion::P2) => vec![
+            "wasi:http/outgoing-handler@0.2.12".to_string(),
+            "wasi:http/types@0.2.12".to_string(),
+            "wasi:io/error@0.2.12".to_string(),
+            "wasi:io/poll@0.2.12".to_string(),
+            "wasi:io/streams@0.2.12".to_string(),
+        ],
+        ("wasi:io", WasiVersion::P2) => vec![
+            "wasi:io/error@0.2.12".to_string(),
+            "wasi:io/poll@0.2.12".to_string(),
+            "wasi:io/streams@0.2.12".to_string(),
+        ],
+        ("wasi:random", WasiVersion::P3) => vec![
+            "wasi:random/random@0.3.0".to_string(),
+            "wasi:random/insecure@0.3.0".to_string(),
+            "wasi:random/insecure-seed@0.3.0".to_string(),
+        ],
+        ("wasi:random", WasiVersion::P2) => vec![
+            "wasi:random/random@0.2.12".to_string(),
+            "wasi:random/insecure@0.2.12".to_string(),
+            "wasi:random/insecure-seed@0.2.12".to_string(),
+        ],
+        ("wasi:sockets", WasiVersion::P3) => vec![
+            "wasi:sockets/types@0.3.0".to_string(),
+            "wasi:sockets/ip-name-lookup@0.3.0".to_string(),
+        ],
+        ("wasi:sockets", WasiVersion::P2) => vec![
             "wasi:sockets/tcp@0.2.12".to_string(),
             "wasi:sockets/udp@0.2.12".to_string(),
             "wasi:sockets/network@0.2.12".to_string(),

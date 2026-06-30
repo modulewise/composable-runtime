@@ -11,15 +11,12 @@ use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
 use wasmtime_wasi::sockets::{WasiSockets, WasiSocketsView};
 use wasmtime_wasi::{ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
-use wasmtime_wasi_http::p2::types::{HostFutureIncomingResponse, OutgoingRequestConfig};
-use wasmtime_wasi_http::p2::{
-    HttpResult, WasiHttpCtxView, WasiHttpHooks, WasiHttpView, default_send_request,
-};
+use wasmtime_wasi_http::{p2 as http_p2, p3 as http_p3};
 use wasmtime_wasi_io::IoView;
 
-use crate::composition::registry::{CapabilityRegistry, ComponentRegistry};
+use crate::composition::registry::{
+    CapabilityRegistry, ComponentRegistry, WasiVersion, split_wasi_kind,
+};
 use crate::context::PROPAGATION_CONTEXT;
 use crate::types::{
     Component, ComponentInvoker, ComponentMetadata, ComponentState, Function, HttpHooks,
@@ -167,25 +164,10 @@ impl WasiView for ComponentState {
     }
 }
 
-impl WasiHttpView for ComponentState {
-    fn http(&mut self) -> WasiHttpCtxView<'_> {
-        WasiHttpCtxView {
-            ctx: self.wasi_http_ctx.as_mut().expect(
-                "Component requires 'http' capability, so HTTP context should be available",
-            ),
-            table: &mut self.resource_table,
-            hooks: &mut self.http_hooks,
-        }
-    }
-}
-
-impl WasiHttpHooks for HttpHooks {
-    fn send_request(
-        &mut self,
-        mut request: hyper::Request<HyperOutgoingBody>,
-        config: OutgoingRequestConfig,
-    ) -> HttpResult<HostFutureIncomingResponse> {
-        // Propagate context entries to outgoing HTTP requests if present.
+impl HttpHooks {
+    // Inject propagation-context headers (e.g. tracecontext) onto an outgoing
+    // request. Shared by the p2 and p3 hooks.
+    fn propagate_headers<B>(request: &mut http::Request<B>) {
         let ctx_entries: Option<HashMap<String, String>> = PROPAGATION_CONTEXT
             .try_with(|ctx| ctx.as_ref().map(|c| c.entries.clone()))
             .ok()
@@ -199,21 +181,98 @@ impl WasiHttpHooks for HttpHooks {
                 }
             }
         }
+    }
 
-        let is_grpc = request
+    // Whether a request is gRPC (content-type application/grpc).
+    fn is_grpc<B>(request: &http::Request<B>) -> bool {
+        request
             .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
-            .is_some_and(|ct| ct.starts_with("application/grpc"));
+            .is_some_and(|ct| ct.starts_with("application/grpc"))
+    }
+}
 
-        if self.h2c_for_grpc && is_grpc {
+impl http_p2::WasiHttpView for ComponentState {
+    fn http(&mut self) -> http_p2::WasiHttpCtxView<'_> {
+        http_p2::WasiHttpCtxView {
+            hooks: &mut self.http_hooks,
+            table: &mut self.resource_table,
+            ctx: self.wasi_http_ctx.as_mut().expect(
+                "Component requires 'http' capability, so HTTP context should be available",
+            ),
+        }
+    }
+}
+
+impl http_p3::WasiHttpView for ComponentState {
+    fn http(&mut self) -> http_p3::WasiHttpCtxView<'_> {
+        http_p3::WasiHttpCtxView {
+            hooks: &mut self.http_hooks,
+            table: &mut self.resource_table,
+            ctx: self.wasi_http_ctx.as_mut().expect(
+                "Component requires 'http' capability, so HTTP context should be available",
+            ),
+        }
+    }
+}
+
+impl http_p2::WasiHttpHooks for HttpHooks {
+    fn send_request(
+        &mut self,
+        mut request: hyper::Request<http_p2::body::HyperOutgoingBody>,
+        config: http_p2::types::OutgoingRequestConfig,
+    ) -> http_p2::HttpResult<http_p2::types::HostFutureIncomingResponse> {
+        Self::propagate_headers(&mut request);
+
+        if self.h2c_for_grpc && Self::is_grpc(&request) {
             if request.uri().scheme_str() == Some("https") {
                 tracing::error!("h2c-for-grpc does not support TLS (https)");
-                return Err(ErrorCode::HttpProtocolError.into());
+                return Err(http_p2::bindings::http::types::ErrorCode::HttpProtocolError.into());
             }
-            Ok(super::grpc::send_grpc_request(request, config))
+            Ok(super::grpc::send_grpc_request_p2(request, config))
         } else {
-            Ok(default_send_request(request, config))
+            Ok(http_p2::default_send_request(request, config))
+        }
+    }
+}
+
+type P3ErrorCode = http_p3::bindings::http::types::ErrorCode;
+type P3Body = http_body_util::combinators::UnsyncBoxBody<bytes::Bytes, P3ErrorCode>;
+type P3IoFuture = Box<dyn std::future::Future<Output = Result<(), P3ErrorCode>> + Send>;
+
+impl http_p3::WasiHttpHooks for HttpHooks {
+    fn send_request(
+        &mut self,
+        mut request: http::Request<P3Body>,
+        options: Option<http_p3::RequestOptions>,
+        fut: P3IoFuture,
+    ) -> Box<
+        dyn std::future::Future<
+                Output = Result<
+                    (http::Response<P3Body>, P3IoFuture),
+                    wasmtime_wasi::TrappableError<P3ErrorCode>,
+                >,
+            > + Send,
+    > {
+        Self::propagate_headers(&mut request);
+
+        if self.h2c_for_grpc && Self::is_grpc(&request) {
+            if request.uri().scheme_str() == Some("https") {
+                tracing::error!("h2c-for-grpc does not support TLS (https)");
+                let err = P3ErrorCode::HttpProtocolError;
+                return Box::new(async move { Err(err.into()) });
+            }
+            super::grpc::send_grpc_request_p3(request, options)
+        } else {
+            // `fut` is the guest-side request-error channel,
+            // unused by `default_send_request`.
+            let _ = fut;
+            Box::new(async move {
+                use http_body_util::BodyExt;
+                let (res, io) = http_p3::default_send_request(request, options).await?;
+                Ok((res.map(BodyExt::boxed_unsync), Box::new(io) as P3IoFuture))
+            })
         }
     }
 }
@@ -250,14 +309,21 @@ impl Invoker {
         // Add WASI interfaces based on explicitly requested capabilities
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name) {
-                if let Some(wasi_capability) = capability.kind.strip_prefix("wasi:") {
+                if capability.kind.starts_with("wasi:") {
                     use wasmtime_wasi::p2::bindings::{cli, clocks, random, sockets};
 
-                    match wasi_capability {
-                        "p2" => {
-                            wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+                    // `wasi:p2` is a bundle alias (hardcoded version), so it
+                    // is matched exactly rather than through split_wasi_kind.
+                    if capability.kind == "wasi:p2" {
+                        wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+                        continue;
+                    }
+
+                    match split_wasi_kind(&capability.kind) {
+                        ("wasi:cli", WasiVersion::P3) => {
+                            wasmtime_wasi::p3::cli::add_to_linker(&mut linker)?;
                         }
-                        "cli" => {
+                        ("wasi:cli", WasiVersion::P2) => {
                             cli::stdin::add_to_linker::<ComponentState, WasiCli>(
                                 &mut linker,
                                 ComponentState::cli,
@@ -275,7 +341,10 @@ impl Invoker {
                                 ComponentState::cli,
                             )?;
                         }
-                        "clocks" => {
+                        ("wasi:clocks", WasiVersion::P3) => {
+                            wasmtime_wasi::p3::clocks::add_to_linker(&mut linker)?;
+                        }
+                        ("wasi:clocks", WasiVersion::P2) => {
                             clocks::wall_clock::add_to_linker::<ComponentState, WasiClocks>(
                                 &mut linker,
                                 ComponentState::clocks,
@@ -285,15 +354,20 @@ impl Invoker {
                                 ComponentState::clocks,
                             )?;
                         }
-                        "http" => {
+                        ("wasi:http", WasiVersion::P3) => {
+                            wasmtime_wasi_http::p3::add_to_linker(&mut linker)?;
+                        }
+                        ("wasi:http", WasiVersion::P2) => {
                             wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
-                            // io is a transitive dep
                             wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
                         }
-                        "io" => {
+                        ("wasi:io", WasiVersion::P2) => {
                             wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
                         }
-                        "random" => {
+                        ("wasi:random", WasiVersion::P3) => {
+                            wasmtime_wasi::p3::random::add_to_linker(&mut linker)?;
+                        }
+                        ("wasi:random", WasiVersion::P2) => {
                             random::random::add_to_linker::<ComponentState, WasiRandom>(
                                 &mut linker,
                                 |state| <ComponentState as WasiRandomView>::random(state),
@@ -307,7 +381,10 @@ impl Invoker {
                                 |state| <ComponentState as WasiRandomView>::random(state),
                             )?;
                         }
-                        "sockets" => {
+                        ("wasi:sockets", WasiVersion::P3) => {
+                            wasmtime_wasi::p3::sockets::add_to_linker(&mut linker)?;
+                        }
+                        ("wasi:sockets", WasiVersion::P2) => {
                             sockets::tcp::add_to_linker::<ComponentState, WasiSockets>(
                                 &mut linker,
                                 ComponentState::sockets,
@@ -413,12 +490,12 @@ impl Invoker {
             }
         }
 
-        // Find the wasi:http capability (if any); its properties configure the
-        // HTTP context and hooks.
+        // Find the wasi:http capability (if any). Its properties configure the
+        // HTTP context and hooks. Matches any version; WasiHttpCtx is shared.
         let http_capability = capabilities.iter().find_map(|capability_name| {
             capability_registry
                 .get_capability(capability_name)
-                .filter(|cap| cap.kind.strip_prefix("wasi:") == Some("http"))
+                .filter(|cap| split_wasi_kind(&cap.kind).0 == "wasi:http")
         });
         let needs_http = http_capability.is_some();
         let http_hooks = http_capability
@@ -523,7 +600,26 @@ impl Invoker {
         let num_results = func_ty.results().len();
         let mut results = vec![Val::Bool(false); num_results];
 
-        func.call_async(&mut store, &arg_vals, &mut results).await?;
+        // `run_concurrent` keeps the async executor active so an async-typed
+        // export can block on async imports (e.g. wasi:http) and be driven to
+        // completion; `call_async` would trap if the call idles awaiting I/O.
+        let call_result = store
+            .run_concurrent(async |accessor| {
+                func.call_concurrent(accessor, &arg_vals, &mut results)
+                    .await
+            })
+            .await?;
+
+        // A guest calling `wasi:cli/exit` surfaces as an `I32Exit` error.
+        if let Err(e) = call_result {
+            return match e.downcast_ref::<wasmtime_wasi::I32Exit>() {
+                Some(wasmtime_wasi::I32Exit(0)) => Ok(serde_json::Value::Null),
+                Some(wasmtime_wasi::I32Exit(code)) => {
+                    Err(anyhow::anyhow!("component exited with code {code}"))
+                }
+                None => Err(e.into()),
+            };
+        }
 
         // Handle results according to WIT function signature
         match results.len() {
