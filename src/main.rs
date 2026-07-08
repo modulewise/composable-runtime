@@ -101,6 +101,8 @@ enum ShellCommand {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -215,6 +217,14 @@ async fn run_invoke(
     let function = component.functions.get(func_name).ok_or_else(|| {
         anyhow::anyhow!("function '{func_name}' not found in component '{component_name}'")
     })?;
+
+    if !function.is_invokable() {
+        return Err(anyhow::anyhow!(
+            "function '{func_name}' uses a type that cannot be invoked directly \
+             (a stream, future, or resource); it can still be used as a composed \
+             dependency of another component"
+        ));
+    }
 
     let final_args =
         parse_invoke_args(args, function.params()).map_err(|e| anyhow::anyhow!("{e}"))?;

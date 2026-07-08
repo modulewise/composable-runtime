@@ -52,6 +52,7 @@ http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 oci-client = "0.16"
 petgraph = "0.8"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 rustyline = "17"
 serde.workspace = true
 serde_json.workspace = true

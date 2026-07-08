@@ -1836,7 +1836,7 @@ mod tests {
         for (name, params) in functions {
             function_map.insert(
                 name.to_string(),
-                Function::new(None, name.to_string(), String::new(), params, None),
+                Function::new(None, name.to_string(), String::new(), params, None, true),
             );
         }
         Component {
@@ -1912,6 +1912,7 @@ mod tests {
                 String::new(),
                 vec![],
                 Some(result_schema),
+                true,
             ),
         );
         Component {

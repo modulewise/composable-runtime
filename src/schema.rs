@@ -818,7 +818,7 @@ mod tests {
     }
 
     fn fn_with(params: Vec<FunctionParam>, result: Option<Value>) -> Function {
-        Function::new(None, "test".into(), String::new(), params, result)
+        Function::new(None, "test".into(), String::new(), params, result, true)
     }
 
     // ----- Path resolution -----

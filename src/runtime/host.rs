@@ -288,6 +288,10 @@ impl Invoker {
         config.cache(Some(Cache::from_file(None)?));
         config.parallel_compilation(true);
         config.wasm_component_model_async(true);
+        // Synchronous stream.read/future.read builtins.
+        config.wasm_component_model_more_async_builtins(true);
+        // Stackful async lift, so an async call can block on those reads.
+        config.wasm_component_model_async_stackful(true);
         config.memory_init_cow(true);
         config.wasm_gc(true);
         config.wasm_exceptions(true);
