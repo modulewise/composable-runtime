@@ -691,6 +691,7 @@ dependencies = [
  "hyper",
  "oci-client",
  "petgraph 0.8.3",
+ "rustls",
  "rustyline",
  "serde",
  "serde_json",

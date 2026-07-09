@@ -143,26 +143,42 @@ impl Parser {
         interface: Option<Interface>,
         resolve: &Resolve,
     ) -> Result<Function> {
-        // Validate and resolve parameter types
-        let mut params = Vec::new();
-        for p in &func.params {
-            Self::validate_wit_type_for_json_rpc(p.ty, resolve)?;
-            let json_schema = Self::wit_type_to_json_schema(p.ty, resolve);
-            let is_optional = Self::is_optional_type(p.ty, resolve);
-            params.push(FunctionParam {
-                name: p.name.clone(),
-                is_optional,
-                json_schema,
-            });
-        }
+        // A function is invokable only if all its param types and its result
+        // type are host-invokable.
+        let is_invokable = func
+            .params
+            .iter()
+            .all(|p| Self::is_invokable(p.ty, resolve))
+            && func
+                .result
+                .is_none_or(|result_type| Self::is_invokable(result_type, resolve));
 
-        // Validate and convert result type
-        let result = match &func.result {
-            Some(return_type) => {
-                Self::validate_wit_type_for_json_rpc(*return_type, resolve)?;
-                Some(Self::wit_type_to_json_schema(*return_type, resolve))
-            }
-            None => None,
+        // Schemas are only meaningful for invokable functions.
+        let (params, result) = if is_invokable {
+            let params = func
+                .params
+                .iter()
+                .map(|p| FunctionParam {
+                    name: p.name.clone(),
+                    is_optional: Self::is_optional_type(p.ty, resolve),
+                    json_schema: Self::wit_type_to_json_schema(p.ty, resolve),
+                })
+                .collect();
+            let result = func
+                .result
+                .map(|result_type| Self::wit_type_to_json_schema(result_type, resolve));
+            (params, result)
+        } else {
+            let params = func
+                .params
+                .iter()
+                .map(|p| FunctionParam {
+                    name: p.name.clone(),
+                    is_optional: Self::is_optional_type(p.ty, resolve),
+                    json_schema: serde_json::Value::Null,
+                })
+                .collect();
+            (params, None)
         };
 
         Ok(Function::new(
@@ -171,6 +187,7 @@ impl Parser {
             func.docs.contents.as_deref().unwrap_or("").to_string(),
             params,
             result,
+            is_invokable,
         ))
     }
 
@@ -197,91 +214,47 @@ impl Parser {
         Ok(result)
     }
 
-    fn validate_wit_type_for_json_rpc(wit_type: Type, resolve: &Resolve) -> Result<()> {
-        match wit_type {
-            // Primitives are all supported
-            Type::Bool
-            | Type::U8
-            | Type::U16
-            | Type::U32
-            | Type::U64
-            | Type::S8
-            | Type::S16
-            | Type::S32
-            | Type::S64
-            | Type::F32
-            | Type::F64
-            | Type::Char
-            | Type::String
-            | Type::ErrorContext => Ok(()),
-
-            // Complex types need validation
-            Type::Id(type_id) => {
-                let type_def = resolve
-                    .types
-                    .get(type_id)
-                    .expect("Type definition not found for type ID");
-                match &type_def.kind {
-                    wit_parser::TypeDefKind::Type(inner_type) => {
-                        Self::validate_wit_type_for_json_rpc(*inner_type, resolve)
-                    }
-                    wit_parser::TypeDefKind::Record(record) => {
-                        for field in &record.fields {
-                            Self::validate_wit_type_for_json_rpc(field.ty, resolve)?;
-                        }
-                        Ok(())
-                    }
-                    wit_parser::TypeDefKind::Variant(variant) => {
-                        for case in &variant.cases {
-                            if let Some(case_type) = case.ty {
-                                Self::validate_wit_type_for_json_rpc(case_type, resolve)?;
-                            }
-                        }
-                        Ok(())
-                    }
-                    wit_parser::TypeDefKind::Enum(_) => Ok(()),
-                    wit_parser::TypeDefKind::Option(option_type) => {
-                        Self::validate_wit_type_for_json_rpc(*option_type, resolve)
-                    }
-                    wit_parser::TypeDefKind::Result(result_type) => {
-                        if let Some(ok_type) = result_type.ok {
-                            Self::validate_wit_type_for_json_rpc(ok_type, resolve)?;
-                        }
-                        if let Some(err_type) = result_type.err {
-                            Self::validate_wit_type_for_json_rpc(err_type, resolve)?;
-                        }
-                        Ok(())
-                    }
-                    wit_parser::TypeDefKind::List(element_type) => {
-                        Self::validate_wit_type_for_json_rpc(*element_type, resolve)
-                    }
-                    wit_parser::TypeDefKind::Map(key_type, value_type) => {
-                        // WIT restricts map keys to primitives.
-                        // Both key and value still need to be representable.
-                        Self::validate_wit_type_for_json_rpc(*key_type, resolve)?;
-                        Self::validate_wit_type_for_json_rpc(*value_type, resolve)
-                    }
-                    wit_parser::TypeDefKind::FixedLengthList(..) => {
-                        // Rejected on a surfaced (JSON-RPC invoked) signature:
-                        // wasmtime does not yet support fixed-length lists in
-                        // its public value-conversion (Val) API.
-                        // Inter-component use is ok.
-                        // See https://github.com/bytecodealliance/wasmtime/issues/12279
-                        Err(anyhow::anyhow!("fixed-length lists are not yet supported"))
-                    }
-                    wit_parser::TypeDefKind::Tuple(tuple) => {
-                        for tuple_type in &tuple.types {
-                            Self::validate_wit_type_for_json_rpc(*tuple_type, resolve)?;
-                        }
-                        Ok(())
-                    }
-                    wit_parser::TypeDefKind::Flags(_) => Ok(()),
-                    // Resources get placeholders
-                    wit_parser::TypeDefKind::Resource => Ok(()),
-                    wit_parser::TypeDefKind::Handle(_) => Ok(()),
-                    _ => Err(anyhow::anyhow!("Unsupported WIT type: {:?}", type_def.kind)),
-                }
+    // Whether a type is directly host-invokable.
+    fn is_invokable(wit_type: Type, resolve: &Resolve) -> bool {
+        if matches!(wit_type, Type::ErrorContext) {
+            return false;
+        }
+        let Type::Id(type_id) = wit_type else {
+            return true; // primitives, string, char
+        };
+        let type_def = &resolve.types[type_id];
+        match &type_def.kind {
+            wit_parser::TypeDefKind::Type(inner) => Self::is_invokable(*inner, resolve),
+            wit_parser::TypeDefKind::Record(r) => {
+                r.fields.iter().all(|f| Self::is_invokable(f.ty, resolve))
             }
+            wit_parser::TypeDefKind::Variant(v) => v
+                .cases
+                .iter()
+                .all(|c| c.ty.map(|t| Self::is_invokable(t, resolve)).unwrap_or(true)),
+            wit_parser::TypeDefKind::Option(t) | wit_parser::TypeDefKind::List(t) => {
+                Self::is_invokable(*t, resolve)
+            }
+            wit_parser::TypeDefKind::Result(r) => {
+                r.ok.map(|t| Self::is_invokable(t, resolve)).unwrap_or(true)
+                    && r.err
+                        .map(|t| Self::is_invokable(t, resolve))
+                        .unwrap_or(true)
+            }
+            wit_parser::TypeDefKind::Tuple(t) => {
+                t.types.iter().all(|ty| Self::is_invokable(*ty, resolve))
+            }
+            wit_parser::TypeDefKind::Map(k, val) => {
+                Self::is_invokable(*k, resolve) && Self::is_invokable(*val, resolve)
+            }
+            wit_parser::TypeDefKind::Enum(_) | wit_parser::TypeDefKind::Flags(_) => true,
+            // Not host-invokable.
+            wit_parser::TypeDefKind::Stream(_)
+            | wit_parser::TypeDefKind::Future(_)
+            | wit_parser::TypeDefKind::Resource
+            | wit_parser::TypeDefKind::Handle(_)
+            | wit_parser::TypeDefKind::FixedLengthList(..)
+            | wit_parser::TypeDefKind::Unknown => false,
         }
     }
 
@@ -476,7 +449,7 @@ impl Parser {
                         json!({"type": "resource", "description": "Resource handle (not representable in JSON-RPC)"})
                     }
                     _ => {
-                        unreachable!("Unsupported types should be caught by validation")
+                        unreachable!("non-invokable types are excluded before schema build")
                     }
                 }
             }

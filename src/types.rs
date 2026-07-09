@@ -163,6 +163,7 @@ pub struct Function {
     docs: String,
     params: Vec<FunctionParam>,
     result: Option<serde_json::Value>,
+    is_invokable: bool,
 }
 
 impl Function {
@@ -173,6 +174,7 @@ impl Function {
         docs: String,
         params: Vec<FunctionParam>,
         result: Option<serde_json::Value>,
+        is_invokable: bool,
     ) -> Self {
         Self {
             interface,
@@ -180,7 +182,13 @@ impl Function {
             docs,
             params,
             result,
+            is_invokable,
         }
+    }
+
+    /// Whether this function can be invoked directly host-side (JSON-RPC).
+    pub fn is_invokable(&self) -> bool {
+        self.is_invokable
     }
 
     /// Get the interface (None for direct function exports)
