@@ -174,7 +174,7 @@ impl Parser {
                 .iter()
                 .map(|p| FunctionParam {
                     name: p.name.clone(),
-                    is_optional: false,
+                    is_optional: Self::is_optional_type(p.ty, resolve),
                     json_schema: serde_json::Value::Null,
                 })
                 .collect();
