@@ -247,11 +247,10 @@ impl Parser {
             wit_parser::TypeDefKind::Map(k, val) => {
                 Self::is_invokable(*k, resolve) && Self::is_invokable(*val, resolve)
             }
-            wit_parser::TypeDefKind::Enum(_) => true,
+            wit_parser::TypeDefKind::Enum(_) | wit_parser::TypeDefKind::Flags(_) => true,
             // Not host-invokable.
             wit_parser::TypeDefKind::Stream(_)
             | wit_parser::TypeDefKind::Future(_)
-            | wit_parser::TypeDefKind::Flags(_)
             | wit_parser::TypeDefKind::Resource
             | wit_parser::TypeDefKind::Handle(_)
             | wit_parser::TypeDefKind::FixedLengthList(..)
