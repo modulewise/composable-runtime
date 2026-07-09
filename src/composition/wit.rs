@@ -143,16 +143,15 @@ impl Parser {
         interface: Option<Interface>,
         resolve: &Resolve,
     ) -> Result<Function> {
-        // Validate and resolve parameter types.
-        let mut is_invokable = true;
-        for p in &func.params {
-            Self::validate_wit(p.ty, resolve)?;
-            is_invokable &= Self::is_invokable(p.ty, resolve);
-        }
-        if let Some(result_type) = &func.result {
-            Self::validate_wit(*result_type, resolve)?;
-            is_invokable &= Self::is_invokable(*result_type, resolve);
-        }
+        // A function is invokable only if all its param types and its result
+        // type are host-invokable.
+        let is_invokable = func
+            .params
+            .iter()
+            .all(|p| Self::is_invokable(p.ty, resolve))
+            && func
+                .result
+                .is_none_or(|result_type| Self::is_invokable(result_type, resolve));
 
         // Schemas are only meaningful for invokable functions.
         let (params, result) = if is_invokable {
@@ -215,68 +214,6 @@ impl Parser {
         Ok(result)
     }
 
-    // Errors on WIT the runtime cannot yet represent even for composition.
-    // Types that merely cannot yet be host-invoked (stream, future, etc.) are
-    // allowed here but rejected later by `is_invokable`.
-    fn validate_wit(wit_type: Type, resolve: &Resolve) -> Result<()> {
-        let Type::Id(type_id) = wit_type else {
-            return Ok(()); // primitives, string, char, error-context
-        };
-        let type_def = resolve
-            .types
-            .get(type_id)
-            .expect("Type definition not found for type ID");
-        match &type_def.kind {
-            wit_parser::TypeDefKind::Type(inner) => Self::validate_wit(*inner, resolve),
-            wit_parser::TypeDefKind::Record(r) => {
-                for f in &r.fields {
-                    Self::validate_wit(f.ty, resolve)?;
-                }
-                Ok(())
-            }
-            wit_parser::TypeDefKind::Variant(v) => {
-                for c in &v.cases {
-                    if let Some(t) = c.ty {
-                        Self::validate_wit(t, resolve)?;
-                    }
-                }
-                Ok(())
-            }
-            wit_parser::TypeDefKind::Option(t) => Self::validate_wit(*t, resolve),
-            wit_parser::TypeDefKind::Result(r) => {
-                if let Some(ok) = r.ok {
-                    Self::validate_wit(ok, resolve)?;
-                }
-                if let Some(err) = r.err {
-                    Self::validate_wit(err, resolve)?;
-                }
-                Ok(())
-            }
-            wit_parser::TypeDefKind::List(t) | wit_parser::TypeDefKind::FixedLengthList(t, _) => {
-                Self::validate_wit(*t, resolve)
-            }
-            wit_parser::TypeDefKind::Tuple(t) => {
-                for ty in &t.types {
-                    Self::validate_wit(*ty, resolve)?;
-                }
-                Ok(())
-            }
-            wit_parser::TypeDefKind::Map(k, val) => {
-                Self::validate_wit(*k, resolve)?;
-                Self::validate_wit(*val, resolve)
-            }
-            wit_parser::TypeDefKind::Stream(t) | wit_parser::TypeDefKind::Future(t) => match t {
-                Some(t) => Self::validate_wit(*t, resolve),
-                None => Ok(()),
-            },
-            wit_parser::TypeDefKind::Enum(_)
-            | wit_parser::TypeDefKind::Flags(_)
-            | wit_parser::TypeDefKind::Resource
-            | wit_parser::TypeDefKind::Handle(_) => Ok(()),
-            other => Err(anyhow::anyhow!("Unsupported WIT type: {other:?}")),
-        }
-    }
-
     // Whether a type is directly host-invokable.
     fn is_invokable(wit_type: Type, resolve: &Resolve) -> bool {
         if matches!(wit_type, Type::ErrorContext) {
@@ -311,15 +248,14 @@ impl Parser {
                 Self::is_invokable(*k, resolve) && Self::is_invokable(*val, resolve)
             }
             wit_parser::TypeDefKind::Enum(_) => true,
-            // Not host-invokable. Streams/futures are consumed only across
-            // component boundaries.
+            // Not host-invokable.
             wit_parser::TypeDefKind::Stream(_)
             | wit_parser::TypeDefKind::Future(_)
             | wit_parser::TypeDefKind::Flags(_)
             | wit_parser::TypeDefKind::Resource
             | wit_parser::TypeDefKind::Handle(_)
-            | wit_parser::TypeDefKind::FixedLengthList(..) => false,
-            _ => false,
+            | wit_parser::TypeDefKind::FixedLengthList(..)
+            | wit_parser::TypeDefKind::Unknown => false,
         }
     }
 
