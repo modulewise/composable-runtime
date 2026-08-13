@@ -1,4 +1,4 @@
-package composable:http@0.2.0;
+package composable:http@0.3.0;
 
 interface client {
     enum method {
