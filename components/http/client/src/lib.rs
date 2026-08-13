@@ -138,6 +138,8 @@ fn to_wasi_method(method: Method) -> WasiMethod {
         Method::Patch => WasiMethod::Patch,
         Method::Head => WasiMethod::Head,
         Method::Options => WasiMethod::Options,
+        Method::Trace => WasiMethod::Trace,
+        Method::Query => WasiMethod::Other("QUERY".to_string()),
     }
 }
 
@@ -215,6 +217,23 @@ impl Guest for HttpClient {
         options: Option<RequestOptions>,
     ) -> Result<HttpResponse, String> {
         Self::request(WasiMethod::Options, url, headers, empty_body(), options).await
+    }
+
+    async fn trace(
+        url: String,
+        headers: Vec<(String, String)>,
+        options: Option<RequestOptions>,
+    ) -> Result<HttpResponse, String> {
+        Self::request(WasiMethod::Trace, url, headers, empty_body(), options).await
+    }
+
+    async fn query(
+        url: String,
+        headers: Vec<(String, String)>,
+        body: StreamReader<u8>,
+        options: Option<RequestOptions>,
+    ) -> Result<HttpResponse, String> {
+        Self::request(to_wasi_method(Method::Query), url, headers, body, options).await
     }
 }
 

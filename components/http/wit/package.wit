@@ -9,6 +9,8 @@ interface client {
         patch,
         head,
         options,
+        trace,
+        query,
     }
 
     /// Per-request options. None fields fall through to host defaults.
@@ -52,6 +54,12 @@ interface client {
 
     /// HTTP OPTIONS request.
     options: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, string>;
+
+    /// HTTP TRACE request.
+    trace: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, string>;
+
+    /// HTTP QUERY request.
+    query: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, string>;
 }
 
 world http-client {
