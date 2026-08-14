@@ -8,6 +8,7 @@ use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
 use std::collections::HashMap;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -239,8 +240,54 @@ async fn run_invoke(
         }
         _ => invoke_fut.await,
     }?;
+    // Write a bytes result to stdout, rather than render as a JSON array.
+    if returns_bytes(function.result()) {
+        let bytes: Vec<u8> = result
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_u64())
+                    .map(|n| n as u8)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if std::io::stdout().is_terminal() {
+            eprintln!("<{} bytes> (redirect stdout to capture)", bytes.len());
+        } else {
+            std::io::stdout().write_all(&bytes)?;
+            std::io::stdout().flush()?;
+        }
+        return Ok(());
+    }
+
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
+}
+
+// Consider the return value bytes if the function's result is a `list<u8>`.
+// The generated schema for such a result will be an array of numbers that
+// includes `minimum: 0` and `maximum: 255`.
+fn returns_bytes(schema: Option<&serde_json::Value>) -> bool {
+    let Some(schema) = schema else {
+        return false;
+    };
+    // `result<T, E>` is encoded as a two-arm `oneOf`; take the `ok` arm's schema.
+    let schema = schema
+        .get("oneOf")
+        .and_then(|arms| arms.as_array())
+        .and_then(|arms| arms.iter().find_map(|arm| arm.pointer("/properties/ok")))
+        .unwrap_or(schema);
+
+    if schema.get("type").and_then(|t| t.as_str()) != Some("array") {
+        return false;
+    }
+    let Some(items) = schema.get("items") else {
+        return false;
+    };
+    items.get("type").and_then(|t| t.as_str()) == Some("number")
+        && items.get("minimum").and_then(|m| m.as_i64()) == Some(0)
+        && items.get("maximum").and_then(|m| m.as_i64()) == Some(255)
 }
 
 async fn run_shell(
