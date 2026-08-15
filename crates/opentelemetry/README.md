@@ -75,6 +75,6 @@ The service claims `[capability.*]` definitions where `type = "otel"`. On `start
 
 ## WIT
 
-Bindings target the [wasi:otel](https://github.com/WebAssembly/wasi-otel) `tracing` and `logs` interfaces (the `wasi:otel@0.2.0-rc.2+patch` package has updated transitive wasi dependency versions to 0.2.6 to align with the core runtime). The `metrics` interface is not yet implemented.
+Bindings target the [wasi:otel](https://github.com/WebAssembly/wasi-otel) `tracing` and `logs` interfaces (the `wasi:otel@0.2.0-rc.2+patch` package has updated transitive wasi dependency versions to 0.2.12 to align with the core runtime). The `metrics` interface is not yet implemented.
 
 See [examples/otel-service](../../examples/otel-service) for an end-to-end example including HTTP trace propagation.

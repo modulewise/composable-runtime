@@ -1,6 +1,6 @@
 interface metrics {
-    use wasi:clocks/wall-clock@0.2.6.{datetime};
-    use wasi:clocks/monotonic-clock@0.2.6.{duration};
+    use wasi:clocks/wall-clock@0.2.12.{datetime};
+    use wasi:clocks/monotonic-clock@0.2.12.{duration};
     use types.{key-value, instrumentation-scope, %resource};
     use tracing.{span-id, trace-id};
 

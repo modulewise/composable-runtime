@@ -1,7 +1,7 @@
 interface logs {
     use types.{instrumentation-scope, %resource, value, key-value};
     use tracing.{span-id, trace-id, trace-flags};
-    use wasi:clocks/wall-clock@0.2.6.{datetime};
+    use wasi:clocks/wall-clock@0.2.12.{datetime};
 
     /// Called when a log is emitted.
     on-emit: func(data: log-record);
