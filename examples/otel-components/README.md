@@ -139,13 +139,13 @@ world guest {
 world otel-to-grpc {
     export wasi:otel/logs@0.2.0-rc.2+patch;
     import modulewise:grpc/endpoint@0.1.0;
-    import wasi:clocks/wall-clock@0.2.6;
+    import wasi:clocks/wall-clock@0.2.12;
 }
 
 // Component Endpoint: translates grpc to wasi:http
 world grpc-to-http {
     export modulewise:grpc/endpoint@0.1.0;
-    import wasi:http/outgoing-handler@0.2.6;
+    import wasi:http/outgoing-handler@0.2.12;
     import wasi:config/store@0.2.0-rc.1;
 }
 ```

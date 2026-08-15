@@ -5,7 +5,7 @@ set -euo pipefail
 EXAMPLES_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Fetching WIT dependencies..."
-wkg wit fetch
+wkg fetch
 
 for example in "$EXAMPLES_DIR"/*/; do
     name="$(basename "$example")"

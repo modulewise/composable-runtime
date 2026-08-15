@@ -2,7 +2,7 @@
 
 set -e
 
-wkg wit fetch
+wkg fetch
 
 cargo build -p guest --target wasm32-unknown-unknown --release
 wasm-tools component new \

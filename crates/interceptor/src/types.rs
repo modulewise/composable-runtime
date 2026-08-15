@@ -326,6 +326,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert_eq!(value_discriminant(&resolve, Type::Id(id)), 6);
     }
@@ -340,6 +341,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert_eq!(value_discriminant(&resolve, Type::Id(id)), 1);
     }
@@ -354,6 +356,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert_eq!(value_discriminant(&resolve, Type::Id(id)), 3);
     }
@@ -388,6 +391,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert_eq!(type_name_str(&resolve, Type::Id(id)), "point");
     }
@@ -402,6 +406,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert_eq!(type_name_str(&resolve, Type::Id(id)), "record");
     }
@@ -416,6 +421,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert_eq!(type_name_str(&resolve, Type::Id(id)), "list");
     }
@@ -498,6 +504,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -519,6 +526,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -548,6 +556,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert!(!type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -562,6 +571,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -576,6 +586,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert!(!type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -603,6 +614,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert!(!type_needs_memory(&resolve, &Type::Id(id)));
     }
@@ -617,6 +629,7 @@ mod tests {
             docs: Default::default(),
             stability: Default::default(),
             span: Default::default(),
+            external_id: None,
         });
         assert!(type_needs_memory(&resolve, &Type::Id(id)));
     }

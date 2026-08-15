@@ -6,25 +6,37 @@ HTTP client support, including a WIT definition and a Wasm Component.
 
 ## The `composable:http/client` Interface
 
-Request functions (each returns `result<http-response, string>`):
+Every function is `async` and returns `result<http-response, string>`.
+Request and response bodies are both `stream<u8>`.
+
+Functions that accept a request body:
 
 - `request(method, url, headers, body, options)`
-- `get(url, headers, options)`
 - `post(url, headers, body, options)`
 - `put(url, headers, body, options)`
-- `delete(url, headers, options)`
 - `patch(url, headers, body, options)`
+- `query(url, headers, body, options)`
+
+Functions without a request body:
+
+- `get(url, headers, options)`
+- `delete(url, headers, options)`
 - `head(url, headers, options)`
 - `options(url, headers, options)`
+- `trace(url, headers, options)`
 
-The `options` arg includes per-request timeouts and response-size limits. If not provided, default timeouts will be used, and there will be no cap on the response size.
+An `http-response` carries `status` and `headers`. The response `body` streams, and `trailers`
+resolve once the body stream is fully consumed.
+
+The `options` arg supplies per-request timeouts (`connect`, `first-byte`, `between-bytes`, all in
+milliseconds). Any field left `none` falls through to the host default.
 
 See [`wit/package.wit`](wit/package.wit) for the full type definitions.
 
 ## The `http-client` World
 
 - exports `composable:http/client`
-- imports `wasi:http/outgoing-handler`
+- imports `wasi:http/client@0.3.0`
 
 That import can be satisfied by the `wasi:http` Capability which is available in the core runtime.
 
