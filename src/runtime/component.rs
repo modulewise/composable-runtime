@@ -195,7 +195,7 @@ fn convert_results(results: Vec<WasmtimeVal>) -> Result<Option<Val>> {
         return Ok(None);
     };
     match result {
-        WasmtimeVal::Result(Ok(Some(ok_val))) => Ok(Some(convert_result(ok_val)?)),
+        WasmtimeVal::Result(Ok(Some(ok_val))) => Ok(Some(convert_value(ok_val)?)),
         WasmtimeVal::Result(Ok(None)) => Ok(None),
         WasmtimeVal::Result(Err(Some(error_val))) => {
             let error_json =
@@ -203,11 +203,11 @@ fn convert_results(results: Vec<WasmtimeVal>) -> Result<Option<Val>> {
             anyhow::bail!("Component returned error: {error_json}")
         }
         WasmtimeVal::Result(Err(None)) => anyhow::bail!("Component returned error"),
-        value => Ok(Some(convert_result(value)?)),
+        value => Ok(Some(convert_value(value)?)),
     }
 }
 
-fn convert_result(val: &WasmtimeVal) -> Result<Val> {
+fn convert_value(val: &WasmtimeVal) -> Result<Val> {
     Ok(match val {
         WasmtimeVal::Resource(resource) => Val::Resource(ComponentResource {
             resource: *resource,
