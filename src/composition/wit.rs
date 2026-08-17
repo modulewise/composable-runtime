@@ -153,33 +153,18 @@ impl Parser {
                 .result
                 .is_none_or(|result_type| Self::is_invokable(result_type, resolve));
 
-        // Schemas are only meaningful for invokable functions.
-        let (params, result) = if is_invokable {
-            let params = func
-                .params
-                .iter()
-                .map(|p| FunctionParam {
-                    name: p.name.clone(),
-                    is_optional: Self::is_optional_type(p.ty, resolve),
-                    json_schema: Self::wit_type_to_json_schema(p.ty, resolve),
-                })
-                .collect();
-            let result = func
-                .result
-                .map(|result_type| Self::wit_type_to_json_schema(result_type, resolve));
-            (params, result)
-        } else {
-            let params = func
-                .params
-                .iter()
-                .map(|p| FunctionParam {
-                    name: p.name.clone(),
-                    is_optional: Self::is_optional_type(p.ty, resolve),
-                    json_schema: serde_json::Value::Null,
-                })
-                .collect();
-            (params, None)
-        };
+        let params = func
+            .params
+            .iter()
+            .map(|p| FunctionParam {
+                name: p.name.clone(),
+                is_optional: Self::is_optional_type(p.ty, resolve),
+                json_schema: Self::wit_type_to_json_schema(p.ty, resolve),
+            })
+            .collect();
+        let result = func
+            .result
+            .map(|result_type| Self::wit_type_to_json_schema(result_type, resolve));
 
         Ok(Function::new(
             interface,
@@ -396,6 +381,14 @@ impl Parser {
                             "items": Self::wit_type_to_json_schema(*element_type, resolve)
                         })
                     }
+                    wit_parser::TypeDefKind::FixedLengthList(element_type, len) => {
+                        json!({
+                            "type": "array",
+                            "items": Self::wit_type_to_json_schema(*element_type, resolve),
+                            "minItems": len,
+                            "maxItems": len
+                        })
+                    }
                     wit_parser::TypeDefKind::Map(key_type, value_type) => {
                         let value_schema = Self::wit_type_to_json_schema(*value_type, resolve);
                         if matches!(key_type, Type::String) {
@@ -442,14 +435,18 @@ impl Parser {
                             "uniqueItems": true
                         })
                     }
-                    wit_parser::TypeDefKind::Resource => {
-                        json!({"type": "resource", "description": "Resource handle (not representable in JSON-RPC)"})
+                    // Use `x-wit-type` for those that have no JSON Schema `type`.
+                    wit_parser::TypeDefKind::Resource | wit_parser::TypeDefKind::Handle(_) => {
+                        json!({"x-wit-type": "resource", "description": "Resource handle (no JSON value representation)"})
                     }
-                    wit_parser::TypeDefKind::Handle(_) => {
-                        json!({"type": "resource", "description": "Resource handle (not representable in JSON-RPC)"})
+                    wit_parser::TypeDefKind::Stream(_) => {
+                        json!({"x-wit-type": "stream", "description": "Stream (no JSON value representation)"})
                     }
-                    _ => {
-                        unreachable!("non-invokable types are excluded before schema build")
+                    wit_parser::TypeDefKind::Future(_) => {
+                        json!({"x-wit-type": "future", "description": "Future (no JSON value representation)"})
+                    }
+                    wit_parser::TypeDefKind::Unknown => {
+                        unreachable!("unknown types are excluded from a Resolve")
                     }
                 }
             }
