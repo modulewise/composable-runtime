@@ -3,8 +3,6 @@
 use anyhow::Result;
 use wasmtime::component::{Type, Val};
 
-use crate::types::Function;
-
 pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Result<Val> {
     match (json_value, val_type) {
         // Direct JSON type mappings
@@ -335,6 +333,14 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
             Ok(Val::Flags(flag_names))
         }
 
+        // Types that cannot convert. Distinguished from type mismatch below.
+        (_, Type::Own(_) | Type::Borrow(_)) => {
+            Err(anyhow::anyhow!("cannot convert JSON to a resource"))
+        }
+        (_, Type::Future(_)) => Err(anyhow::anyhow!("cannot convert JSON to a future")),
+        (_, Type::Stream(_)) => Err(anyhow::anyhow!("cannot convert JSON to a stream")),
+        (_, Type::ErrorContext) => Err(anyhow::anyhow!("cannot convert JSON to an error-context")),
+
         // Type mismatches
         _ => Err(anyhow::anyhow!(
             "Type mismatch: cannot convert JSON {json_value:?} to WIT type {val_type:?}"
@@ -342,8 +348,8 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
     }
 }
 
-pub(crate) fn val_to_json(val: &Val) -> serde_json::Value {
-    match val {
+pub(crate) fn val_to_json(val: &Val) -> Result<serde_json::Value> {
+    let json = match val {
         // Direct mappings
         Val::Bool(b) => serde_json::Value::Bool(*b),
         Val::String(s) => serde_json::Value::String(s.clone()),
@@ -367,7 +373,10 @@ pub(crate) fn val_to_json(val: &Val) -> serde_json::Value {
 
         // Collections
         Val::List(items) => {
-            let json_items: Vec<serde_json::Value> = items.iter().map(val_to_json).collect();
+            let mut json_items = Vec::with_capacity(items.len());
+            for item in items {
+                json_items.push(val_to_json(item)?);
+            }
             serde_json::Value::Array(json_items)
         }
 
@@ -378,15 +387,18 @@ pub(crate) fn val_to_json(val: &Val) -> serde_json::Value {
                 let mut obj = serde_json::Map::new();
                 for (k, v) in entries {
                     if let Val::String(key) = k {
-                        obj.insert(key.clone(), val_to_json(v));
+                        obj.insert(key.clone(), val_to_json(v)?);
                     }
                 }
                 serde_json::Value::Object(obj)
             } else {
-                let pairs: Vec<serde_json::Value> = entries
-                    .iter()
-                    .map(|(k, v)| serde_json::Value::Array(vec![val_to_json(k), val_to_json(v)]))
-                    .collect();
+                let mut pairs = Vec::with_capacity(entries.len());
+                for (k, v) in entries {
+                    pairs.push(serde_json::Value::Array(vec![
+                        val_to_json(k)?,
+                        val_to_json(v)?,
+                    ]));
+                }
                 serde_json::Value::Array(pairs)
             }
         }
@@ -394,19 +406,22 @@ pub(crate) fn val_to_json(val: &Val) -> serde_json::Value {
         Val::Record(fields) => {
             let mut obj = serde_json::Map::new();
             for (name, val) in fields {
-                obj.insert(name.clone(), val_to_json(val));
+                obj.insert(name.clone(), val_to_json(val)?);
             }
             serde_json::Value::Object(obj)
         }
 
         // Options
         Val::Option(opt) => match opt {
-            Some(val) => val_to_json(val),
+            Some(val) => val_to_json(val)?,
             None => serde_json::Value::Null,
         },
 
         Val::Tuple(vals) => {
-            let json_items: Vec<serde_json::Value> = vals.iter().map(val_to_json).collect();
+            let mut json_items = Vec::with_capacity(vals.len());
+            for val in vals {
+                json_items.push(val_to_json(val)?);
+            }
             serde_json::Value::Array(json_items)
         }
 
@@ -414,7 +429,7 @@ pub(crate) fn val_to_json(val: &Val) -> serde_json::Value {
             let mut obj = serde_json::Map::new();
             obj.insert("type".to_string(), serde_json::Value::String(name.clone()));
             if let Some(v) = val {
-                match val_to_json(v) {
+                match val_to_json(v)? {
                     serde_json::Value::Object(payload_obj) => {
                         for (k, v) in payload_obj {
                             obj.insert(k, v);
@@ -444,13 +459,13 @@ pub(crate) fn val_to_json(val: &Val) -> serde_json::Value {
             let mut obj = serde_json::Map::new();
             match result {
                 Ok(Some(v)) => {
-                    obj.insert("ok".to_string(), val_to_json(v));
+                    obj.insert("ok".to_string(), val_to_json(v)?);
                 }
                 Ok(None) => {
                     obj.insert("ok".to_string(), serde_json::Value::Null);
                 }
                 Err(Some(v)) => {
-                    obj.insert("error".to_string(), val_to_json(v));
+                    obj.insert("error".to_string(), val_to_json(v)?);
                 }
                 Err(None) => {
                     obj.insert("error".to_string(), serde_json::Value::Null);
@@ -459,79 +474,18 @@ pub(crate) fn val_to_json(val: &Val) -> serde_json::Value {
             serde_json::Value::Object(obj)
         }
 
-        Val::Resource(resource_any) => {
-            unreachable!(
-                "Resource types should be caught by validation: {:?}",
-                resource_any
-            )
+        Val::Resource(_) => {
+            anyhow::bail!("cannot convert a resource to JSON")
         }
-
-        Val::Future(future_any) => {
-            unreachable!(
-                "Future types should be caught by validation: {:?}",
-                future_any
-            )
+        Val::Future(_) => {
+            anyhow::bail!("cannot convert a future to JSON")
         }
-
-        Val::Stream(stream_any) => {
-            unreachable!(
-                "Stream types should be caught by validation: {:?}",
-                stream_any
-            )
+        Val::Stream(_) => {
+            anyhow::bail!("cannot convert a stream to JSON")
         }
-
-        Val::ErrorContext(error_context_any) => {
-            unreachable!(
-                "ErrorContext types should be caught by validation: {:?}",
-                error_context_any
-            )
+        Val::ErrorContext(_) => {
+            anyhow::bail!("cannot convert an error-context to JSON")
         }
-    }
-}
-
-// This handles the case where wasmtime decomposes tuples/records into separate Val objects
-pub(crate) fn reconstruct_wit_return(
-    results: &[Val],
-    function: &Function,
-) -> Result<serde_json::Value> {
-    // Check if this is a record that needs field mapping to reconstruct as an object
-    if let Some(return_schema) = function.result()
-        && let Some(schema_obj) = return_schema.as_object()
-        && schema_obj.get("type").and_then(|t| t.as_str()) == Some("object")
-        && schema_obj.contains_key("properties")
-    {
-        return reconstruct_record(results, schema_obj);
-    }
-
-    // All other cases (tuples, unknown schemas, malformed schemas) -> array
-    let json_results: Vec<serde_json::Value> = results.iter().map(val_to_json).collect();
-    Ok(serde_json::Value::Array(json_results))
-}
-
-// Reconstruct a WIT record from multiple wasmtime results
-fn reconstruct_record(
-    results: &[Val],
-    schema_obj: &serde_json::Map<String, serde_json::Value>,
-) -> Result<serde_json::Value> {
-    let properties = schema_obj
-        .get("properties")
-        .and_then(|p| p.as_object())
-        .ok_or_else(|| anyhow::anyhow!("Record schema missing properties"))?;
-
-    let mut record = serde_json::Map::new();
-    let field_names: Vec<&String> = properties.keys().collect();
-
-    if results.len() != field_names.len() {
-        return Err(anyhow::anyhow!(
-            "Mismatch between wasmtime results ({}) and record fields ({})",
-            results.len(),
-            field_names.len()
-        ));
-    }
-
-    for (i, field_name) in field_names.iter().enumerate() {
-        record.insert(field_name.to_string(), val_to_json(&results[i]));
-    }
-
-    Ok(serde_json::Value::Object(record))
+    };
+    Ok(json)
 }

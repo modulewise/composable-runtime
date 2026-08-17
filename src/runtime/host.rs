@@ -563,7 +563,7 @@ impl Invoker {
         let args = args.into_iter().map(Val::Json).collect();
         let results = instance.call(&function, args).await?;
 
-        match results.into_iter().next() {
+        match results {
             None => Ok(serde_json::Value::Null),
             Some(Val::Json(value)) => Ok(value),
             Some(Val::Resource(_)) => Err(anyhow::anyhow!(

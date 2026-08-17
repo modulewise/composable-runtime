@@ -8,7 +8,7 @@ use anyhow::Result;
 use wasmtime::Store;
 use wasmtime::component::{ComponentExportIndex, Instance, ResourceAny, Val as WasmtimeVal};
 
-use crate::runtime::conversion::{json_to_val, reconstruct_wit_return, val_to_json};
+use crate::runtime::conversion::{json_to_val, val_to_json};
 use crate::types::{ComponentState, Function};
 
 /// A value crossing the call boundary, either as JSON (passed by value) or as
@@ -83,15 +83,11 @@ impl ComponentInstance {
     /// This covers every component model export shape. A resource method is
     /// represented as a function whose first parameter is the receiver, so can
     /// be called by passing the resource handle as that arg.
-    pub async fn call(&mut self, function: &Function, args: Vec<Val>) -> Result<Vec<Val>> {
+    pub async fn call(&mut self, function: &Function, args: Vec<Val>) -> Result<Option<Val>> {
         let export = self.resolve_function(function)?;
         let results = self
             .call_export(export, args, function.function_name())
             .await?;
-
-        if results.len() > 1 {
-            return Ok(vec![Val::Json(reconstruct_wit_return(&results, function)?)]);
-        }
         convert_results(results)
     }
 
@@ -188,28 +184,34 @@ impl ComponentInstance {
 // A WIT `result<T, E>` maps onto Rust's `Result`: an `err` becomes an `Err`
 // here, so callers handle failure before ever checking for an `ok` value. A
 // resource remains a handle; everything else converts to JSON.
-fn convert_results(results: Vec<WasmtimeVal>) -> Result<Vec<Val>> {
-    match results.len() {
-        0 => Ok(Vec::new()),
-        1 => match &results[0] {
-            WasmtimeVal::Result(Ok(Some(ok_val))) => Ok(vec![convert_result(ok_val)]),
-            WasmtimeVal::Result(Ok(None)) => Ok(Vec::new()),
-            WasmtimeVal::Result(Err(Some(error_val))) => {
-                let error_json = val_to_json(error_val);
-                Err(anyhow::anyhow!("Component returned error: {error_json}"))
-            }
-            WasmtimeVal::Result(Err(None)) => Err(anyhow::anyhow!("Component returned error")),
-            value => Ok(vec![convert_result(value)]),
-        },
-        _ => Ok(results.iter().map(convert_result).collect()),
+fn convert_results(results: Vec<WasmtimeVal>) -> Result<Option<Val>> {
+    if results.len() > 1 {
+        anyhow::bail!(
+            "got {} results; a WIT function declares at most one",
+            results.len()
+        );
+    }
+    let Some(result) = results.first() else {
+        return Ok(None);
+    };
+    match result {
+        WasmtimeVal::Result(Ok(Some(ok_val))) => Ok(Some(convert_result(ok_val)?)),
+        WasmtimeVal::Result(Ok(None)) => Ok(None),
+        WasmtimeVal::Result(Err(Some(error_val))) => {
+            let error_json =
+                val_to_json(error_val).map_or_else(|e| format!("<{e}>"), |json| json.to_string());
+            anyhow::bail!("Component returned error: {error_json}")
+        }
+        WasmtimeVal::Result(Err(None)) => anyhow::bail!("Component returned error"),
+        value => Ok(Some(convert_result(value)?)),
     }
 }
 
-fn convert_result(val: &WasmtimeVal) -> Val {
-    match val {
+fn convert_result(val: &WasmtimeVal) -> Result<Val> {
+    Ok(match val {
         WasmtimeVal::Resource(resource) => Val::Resource(ComponentResource {
             resource: *resource,
         }),
-        other => Val::Json(val_to_json(other)),
-    }
+        other => Val::Json(val_to_json(other)?),
+    })
 }
