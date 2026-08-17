@@ -461,7 +461,8 @@ impl Invoker {
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name) {
                 let props = &capability.properties;
-                match capability.kind.as_str() {
+                // Match the base kind for consistent behavior with or without a version suffix.
+                match split_wasi_kind(&capability.kind).0 {
                     "wasi:p2" => {
                         wasi_builder.inherit_stdio();
                         wasi_builder.inherit_network();
