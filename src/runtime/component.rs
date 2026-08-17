@@ -63,7 +63,7 @@ pub struct ComponentResource {
 /// An owned handle to one instantiated component.
 ///
 /// Obtained from `Runtime::instantiate`. Dropping it drops the underlying
-/// store, reclaiming the instance and any resources it produced.
+/// store and any resources produced with this instance.
 pub struct ComponentInstance {
     store: Store<ComponentState>,
     instance: Instance,
