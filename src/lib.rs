@@ -15,7 +15,7 @@ pub use mapping::{
 pub use message::{
     Message, MessageBuilder, MessageHeaders, MessagePublisher, PropagatedHeader, ReturnAddress,
 };
-pub use runtime::{Runtime, RuntimeBuilder};
+pub use runtime::{ComponentInstance, ComponentResource, Runtime, RuntimeBuilder, Val};
 pub use service::Service;
 pub use types::{
     CapabilityDefinition, Component, ComponentDefinition, ComponentInvoker, ComponentMetadata,

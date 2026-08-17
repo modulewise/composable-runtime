@@ -12,9 +12,12 @@ use crate::message::MessagePublisher;
 use crate::service::Service;
 use crate::types::{Component, ComponentInvoker};
 
+pub mod component;
+pub(crate) mod conversion;
 mod grpc;
 pub(crate) mod host;
 
+pub use component::{ComponentInstance, ComponentResource, Val};
 use host::ComponentHost;
 
 /// Composable Runtime for invoking Wasm Components
@@ -44,15 +47,15 @@ impl Runtime {
         self.host.get_component(name)
     }
 
-    /// Instantiate a component
+    /// Instantiate a component.
+    ///
+    /// Call one or more exports on it via [`ComponentInstance::call`].
+    /// Resources it produces are no longer valid once the instance is dropped.
     pub async fn instantiate(
         &self,
         component_name: &str,
         env: Option<HashMap<String, String>>,
-    ) -> Result<(
-        wasmtime::Store<crate::types::ComponentState>,
-        wasmtime::component::Instance,
-    )> {
+    ) -> Result<ComponentInstance> {
         let env_pairs: Vec<(String, String)> =
             env.map(|m| m.into_iter().collect()).unwrap_or_default();
         self.host.instantiate(component_name, &env_pairs).await
