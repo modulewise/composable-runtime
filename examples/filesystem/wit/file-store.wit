@@ -1,0 +1,15 @@
+package example:filesystem;
+
+world file-store {
+    import wasi:filesystem/preopens@0.3.0;
+    import wasi:filesystem/types@0.3.0;
+
+    /// Read a file from the preopened directory.
+    export read: async func(name: string) -> result<string, string>;
+
+    /// Write a file to the preopened directory, returning the number of bytes written.
+    export write: async func(name: string, contents: string) -> result<u64, string>;
+
+    /// List the names of the files in the preopened directory.
+    export list-files: async func() -> result<list<string>, string>;
+}

@@ -448,6 +448,18 @@ fn get_interfaces_for_capability(kind: &str) -> Vec<String> {
             "wasi:clocks/monotonic-clock@0.2.12".to_string(),
             "wasi:clocks/wall-clock@0.2.12".to_string(),
         ],
+        ("wasi:filesystem", WasiVersion::P3) => vec![
+            "wasi:filesystem/preopens@0.3.0".to_string(),
+            "wasi:filesystem/types@0.3.0".to_string(),
+        ],
+        // p2 filesystem descriptors read and write through `wasi:io` streams.
+        ("wasi:filesystem", WasiVersion::P2) => vec![
+            "wasi:filesystem/preopens@0.2.12".to_string(),
+            "wasi:filesystem/types@0.2.12".to_string(),
+            "wasi:io/error@0.2.12".to_string(),
+            "wasi:io/poll@0.2.12".to_string(),
+            "wasi:io/streams@0.2.12".to_string(),
+        ],
         ("wasi:http", WasiVersion::P3) => vec![
             "wasi:http/client@0.3.0".to_string(),
             "wasi:http/types@0.3.0".to_string(),
