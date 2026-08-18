@@ -8,12 +8,16 @@ use wasi::filesystem::types::{Descriptor, DescriptorFlags, DescriptorType, OpenF
 
 struct FileStore;
 
+// Matches the `guest` path in the config.
+const DATA_DIR: &str = "/data";
+
+// Each preopen directory is paired with its guest path.
 fn preopen() -> Result<Descriptor, String> {
     wasi::filesystem::preopens::get_directories()
         .into_iter()
-        .next()
-        .map(|(descriptor, _path)| descriptor)
-        .ok_or_else(|| "no preopened directory".to_string())
+        .find(|(_descriptor, guest_path)| guest_path == DATA_DIR)
+        .map(|(descriptor, _guest_path)| descriptor)
+        .ok_or_else(|| format!("no preopened directory at '{DATA_DIR}'"))
 }
 
 async fn open(
@@ -31,13 +35,9 @@ impl Guest for FileStore {
     async fn read(name: String) -> Result<String, String> {
         let file = open(&name, DescriptorFlags::READ, OpenFlags::empty()).await?;
 
-        // A p3 stream is paired with a future carrying the final result:
-        // drain the stream, then check the future for an error.
-        let (mut stream, result) = file.read_via_stream(0);
-        let mut contents = Vec::new();
-        while let Some(byte) = stream.next().await {
-            contents.push(byte);
-        }
+        // Drain the stream from offset 0, then check the future for an error.
+        let (stream, result) = file.read_via_stream(0);
+        let contents = stream.collect().await;
         result
             .await
             .map_err(|e| format!("cannot read '{name}': {e}"))?;
@@ -46,7 +46,7 @@ impl Guest for FileStore {
     }
 
     async fn write(name: String, contents: String) -> Result<u64, String> {
-        // Fails with `not-permitted` unless the preopen grants "read-write".
+        // Open for write will fail if "read-write" perms were not granted.
         let file = open(
             &name,
             DescriptorFlags::WRITE,
@@ -55,32 +55,34 @@ impl Guest for FileStore {
         .await?;
 
         let bytes = contents.into_bytes();
-        let written = bytes.len() as u64;
+        let length = bytes.len() as u64;
 
+        // TRUNCATE above emptied the file, so this writes from offset 0.
         let (mut tx, rx) = wit_stream::new();
         let result = file.write_via_stream(rx, 0);
         tx.write_all(bytes).await;
+
+        // Dropping the writer closes the stream, which completes the future.
         drop(tx);
         result
             .await
             .map_err(|e| format!("cannot write '{name}': {e}"))?;
 
-        Ok(written)
+        Ok(length)
     }
 
     async fn list_files() -> Result<Vec<String>, String> {
-        let (mut entries, result) = preopen()?.read_directory();
-
-        let mut names = Vec::new();
-        while let Some(entry) = entries.next().await {
-            if matches!(entry.type_, DescriptorType::RegularFile) {
-                names.push(entry.name);
-            }
-        }
+        let (entries, result) = preopen()?.read_directory();
+        let entries = entries.collect().await;
         result
             .await
             .map_err(|e| format!("cannot read directory: {e}"))?;
 
+        let mut names: Vec<String> = entries
+            .into_iter()
+            .filter(|entry| matches!(entry.type_, DescriptorType::RegularFile))
+            .map(|entry| entry.name)
+            .collect();
         names.sort();
         Ok(names)
     }

@@ -52,6 +52,8 @@ directory permissions for the preopen ("read-write" grants directory mutation).
 
 The `host` resolves relative to the working directory where the runtime starts.
 
+The `guest` path is how the component interacts with this preopen.
+
 ## Sample Commands
 
 Reading works under either config:
