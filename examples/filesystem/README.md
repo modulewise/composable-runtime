@@ -7,13 +7,13 @@ the runtime configuration grants filesystem access with explicit permissions.
 
 ```
 filesystem/
-├── file-store/            # Wasm Component
-│   └── src/lib.rs         # Implements read, write, and list-files
-├── wit/                   # WIT interface definitions
-│   └── file-store.wit     # Imports wasi:filesystem, exports the three functions
-├── data/                  # The directory made available to the component
-├── config-readwrite.toml  # Grants read-write access
-└── config-readonly.toml   # Grants read-only access
+├── file-store/              # Wasm Component
+│   └── src/lib.rs           # Implements read, write, and list-files
+├── wit/                     # WIT interface definitions
+│   └── file-store.wit       # Imports wasi:filesystem, exports the three functions
+├── data/                    # The directory made available to the component
+├── config-readonly.toml     # Grants read-only access
+└── config-readwrite.toml    # Grants read-write access
 ```
 
 ## Build
