@@ -1,0 +1,11 @@
+[component.file-store]
+uri = "./lib/file-store.wasm"
+imports = ["filesystem"]
+
+[capability.filesystem]
+type = "wasi:filesystem"
+
+[[capability.filesystem.preopens]]
+host = "./data"
+guest = "/data"
+perms = "read-only"

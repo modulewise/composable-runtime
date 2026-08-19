@@ -7,9 +7,10 @@ use wasmtime::{
 };
 use wasmtime_wasi::cli::{WasiCli, WasiCliView};
 use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
+use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
 use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
 use wasmtime_wasi::sockets::{WasiSockets, WasiSocketsView};
-use wasmtime_wasi::{ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_http::{p2 as http_p2, p3 as http_p3};
 use wasmtime_wasi_io::IoView;
@@ -316,7 +317,7 @@ impl Invoker {
         for capability_name in capabilities {
             if let Some(capability) = capability_registry.get_capability(capability_name) {
                 if capability.kind.starts_with("wasi:") {
-                    use wasmtime_wasi::p2::bindings::{cli, clocks, random, sockets};
+                    use wasmtime_wasi::p2::bindings::{cli, clocks, filesystem, random, sockets};
 
                     // `wasi:p2` is a bundle alias (hardcoded version), so it
                     // is matched exactly rather than through split_wasi_kind.
@@ -359,6 +360,20 @@ impl Invoker {
                                 &mut linker,
                                 ComponentState::clocks,
                             )?;
+                        }
+                        ("wasi:filesystem", WasiVersion::P3) => {
+                            wasmtime_wasi::p3::filesystem::add_to_linker(&mut linker)?;
+                        }
+                        ("wasi:filesystem", WasiVersion::P2) => {
+                            filesystem::types::add_to_linker::<ComponentState, WasiFilesystem>(
+                                &mut linker,
+                                ComponentState::filesystem,
+                            )?;
+                            filesystem::preopens::add_to_linker::<ComponentState, WasiFilesystem>(
+                                &mut linker,
+                                ComponentState::filesystem,
+                            )?;
+                            wasmtime_wasi_io::add_to_linker_async(&mut linker)?;
                         }
                         ("wasi:http", WasiVersion::P3) => {
                             wasmtime_wasi_http::p3::add_to_linker(&mut linker)?;
@@ -467,6 +482,7 @@ impl Invoker {
                         wasi_builder.inherit_stdio();
                         wasi_builder.inherit_network();
                         wasi_builder.allow_ip_name_lookup(true);
+                        add_preopens(&mut wasi_builder, props, capability_name)?;
                     }
                     "wasi:cli" => {
                         if props.get("inherit-stdio").and_then(|v| v.as_bool()) == Some(true) {
@@ -482,6 +498,9 @@ impl Invoker {
                                 wasi_builder.inherit_stderr();
                             }
                         }
+                    }
+                    "wasi:filesystem" => {
+                        add_preopens(&mut wasi_builder, props, capability_name)?;
                     }
                     "wasi:sockets" => {
                         if props.get("inherit-network").and_then(|v| v.as_bool()) == Some(true) {
@@ -574,4 +593,61 @@ impl Invoker {
             )),
         }
     }
+}
+
+// Apply a filesystem capability's `preopens` to the WASI context.
+//
+// Each entry maps a host directory into the guest with explicit permissions:
+//
+//     [[capability.fs.preopens]]
+//     host = "./data"
+//     guest = "/data"
+//     perms = "read-only"    # or "read-write"
+//
+// The `perms` configuration is required. It covers file and directory
+// permissions for the preopen ("read-write" grants directory mutation).
+fn add_preopens(
+    builder: &mut WasiCtxBuilder,
+    props: &HashMap<String, serde_json::Value>,
+    capability_name: &str,
+) -> Result<()> {
+    let Some(value) = props.get("preopens") else {
+        return Ok(());
+    };
+    let entries = value.as_array().ok_or_else(|| {
+        anyhow::anyhow!("Capability '{capability_name}': 'preopens' must be an array")
+    })?;
+
+    for (index, entry) in entries.iter().enumerate() {
+        let ctx = |detail: String| {
+            anyhow::anyhow!("Capability '{capability_name}' preopen {index}: {detail}")
+        };
+        let field = |name: &str| -> Result<String> {
+            entry
+                .get(name)
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| ctx(format!("missing required string '{name}'")))
+        };
+
+        let host = field("host")?;
+        let guest = field("guest")?;
+        let (dir_perms, file_perms) = match field("perms")?.as_str() {
+            "read-only" => (DirPerms::READ, FilePerms::READ),
+            "read-write" => (
+                DirPerms::READ | DirPerms::MUTATE,
+                FilePerms::READ | FilePerms::WRITE,
+            ),
+            other => {
+                return Err(ctx(format!(
+                    "'perms' must be \"read-only\" or \"read-write\", got \"{other}\""
+                )));
+            }
+        };
+
+        builder
+            .preopened_dir(&host, &guest, dir_perms, file_perms)
+            .map_err(|e| ctx(format!("cannot open host path '{host}': {e}")))?;
+    }
+    Ok(())
 }
