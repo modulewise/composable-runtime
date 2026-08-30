@@ -3,4 +3,4 @@ members = ["calculator", "greeter", "logger"]
 resolver = "3"
 
 [workspace.dependencies]
-wit-bindgen = "0.60"
+wit-bindgen = "0.61"
