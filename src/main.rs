@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use composable_runtime::{
     Component, ComponentGraph, FunctionParam, MessageBuilder, MessageHeaders, PROPAGATION_CONTEXT,
-    PropagationContext, Runtime, Selector,
+    PropagationContext, Runtime, Selector, Val,
 };
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
@@ -231,8 +231,13 @@ async fn run_invoke(
         parse_invoke_args(args, function.params()).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Scope the propagation context at the CLI entry point if --ctx provided.
-    let invoker = runtime.invoker();
-    let invoke_fut = invoker.invoke(component_name, func_name, final_args, env);
+    let component_host = runtime.host();
+    let invoke_fut = component_host.invoke(
+        component_name,
+        func_name,
+        final_args.into_iter().map(Val::Json).collect(),
+        env,
+    );
     let result = match context {
         Some(entries) if !entries.is_empty() => {
             let ctx = PropagationContext { entries };
@@ -240,54 +245,24 @@ async fn run_invoke(
         }
         _ => invoke_fut.await,
     }?;
-    // Write a bytes result to stdout, rather than render as a JSON array.
-    if returns_bytes(function.result()) {
-        let bytes: Vec<u8> = result
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|v| v.as_u64())
-                    .map(|n| n as u8)
-                    .collect()
-            })
-            .unwrap_or_default();
-        if std::io::stdout().is_terminal() {
-            eprintln!("<{} bytes> (redirect stdout to capture)", bytes.len());
-        } else {
-            std::io::stdout().write_all(&bytes)?;
-            std::io::stdout().flush()?;
+
+    match result {
+        // Bytes go to stdout as bytes, not as a JSON array of numbers.
+        Some(Val::Bytes(bytes)) => {
+            if std::io::stdout().is_terminal() {
+                eprintln!("<{} bytes> (redirect stdout to capture)", bytes.len());
+            } else {
+                std::io::stdout().write_all(&bytes)?;
+                std::io::stdout().flush()?;
+            }
         }
-        return Ok(());
+        None => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::Value::Null)?
+        ),
+        Some(value) => println!("{}", serde_json::to_string_pretty(&value.into_json()?)?),
     }
-
-    println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
-}
-
-// Consider the return value bytes if the function's result is a `list<u8>`.
-// The generated schema for such a result will be an array of numbers that
-// includes `minimum: 0` and `maximum: 255`.
-fn returns_bytes(schema: Option<&serde_json::Value>) -> bool {
-    let Some(schema) = schema else {
-        return false;
-    };
-    // `result<T, E>` is encoded as a two-arm `oneOf`; take the `ok` arm's schema.
-    let schema = schema
-        .get("oneOf")
-        .and_then(|arms| arms.as_array())
-        .and_then(|arms| arms.iter().find_map(|arm| arm.pointer("/properties/ok")))
-        .unwrap_or(schema);
-
-    if schema.get("type").and_then(|t| t.as_str()) != Some("array") {
-        return false;
-    }
-    let Some(items) = schema.get("items") else {
-        return false;
-    };
-    items.get("type").and_then(|t| t.as_str()) == Some("number")
-        && items.get("minimum").and_then(|m| m.as_i64()) == Some(0)
-        && items.get("maximum").and_then(|m| m.as_i64()) == Some(255)
 }
 
 async fn run_shell(
@@ -457,21 +432,26 @@ async fn handle_command(
                                     Ok(final_args) => {
                                         println!("Invoking {target}...");
                                         match runtime
-                                            .invoker()
+                                            .host()
                                             .invoke(
                                                 component_name,
                                                 func_name,
-                                                final_args,
+                                                final_args.into_iter().map(Val::Json).collect(),
                                                 env.cloned(),
                                             )
                                             .await
                                         {
-                                            Ok(result) => {
-                                                println!(
-                                                    "{}",
-                                                    serde_json::to_string_pretty(&result).unwrap()
-                                                );
+                                            Ok(Some(Val::Bytes(bytes))) => {
+                                                println!("<{} bytes>", bytes.len());
                                             }
+                                            Ok(None) => println!("null"),
+                                            Ok(Some(value)) => match value.into_json() {
+                                                Ok(json) => println!(
+                                                    "{}",
+                                                    serde_json::to_string_pretty(&json).unwrap()
+                                                ),
+                                                Err(e) => eprintln!("Error: {e}"),
+                                            },
                                             Err(e) => eprintln!("Error: {e}"),
                                         }
                                     }

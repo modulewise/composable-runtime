@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
 
-use crate::types::ComponentInvoker;
+use crate::types::ComponentHost;
 
 use super::activator::Activator;
 use super::channel::{Channel, ChannelRegistry, ReplyPublisher};
@@ -23,7 +23,7 @@ pub(crate) trait Bus: Send + Sync {
 
     fn add_subscription(&self, config: SubscriptionConfig);
 
-    fn set_invoker(&self, invoker: Arc<dyn ComponentInvoker>);
+    fn set_component_host(&self, component_host: Arc<dyn ComponentHost>);
 
     // Set the shared reply publisher that uses ephemeral reply channels.
     // The bus composes this with its own registry to build the
@@ -64,7 +64,7 @@ pub(crate) struct GenericBus<C: Channel, F: ChannelFactory<C>> {
     factory: F,
     registry: Arc<ChannelRegistry<C>>,
     subscriptions: Mutex<Vec<SubscriptionConfig>>,
-    invoker: Mutex<Option<Arc<dyn ComponentInvoker>>>,
+    component_host: Mutex<Option<Arc<dyn ComponentHost>>>,
     shared_reply_publisher: Mutex<Option<Arc<dyn ReplyPublisher>>>,
     cancel: CancellationToken,
     handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
@@ -79,7 +79,7 @@ where
             factory,
             registry: Arc::new(ChannelRegistry::new()),
             subscriptions: Mutex::new(Vec::new()),
-            invoker: Mutex::new(None),
+            component_host: Mutex::new(None),
             shared_reply_publisher: Mutex::new(None),
             cancel: CancellationToken::new(),
             handles: Mutex::new(Vec::new()),
@@ -110,8 +110,8 @@ where
         self.subscriptions.lock().unwrap().push(config);
     }
 
-    fn set_invoker(&self, invoker: Arc<dyn ComponentInvoker>) {
-        *self.invoker.lock().unwrap() = Some(invoker);
+    fn set_component_host(&self, component_host: Arc<dyn ComponentHost>) {
+        *self.component_host.lock().unwrap() = Some(component_host);
     }
 
     fn set_reply_publisher(&self, publisher: Arc<dyn ReplyPublisher>) {
@@ -119,12 +119,12 @@ where
     }
 
     fn start(&self) -> Result<()> {
-        let invoker = self
-            .invoker
+        let component_host = self
+            .component_host
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("Bus: invoker not set before start()"))?;
+            .ok_or_else(|| anyhow::anyhow!("Bus: component host not set before start()"))?;
 
         // Compose the shared reply publisher with this bus's own registry.
         let shared = self.shared_reply_publisher.lock().unwrap().clone();
@@ -147,7 +147,7 @@ where
             self.factory.init(&channel, &sub.component_name);
 
             let activator = Activator::new(
-                Arc::clone(&invoker),
+                Arc::clone(&component_host),
                 &sub.component_name,
                 sub.function_key,
                 sub.mapping,

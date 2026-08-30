@@ -6,7 +6,7 @@ use crate::context::{PROPAGATION_CONTEXT, PropagationContext};
 #[cfg(test)]
 use crate::mapping::ParamMapping;
 use crate::mapping::{MappingConfig, MessageMapper};
-use crate::types::{Component, ComponentInvoker, PROPAGATED_HEADERS};
+use crate::types::{Component, ComponentHost, PROPAGATED_HEADERS, Val};
 
 use super::channel::ReplyPublisher;
 use crate::message::{Message, MessageHeaders};
@@ -27,7 +27,7 @@ pub trait Handler: Send + Sync {
 /// the message into a function call. For components exporting the WIT
 /// `handler` interface (direct mode), bypasses the mapper entirely.
 pub struct Activator {
-    invoker: Arc<dyn ComponentInvoker>,
+    host: Arc<dyn ComponentHost>,
     component_name: String,
     mode: InvocationMode,
     reply_publisher: Option<Arc<dyn ReplyPublisher>>,
@@ -45,13 +45,13 @@ impl Activator {
     /// must export exactly one function. `config` carries the four
     /// mapping-related blocks (see [`MappingConfig`]).
     pub fn new(
-        invoker: Arc<dyn ComponentInvoker>,
+        host: Arc<dyn ComponentHost>,
         component_name: &str,
         function_key: Option<String>,
         config: MappingConfig,
         reply_publisher: Option<Arc<dyn ReplyPublisher>>,
     ) -> Result<Self, String> {
-        let component = invoker
+        let component = host
             .get_component(component_name)
             .ok_or_else(|| format!("component '{component_name}' not found"))?;
 
@@ -68,7 +68,7 @@ impl Activator {
         };
 
         Ok(Self {
-            invoker,
+            host,
             component_name: component_name.to_string(),
             mode,
             reply_publisher,
@@ -101,10 +101,10 @@ impl Handler for Activator {
                 // Scope the propagation context for the invocation. Downstream
                 // code (e.g. host imports for outbound HTTP) reads via the
                 // task-local. The explicit scope here is the boundary.
-                let invoke_fut = self.invoker.invoke(
+                let invoke_fut = self.host.invoke(
                     &self.component_name,
                     invocation.function_key.as_str(),
-                    invocation.args,
+                    invocation.args.into_iter().map(Val::Json).collect(),
                     None,
                 );
                 let result = if propagated.is_empty() {
@@ -116,6 +116,12 @@ impl Handler for Activator {
                     PROPAGATION_CONTEXT.scope(Some(ctx), invoke_fut).await
                 }
                 .map_err(|e| e.to_string())?;
+
+                // The reply mapper is JSON-based.
+                let result = match result {
+                    Some(value) => value.into_json().map_err(|e| e.to_string())?,
+                    None => serde_json::Value::Null,
+                };
 
                 if let Some(reply_to) = msg.headers().reply_to() {
                     let publisher = self.reply_publisher.as_ref().ok_or_else(|| {
@@ -180,13 +186,13 @@ mod tests {
         temp_file
     }
 
-    async fn build_invoker(paths: &[PathBuf]) -> Arc<dyn ComponentInvoker> {
+    async fn build_component_host(paths: &[PathBuf]) -> Arc<dyn ComponentHost> {
         Runtime::builder()
             .from_paths(paths)
             .build()
             .await
             .unwrap()
-            .invoker()
+            .host()
     }
 
     // Component that exports a single bare function: double(value: u32) -> u32
@@ -317,14 +323,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig::default(),
@@ -362,9 +368,9 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(invoker, "guest", None, MappingConfig::default(), None) {
+        match Activator::new(host, "guest", None, MappingConfig::default(), None) {
             Ok(_) => panic!("expected error for multi-function component without function key"),
             Err(err) => assert!(
                 err.contains("must specify a 'function'"),
@@ -384,9 +390,9 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
-        match Activator::new(invoker, "nonexistent", None, MappingConfig::default(), None) {
+        match Activator::new(host, "nonexistent", None, MappingConfig::default(), None) {
             Ok(_) => panic!("expected error for nonexistent component"),
             Err(err) => assert!(
                 err.contains("component 'nonexistent' not found"),
@@ -406,7 +412,7 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
@@ -419,7 +425,7 @@ mod tests {
             .collect();
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig {
@@ -460,14 +466,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig::default(),
@@ -527,14 +533,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig::default(),
@@ -572,10 +578,10 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let activator =
-            Activator::new(invoker, "guest", None, MappingConfig::default(), None).unwrap();
+            Activator::new(host, "guest", None, MappingConfig::default(), None).unwrap();
 
         // Only provide "a", missing "b"
         let msg = MessageBuilder::new(br#"{"a": 5}"#.to_vec())
@@ -602,14 +608,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig::default(),
@@ -647,10 +653,10 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let activator =
-            Activator::new(invoker, "guest", None, MappingConfig::default(), None).unwrap();
+            Activator::new(host, "guest", None, MappingConfig::default(), None).unwrap();
 
         let msg = MessageBuilder::new(b"42".to_vec())
             .header(MessageHeaders::CONTENT_TYPE, "application/json")
@@ -676,14 +682,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig::default(),
@@ -725,14 +731,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
         registry.register("replies", replies.clone());
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig::default(),
@@ -784,14 +790,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let mapping: ParamMapping = [("value".to_string(), serde_json::json!("{body.n}"))]
             .into_iter()
             .collect();
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig {
@@ -827,14 +833,14 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let mapping: ParamMapping = [("value".to_string(), serde_json::json!("{body.nope}"))]
             .into_iter()
             .collect();
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig {
@@ -871,7 +877,7 @@ mod tests {
             wasm.path().display()
         );
         let toml = create_toml_file(&toml_content);
-        let invoker = build_invoker(&[toml.path().to_path_buf()]).await;
+        let host = build_component_host(&[toml.path().to_path_buf()]).await;
 
         let registry: Arc<ChannelRegistry<LocalChannel>> = Arc::new(ChannelRegistry::new());
         let replies = Arc::new(LocalChannel::with_defaults());
@@ -881,7 +887,7 @@ mod tests {
         let result_mapping = serde_json::json!({ "body": { "status": "ok", "label": "doubled" } });
 
         let activator = Activator::new(
-            invoker,
+            host,
             "guest",
             None,
             MappingConfig {

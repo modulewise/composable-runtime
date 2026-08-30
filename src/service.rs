@@ -8,7 +8,7 @@ use crate::composition::registry::HostCapabilityFactory;
 use crate::config::types::ConfigHandler;
 #[cfg(feature = "messaging")]
 use crate::message::MessagePublisher;
-use crate::types::ComponentInvoker;
+use crate::types::ComponentHost;
 
 /// Lifecycle-managed service that participates in config parsing and runtime.
 ///
@@ -38,14 +38,14 @@ pub trait Service: Send + Sync {
         vec![]
     }
 
-    /// Inject the component invoker. Called before `start()`.
-    /// Override to stash the invoker for use during the service lifecycle.
-    fn set_invoker(&self, _invoker: Arc<dyn ComponentInvoker>) {}
+    /// Inject the component host. Called before `start()`.
+    /// Override to stash it for use during the service lifecycle.
+    fn set_component_host(&self, _component_host: Arc<dyn ComponentHost>) {}
 
     /// Inject the message publisher. Called before `start()`.
     /// Override to stash the publisher for use during the service lifecycle.
     #[cfg(feature = "messaging")]
-    fn set_publisher(&self, _publisher: Arc<dyn MessagePublisher>) {}
+    fn set_message_publisher(&self, _message_publisher: Arc<dyn MessagePublisher>) {}
 
     /// Start the service. Called after all dependencies are injected.
     /// Implementations should spawn background tasks and return immediately.

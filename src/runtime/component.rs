@@ -6,59 +6,12 @@
 
 use anyhow::Result;
 use wasmtime::Store;
-use wasmtime::component::{ComponentExportIndex, Instance, ResourceAny, Val as WasmtimeVal};
+use wasmtime::component::{
+    ComponentExportIndex, Instance, Type as WasmtimeType, Val as WasmtimeVal,
+};
 
 use crate::runtime::conversion::{json_to_val, val_to_json};
-use crate::types::{ComponentState, Function};
-
-/// A value crossing the call boundary, either as JSON (passed by value) or as
-/// a Component-owned Resource (passed by reference).
-pub enum Val {
-    /// Data passed by value.
-    Json(serde_json::Value),
-    /// Reference to a resource owned by a component instance.
-    Resource(ComponentResource),
-}
-
-impl Val {
-    /// The JSON value, if this is data.
-    pub fn as_json(&self) -> Option<&serde_json::Value> {
-        match self {
-            Self::Json(value) => Some(value),
-            Self::Resource(_) => None,
-        }
-    }
-
-    /// The reference handle, if this is a resource.
-    pub fn as_resource(&self) -> Option<&ComponentResource> {
-        match self {
-            Self::Resource(resource) => Some(resource),
-            Self::Json(_) => None,
-        }
-    }
-}
-
-impl From<serde_json::Value> for Val {
-    fn from(value: serde_json::Value) -> Self {
-        Self::Json(value)
-    }
-}
-
-impl From<ComponentResource> for Val {
-    fn from(resource: ComponentResource) -> Self {
-        Self::Resource(resource)
-    }
-}
-
-/// A reference handle to a resource owned by a [`ComponentInstance`].
-///
-/// Can only be used with its owning instance, as the "receiver" (first arg) of
-/// a [`ComponentInstance::call`] or as an arg passed to another call. It is no
-/// longer valid once the owning instance drops.
-#[derive(Clone, Copy)]
-pub struct ComponentResource {
-    resource: ResourceAny,
-}
+use crate::types::{ComponentResource, ComponentState, Function, Val};
 
 /// An owned handle to one instantiated component.
 ///
@@ -88,7 +41,7 @@ impl ComponentInstance {
         let results = self
             .call_export(export, args, function.function_name())
             .await?;
-        convert_results(results)
+        convert_results(results, function.returns_bytes())
     }
 
     // Resolve an exported function on an interface or directly at world-level.
@@ -145,6 +98,20 @@ impl ComponentInstance {
         for (index, arg) in args.into_iter().enumerate() {
             let val = match arg {
                 Val::Resource(resource) => WasmtimeVal::Resource(resource.resource),
+                Val::Bytes(bytes) => {
+                    let element_type = match &params[index].1 {
+                        WasmtimeType::List(list) => list.ty(),
+                        other => {
+                            anyhow::bail!("parameter {index} is {other:?}, but bytes were provided")
+                        }
+                    };
+                    if !matches!(element_type, WasmtimeType::U8) {
+                        anyhow::bail!(
+                            "parameter {index} is a list of {element_type:?}, but bytes were provided"
+                        );
+                    }
+                    WasmtimeVal::List(bytes.into_iter().map(WasmtimeVal::U8).collect())
+                }
                 Val::Json(json) => json_to_val(&json, &params[index].1)
                     .map_err(|e| anyhow::anyhow!("Error converting parameter {index}: {e}"))?,
             };
@@ -183,8 +150,12 @@ impl ComponentInstance {
 //
 // A WIT `result<T, E>` maps onto Rust's `Result`: an `err` becomes an `Err`
 // here, so callers handle failure before ever checking for an `ok` value. A
-// resource remains a handle; everything else converts to JSON.
-fn convert_results(results: Vec<WasmtimeVal>) -> Result<Option<Val>> {
+// resource remains a handle, a `list<u8>` becomes bytes, and everything else
+// converts to JSON.
+//
+// `as_bytes` is determined from the function's declared result type rather
+// than the returned values, so an empty `list<u8>` can be recognized as bytes.
+fn convert_results(results: Vec<WasmtimeVal>, as_bytes: bool) -> Result<Option<Val>> {
     if results.len() > 1 {
         anyhow::bail!(
             "got {} results; a WIT function declares at most one",
@@ -195,7 +166,7 @@ fn convert_results(results: Vec<WasmtimeVal>) -> Result<Option<Val>> {
         return Ok(None);
     };
     match result {
-        WasmtimeVal::Result(Ok(Some(ok_val))) => Ok(Some(convert_value(ok_val)?)),
+        WasmtimeVal::Result(Ok(Some(ok_val))) => Ok(Some(convert_value(ok_val, as_bytes)?)),
         WasmtimeVal::Result(Ok(None)) => Ok(None),
         WasmtimeVal::Result(Err(Some(error_val))) => {
             let error_json =
@@ -203,15 +174,25 @@ fn convert_results(results: Vec<WasmtimeVal>) -> Result<Option<Val>> {
             anyhow::bail!("Component returned error: {error_json}")
         }
         WasmtimeVal::Result(Err(None)) => anyhow::bail!("Component returned error"),
-        value => Ok(Some(convert_value(value)?)),
+        value => Ok(Some(convert_value(value, as_bytes)?)),
     }
 }
 
-fn convert_value(val: &WasmtimeVal) -> Result<Val> {
+fn convert_value(val: &WasmtimeVal, as_bytes: bool) -> Result<Val> {
     Ok(match val {
         WasmtimeVal::Resource(resource) => Val::Resource(ComponentResource {
             resource: *resource,
         }),
+        WasmtimeVal::List(items) if as_bytes => {
+            let mut bytes = Vec::with_capacity(items.len());
+            for item in items {
+                let WasmtimeVal::U8(byte) = item else {
+                    unreachable!("a WIT list is homogeneous, and this one is declared list<u8>")
+                };
+                bytes.push(*byte);
+            }
+            Val::Bytes(bytes)
+        }
         other => Val::Json(val_to_json(other)?),
     })
 }

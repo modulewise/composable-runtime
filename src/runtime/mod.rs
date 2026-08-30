@@ -5,24 +5,27 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::composition::graph::ComponentGraph;
-use crate::composition::registry::{HostCapability, HostCapabilityFactory, build_registries};
+use crate::composition::registry::{
+    HostCapability, HostCapabilityFactory, build_capability_registry, build_components,
+};
+use crate::composition::resolver::{OciResolver, Resolver, Resolvers};
 use crate::config::types::{ConfigHandler, DefinitionLoader};
 #[cfg(feature = "messaging")]
 use crate::message::MessagePublisher;
 use crate::service::Service;
-use crate::types::{Component, ComponentInvoker};
+use crate::types::{Component, ComponentHost};
 
 pub mod component;
 pub(crate) mod conversion;
 mod grpc;
 pub(crate) mod host;
 
-pub use component::{ComponentInstance, ComponentResource, Val};
-use host::ComponentHost;
+pub use component::ComponentInstance;
+use host::{Bootstrapper, FactoryResolver, Host, Invoker};
 
 /// Composable Runtime for invoking Wasm Components
 pub struct Runtime {
-    host: ComponentHost,
+    host: Arc<Host>,
     services: Vec<Box<dyn Service>>,
     #[cfg(feature = "messaging")]
     publisher: Arc<dyn MessagePublisher>,
@@ -35,10 +38,7 @@ impl Runtime {
     }
 
     /// List all components, optionally filtered by a selector
-    pub fn list_components(
-        &self,
-        selector: Option<&crate::config::types::Selector>,
-    ) -> Vec<&Component> {
+    pub fn list_components(&self, selector: Option<&crate::selector::Selector>) -> Vec<&Component> {
         self.host.list_components(selector)
     }
 
@@ -61,9 +61,9 @@ impl Runtime {
         self.host.instantiate(component_name, &env_pairs).await
     }
 
-    /// Get a component invoker for this runtime.
-    pub fn invoker(&self) -> Arc<dyn ComponentInvoker> {
-        Arc::new(self.host.clone())
+    /// Get a handle to this runtime's component host.
+    pub fn host(&self) -> Arc<dyn ComponentHost> {
+        self.host.clone()
     }
 
     /// Get a message publisher for this runtime (messaging feature only).
@@ -74,14 +74,14 @@ impl Runtime {
 
     /// Start the runtime (services, in registration order).
     ///
-    /// Injects dependencies (`set_invoker`, `set_publisher`) into each
-    /// service before calling `start()`.
+    /// Injects dependencies (`set_component_host`, `set_message_publisher`)
+    /// into each service before calling `start()`.
     pub fn start(&self) -> Result<()> {
-        let invoker: Arc<dyn ComponentInvoker> = Arc::new(self.host.clone());
+        let component_host: Arc<dyn ComponentHost> = self.host.clone();
         for service in &self.services {
-            service.set_invoker(invoker.clone());
+            service.set_component_host(component_host.clone());
             #[cfg(feature = "messaging")]
-            service.set_publisher(Arc::clone(&self.publisher));
+            service.set_message_publisher(Arc::clone(&self.publisher));
             service.start()?;
         }
         Ok(())
@@ -236,14 +236,37 @@ impl RuntimeBuilder {
             }
         }
 
-        // Build registries from graph
-        let (component_registry, capability_registry) = build_registries(&graph, factories).await?;
+        // Capabilities first, since they depend on no components.
+        let capability_registry = build_capability_registry(&graph, factories)?;
 
-        // Create component host
-        let host = ComponentHost::new(component_registry, capability_registry)?;
+        // The traverser of the graph and builder of the component registry.
+        let bootstrapper = Arc::new(Bootstrapper::new(Invoker::new()?, capability_registry));
+
+        // The factory resolver invokes components as they are built, so it
+        // needs the bootstrapper. The others need nothing from the runtime.
+        let resolvers = Resolvers::new(HashMap::from([
+            ("oci", Box::new(OciResolver) as Box<dyn Resolver>),
+            (
+                "factory",
+                Box::new(FactoryResolver::new(bootstrapper.clone())) as Box<dyn Resolver>,
+            ),
+        ]));
+
+        build_components(
+            &graph,
+            &resolvers,
+            &bootstrapper.component_registry,
+            &bootstrapper.capability_registry,
+        )
+        .await?;
+
+        // Resolvers are only needed for the boostrap phase.
+        drop(resolvers);
+        let bootstrapper = Arc::into_inner(bootstrapper)
+            .expect("resolvers dropped, so the bootstrapper is unshared");
 
         Ok(Runtime {
-            host,
+            host: Arc::new(bootstrapper.into_host()),
             services: self.services,
             #[cfg(feature = "messaging")]
             publisher: messaging_publisher,
