@@ -3,12 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use wasmtime::component::{HasData, Linker};
 
 use super::composer::Composer;
 use super::graph::{ComponentGraph, Edge, Node};
+use super::resolver::Resolvers;
 use super::wit::Parser;
 use crate::types::{
     CapabilityDefinition, ComponentDefinition, ComponentMetadata, ComponentState, Function,
@@ -176,9 +176,17 @@ pub struct CapabilityRegistry {
     pub capabilities: Arc<HashMap<String, Capability>>,
 }
 
-#[derive(Debug, Clone)]
+/// Components registered during graph traversal. `seal` consumes it to produce
+/// the fixed [`ComponentRegistry`].
+#[derive(Debug, Clone, Default)]
+pub struct BootstrapRegistry {
+    components: Arc<RwLock<HashMap<String, Arc<ComponentSpec>>>>,
+}
+
+/// Every registered component, keyed by name.
+#[derive(Debug, Clone, Default)]
 pub struct ComponentRegistry {
-    pub components: Arc<HashMap<String, ComponentSpec>>,
+    components: Arc<HashMap<String, Arc<ComponentSpec>>>,
 }
 
 impl CapabilityRegistry {
@@ -209,24 +217,27 @@ impl CapabilityRegistry {
     }
 }
 
-impl ComponentRegistry {
-    pub fn empty() -> Self {
-        Self {
-            components: Arc::new(HashMap::new()),
+impl BootstrapRegistry {
+    /// Register a component spec.
+    pub fn register(&self, spec: ComponentSpec) {
+        let mut components = self.components.write().unwrap();
+        components.insert(spec.name.clone(), Arc::new(spec));
+    }
+
+    /// Record that `dependent` imports `name`.
+    pub fn add_dependent(&self, name: &str, dependent: &str) {
+        let mut components = self.components.write().unwrap();
+        if let Some(spec) = components.get_mut(name) {
+            Arc::make_mut(spec).dependents.push(dependent.to_string());
         }
     }
 
-    pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
-        self.components
-            .values()
-            .filter(|spec| !spec.name.starts_with('_'))
-    }
-
-    pub fn get_component(&self, name: &str) -> Option<&ComponentSpec> {
+    pub fn get_component(&self, name: &str) -> Option<Arc<ComponentSpec>> {
         if name.starts_with('_') {
             return None;
         }
-        self.components.get(name)
+        let components = self.components.read().unwrap();
+        components.get(name).cloned()
     }
 
     // TODO: replace hardcoded "any" with label selector evaluation
@@ -235,11 +246,14 @@ impl ComponentRegistry {
         candidate: &ComponentDefinition,
         requester: &ComponentDefinition,
         _requester_metadata: &ComponentMetadata,
-    ) -> Result<&ComponentSpec> {
-        let component = self
-            .components
-            .get(&candidate.name)
-            .expect("component must exist in registry");
+    ) -> Result<Arc<ComponentSpec>> {
+        let component = {
+            let components = self.components.read().unwrap();
+            components
+                .get(&candidate.name)
+                .cloned()
+                .expect("component must exist in registry")
+        };
         match candidate.scope.as_str() {
             "any" => Ok(component),
             scope => Err(anyhow::anyhow!(
@@ -249,47 +263,81 @@ impl ComponentRegistry {
             )),
         }
     }
-}
 
-impl Default for ComponentRegistry {
-    fn default() -> Self {
-        Self::empty()
+    /// Pass the accumulated components to a fixed registry.
+    pub fn seal(self) -> ComponentRegistry {
+        let components = std::mem::take(&mut *self.components.write().unwrap());
+        ComponentRegistry {
+            components: Arc::new(components),
+        }
     }
 }
 
-/// Build registries from definitions
-pub async fn build_registries(
+impl ComponentRegistry {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn get_components(&self) -> impl Iterator<Item = &ComponentSpec> {
+        self.components
+            .values()
+            .map(Arc::as_ref)
+            .filter(|spec| !spec.name.starts_with('_'))
+    }
+
+    pub fn get_component(&self, name: &str) -> Option<&ComponentSpec> {
+        if name.starts_with('_') {
+            return None;
+        }
+        self.components.get(name).map(Arc::as_ref)
+    }
+}
+
+/// Build the capability registry from the graph's capability definitions.
+pub fn build_capability_registry(
     component_graph: &ComponentGraph,
     factories: HashMap<&'static str, HostCapabilityFactory>,
-) -> Result<(ComponentRegistry, CapabilityRegistry)> {
+) -> Result<CapabilityRegistry> {
     let mut capability_definitions = Vec::new();
     for node in component_graph.nodes() {
         if let Node::Capability(def) = &node.weight {
             capability_definitions.push(def.clone());
         }
     }
+    create_capability_registry(capability_definitions, factories)
+}
 
-    let capability_registry = create_capability_registry(capability_definitions, factories)?;
-
+/// Build every component in dependency order.
+pub async fn build_components(
+    component_graph: &ComponentGraph,
+    resolvers: &Resolvers,
+    component_registry: &BootstrapRegistry,
+    capability_registry: &CapabilityRegistry,
+) -> Result<()> {
     let sorted_indices = component_graph.get_build_order();
-
-    let mut built_components = HashMap::new();
 
     for &node_index in &sorted_indices {
         if let Node::Component(definition) = &component_graph[node_index] {
-            let temp_component_registry = ComponentRegistry {
-                components: Arc::new(built_components.clone()),
-            };
+            let bytes = resolvers
+                .resolve(&definition.uri)
+                .await
+                .map_err(|e| anyhow::anyhow!("Component '{}': {e}", definition.name))?;
+
+            let dependencies: Vec<(&Node, &Edge)> = component_graph
+                .get_dependencies(node_index)
+                .map(|(index, edge)| (&component_graph[index], edge))
+                .collect();
 
             let component_spec = process_component(
-                node_index,
-                component_graph,
-                &temp_component_registry,
-                &capability_registry,
+                bytes,
+                definition,
+                &dependencies,
+                component_registry,
+                capability_registry,
             )
             .await?;
 
-            built_components.insert(definition.name.clone(), component_spec);
+            component_registry.register(component_spec);
         }
     }
 
@@ -299,20 +347,14 @@ pub async fn build_registries(
             for (dep_index, edge) in component_graph.get_dependencies(node_index) {
                 if matches!(edge, Edge::Dependency)
                     && let Node::Component(dep_def) = &component_graph[dep_index]
-                    && let Some(spec) = built_components.get_mut(&dep_def.name)
                 {
-                    spec.dependents.push(definition.name.clone());
+                    component_registry.add_dependent(&dep_def.name, &definition.name);
                 }
             }
         }
     }
 
-    Ok((
-        ComponentRegistry {
-            components: Arc::new(built_components),
-        },
-        capability_registry,
-    ))
+    Ok(())
 }
 
 fn create_capability_registry(
@@ -546,22 +588,15 @@ fn parse_semver(version: &str) -> Option<(u32, u32, u32)> {
     None
 }
 
+// Turn a definition and its resolved bytes into a spec: parse, compose with
+// config and dependencies, then check that every import is satisfied.
 async fn process_component(
-    node_index: petgraph::graph::NodeIndex,
-    component_graph: &ComponentGraph,
-    component_registry: &ComponentRegistry,
+    mut bytes: Vec<u8>,
+    definition: &ComponentDefinition,
+    dependencies: &[(&Node, &Edge)],
+    component_registry: &BootstrapRegistry,
     capability_registry: &CapabilityRegistry,
 ) -> Result<ComponentSpec> {
-    let definition = if let Node::Component(def) = &component_graph[node_index] {
-        def
-    } else {
-        return Err(anyhow::anyhow!(
-            "Internal error: process_component called on a non-component node"
-        ));
-    };
-
-    let mut bytes = read_bytes(&definition.uri).await?;
-
     let (metadata, mut imports, mut exports, mut functions) =
         Parser::parse(&bytes).map_err(|e| anyhow::anyhow!("Failed to parse component: {e}"))?;
 
@@ -603,9 +638,7 @@ async fn process_component(
         exports: exports.clone(),
     };
 
-    let dependencies: Vec<_> = component_graph.get_dependencies(node_index).collect();
-    for (dependency_node_index, edge) in &dependencies {
-        let dependency_node = &component_graph[*dependency_node_index];
+    for (dependency_node, edge) in dependencies {
         match dependency_node {
             Node::Component(dependency_def) => {
                 let component_spec = component_registry.get_required_import(
@@ -723,30 +756,4 @@ fn is_advice_component(exports: &[String]) -> bool {
     exports
         .iter()
         .any(|e| e.starts_with("modulewise:interceptor/advice"))
-}
-
-async fn read_bytes(uri: &str) -> Result<Vec<u8>> {
-    if let Some(oci_ref) = uri.strip_prefix("oci://") {
-        let client = wasm_pkg_client::oci::client::Client::new(Default::default());
-        let image_ref = oci_ref.parse()?;
-        let auth = oci_client::secrets::RegistryAuth::Anonymous;
-        let media_types = vec!["application/wasm", "application/vnd.wasm.component"];
-
-        let image_data = client.pull(&image_ref, &auth, media_types).await?;
-
-        // Get the component bytes from the first layer
-        if let Some(layer) = image_data.layers.first() {
-            Ok(layer.data.to_vec())
-        } else {
-            Err(anyhow::anyhow!("No layers found in OCI image: {oci_ref}"))
-        }
-    } else {
-        // Handle both file:// and plain paths
-        let path = if let Some(path_str) = uri.strip_prefix("file://") {
-            PathBuf::from(path_str)
-        } else {
-            PathBuf::from(uri)
-        };
-        Ok(std::fs::read(path)?)
-    }
 }

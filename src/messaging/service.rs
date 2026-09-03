@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::config::types::{CategoryClaim, ConfigHandler, PropertyMap};
 use crate::message::{Message, MessageBuilder, MessageHeaders, MessagePublisher};
 use crate::service::Service;
-use crate::types::ComponentInvoker;
+use crate::types::ComponentHost;
 
 use super::bus::{Bus, LocalBus, LocalChannelFactory, SubscriptionConfig};
 use super::reply::ReplyHandler;
@@ -169,8 +169,8 @@ impl Service for MessagingService {
         }))
     }
 
-    fn set_invoker(&self, invoker: Arc<dyn ComponentInvoker>) {
-        self.bus.set_invoker(invoker);
+    fn set_component_host(&self, component_host: Arc<dyn ComponentHost>) {
+        self.bus.set_component_host(component_host);
     }
 
     fn start(&self) -> Result<()> {

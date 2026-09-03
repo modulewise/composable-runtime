@@ -170,10 +170,13 @@ async fn test_host_capability_invoked() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoker()
+        .host()
         .invoke("guest", "get-value", vec![], None)
         .await
-        .expect("Failed to invoke");
+        .expect("Failed to invoke")
+        .expect("expected a result")
+        .into_json()
+        .expect("expected JSON");
 
     assert_eq!(result, serde_json::json!(42));
 }
@@ -265,10 +268,13 @@ async fn test_host_capability_with_config() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoker()
+        .host()
         .invoke("guest", "calc", vec![], None)
         .await
-        .expect("Failed to invoke");
+        .expect("Failed to invoke")
+        .expect("expected a result")
+        .into_json()
+        .expect("expected JSON");
 
     // 10 * 5 = 50
     assert_eq!(result, serde_json::json!(50));
@@ -301,10 +307,13 @@ async fn test_host_capability_with_default_config() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoker()
+        .host()
         .invoke("guest", "calc", vec![], None)
         .await
-        .expect("Failed to invoke");
+        .expect("Failed to invoke")
+        .expect("expected a result")
+        .into_json()
+        .expect("expected JSON");
 
     // 10 * 1 = 10 (default multiplier)
     assert_eq!(result, serde_json::json!(10));
@@ -400,10 +409,13 @@ async fn test_host_capability_with_state() {
         .expect("Failed to create runtime");
 
     let result = runtime
-        .invoker()
+        .host()
         .invoke("guest", "count-twice", vec![], None)
         .await
-        .expect("Failed to invoke");
+        .expect("Failed to invoke")
+        .expect("expected a result")
+        .into_json()
+        .expect("expected JSON");
 
     // increment() called twice
     assert_eq!(result, serde_json::json!(2));
@@ -436,18 +448,24 @@ async fn test_host_capability_state_isolated_per_instance() {
 
     // First invocation
     let result1 = runtime
-        .invoker()
+        .host()
         .invoke("guest", "count-twice", vec![], None)
         .await
-        .expect("Failed to invoke");
+        .expect("Failed to invoke")
+        .expect("expected a result")
+        .into_json()
+        .expect("expected JSON");
     assert_eq!(result1, serde_json::json!(2));
 
     // Second invocation - should start fresh (new instance, new state)
     let result2 = runtime
-        .invoker()
+        .host()
         .invoke("guest", "count-twice", vec![], None)
         .await
-        .expect("Failed to invoke");
+        .expect("Failed to invoke")
+        .expect("expected a result")
+        .into_json()
+        .expect("expected JSON");
     assert_eq!(result2, serde_json::json!(2));
 }
 

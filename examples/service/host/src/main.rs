@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use composable_runtime::{
     CategoryClaim, ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
-    PropertyMap, Runtime, Service, create_capability, create_state,
+    PropertyMap, Runtime, Service, Val, create_capability, create_state,
 };
 use wasmtime::component::{HasSelf, Linker};
 
@@ -155,11 +155,19 @@ async fn main() -> Result<()> {
     runtime.start()?;
 
     let result = runtime
-        .invoker()
-        .invoke("greeter", "greet", vec![serde_json::json!("World")], None)
+        .host()
+        .invoke(
+            "greeter",
+            "greet",
+            vec![Val::Json(serde_json::json!("World"))],
+            None,
+        )
         .await?;
 
-    println!("Result: {result}");
+    match result {
+        Some(value) => println!("Result: {}", value.into_json()?),
+        None => println!("Result: null"),
+    }
 
     runtime.shutdown().await;
 

@@ -3,8 +3,10 @@
 use composable_runtime::ComponentGraph;
 use composable_runtime::composition::graph::Node;
 use composable_runtime::composition::registry::{
-    CapabilityRegistry, ComponentRegistry, build_registries,
+    BootstrapRegistry, CapabilityRegistry, ComponentRegistry, build_capability_registry,
+    build_components,
 };
+use composable_runtime::composition::resolver::Resolvers;
 use composable_runtime::types::{CapabilityDefinition, ComponentDefinition};
 use std::collections::HashMap;
 use std::io::Write;
@@ -137,13 +139,18 @@ pub fn get_capability_definition<'a>(
 pub async fn build_registries_and_assert_ok(
     graph: &ComponentGraph,
 ) -> (ComponentRegistry, CapabilityRegistry) {
-    let registries_result = build_registries(graph, HashMap::new()).await;
+    let capability_registry =
+        build_capability_registry(graph, HashMap::new()).expect("build_capability_registry failed");
+    let bootstrap_registry = BootstrapRegistry::default();
+    let resolvers = Resolvers::new(HashMap::new());
+    let result =
+        build_components(graph, &resolvers, &bootstrap_registry, &capability_registry).await;
     assert!(
-        registries_result.is_ok(),
-        "build_registries failed with: {:?}",
-        registries_result.err()
+        result.is_ok(),
+        "build_components failed with: {:?}",
+        result.err()
     );
-    registries_result.unwrap()
+    (bootstrap_registry.seal(), capability_registry)
 }
 
 pub fn load_graph_and_assert_ok(paths: &[PathBuf]) -> ComponentGraph {

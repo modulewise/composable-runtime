@@ -20,8 +20,8 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 use composable_runtime::{
-    ComponentInvoker, Message, MessageBuilder, MessageHeaders, MessageMapper, MessagePublisher,
-    PROPAGATED_HEADERS, PROPAGATION_CONTEXT, PropagatedHeader, PropagationContext, schema,
+    ComponentHost, Message, MessageBuilder, MessageHeaders, MessageMapper, MessagePublisher,
+    PROPAGATED_HEADERS, PROPAGATION_CONTEXT, PropagatedHeader, PropagationContext, Val, schema,
 };
 
 use crate::config::{
@@ -101,7 +101,7 @@ enum Segment {
 }
 
 impl Route {
-    fn from_config(config: &RouteConfig, invoker: &Arc<dyn ComponentInvoker>) -> Result<Self> {
+    fn from_config(config: &RouteConfig, component_host: &Arc<dyn ComponentHost>) -> Result<Self> {
         let method = config.method.parse::<Method>().map_err(|e| {
             anyhow::anyhow!(
                 "route '{}': invalid method '{}': {e}",
@@ -140,7 +140,7 @@ impl Route {
                 function,
                 mapping,
             } => {
-                let component_def = invoker.get_component(component).ok_or_else(|| {
+                let component_def = component_host.get_component(component).ok_or_else(|| {
                     anyhow::anyhow!(
                         "route '{}': component '{}' not found",
                         config.name,
@@ -365,7 +365,7 @@ impl Captures {
 
 struct Router {
     routes: Vec<Route>,
-    invoker: Arc<dyn ComponentInvoker>,
+    component_host: Arc<dyn ComponentHost>,
     publisher: Option<Arc<dyn MessagePublisher>>,
     tracer_provider: Option<SdkTracerProvider>,
 }
@@ -535,10 +535,10 @@ impl Router {
         // Scope the propagation context for the invocation. Downstream code
         // (e.g. host imports for outbound HTTP) reads via the task-local.
         // The explicit scope here is the boundary.
-        let invoke_fut = self.invoker.invoke(
+        let invoke_fut = self.component_host.invoke(
             component_name,
             invocation.function_key.as_str(),
-            invocation.args,
+            invocation.args.into_iter().map(Val::Json).collect(),
             None,
         );
         let wit_result = if propagated.is_empty() {
@@ -555,6 +555,14 @@ impl Router {
                 format!("invocation error: {e}"),
             )
         })?;
+
+        // The response mapper is JSON-based.
+        let wit_result = match wit_result {
+            Some(value) => value
+                .into_json()
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?,
+            None => serde_json::Value::Null,
+        };
 
         let reply = mapper
             .from_invocation_result(&wit_result, propagated)
@@ -923,13 +931,13 @@ pub struct HttpServer {
 impl HttpServer {
     pub fn new(
         config: ServerConfig,
-        invoker: Arc<dyn ComponentInvoker>,
+        component_host: Arc<dyn ComponentHost>,
         publisher: Option<Arc<dyn MessagePublisher>>,
     ) -> Result<Self> {
         let routes: Vec<Route> = config
             .routes
             .iter()
-            .map(|c| Route::from_config(c, &invoker))
+            .map(|c| Route::from_config(c, &component_host))
             .collect::<Result<_>>()?;
 
         let tracer_provider = if let Some(endpoint) = &config.otlp_endpoint {
@@ -946,7 +954,7 @@ impl HttpServer {
 
         let router = Arc::new(Router {
             routes,
-            invoker,
+            component_host,
             publisher,
             tracer_provider: tracer_provider.clone(),
         });

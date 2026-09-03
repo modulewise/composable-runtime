@@ -1,5 +1,5 @@
 use anyhow::Result;
-use composable_runtime::Runtime;
+use composable_runtime::{Runtime, Val};
 use grpc_capability::GrpcCapability;
 use tracing_subscriber::EnvFilter;
 
@@ -24,10 +24,18 @@ async fn main() -> Result<()> {
     let message = format!("testing {}", config_file);
 
     let result = runtime
-        .invoker()
-        .invoke("guest", "test.log", vec![serde_json::json!(message)], None)
+        .host()
+        .invoke(
+            "guest",
+            "test.log",
+            vec![Val::Json(serde_json::json!(message))],
+            None,
+        )
         .await?;
-    println!("Result: {}", result);
+    match result {
+        Some(value) => println!("Result: {}", value.into_json()?),
+        None => println!("Result: null"),
+    }
 
     Ok(())
 }

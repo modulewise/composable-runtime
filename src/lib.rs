@@ -15,11 +15,12 @@ pub use mapping::{
 pub use message::{
     Message, MessageBuilder, MessageHeaders, MessagePublisher, PropagatedHeader, ReturnAddress,
 };
-pub use runtime::{ComponentInstance, ComponentResource, Runtime, RuntimeBuilder, Val};
+pub use runtime::{ComponentInstance, Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{
-    CapabilityDefinition, Component, ComponentDefinition, ComponentInvoker, ComponentMetadata,
-    ComponentState, Function, FunctionParam, PROPAGATED_HEADERS,
+    CapabilityDefinition, Component, ComponentDefinition, ComponentHost, ComponentInvoker,
+    ComponentMetadata, ComponentResource, ComponentState, Function, FunctionParam,
+    PROPAGATED_HEADERS, Val,
 };
 
 // exposed for testing, hidden from docs
@@ -36,6 +37,7 @@ pub(crate) mod message;
 mod messaging;
 mod runtime;
 pub mod schema;
+pub(crate) mod selector;
 pub(crate) mod service;
 
 #[cfg(feature = "messaging")]

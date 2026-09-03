@@ -149,6 +149,18 @@ impl ComponentGraph {
                     );
                 }
             }
+
+            // A factory uri references the component that generates this one.
+            if let Some(factory_name) = definition.uri.strip_prefix("factory:") {
+                let factory_index = node_map.get(factory_name).copied().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Component '{}' references factory '{}', which is not defined.",
+                        definition.name,
+                        factory_name
+                    )
+                })?;
+                graph.update_edge(factory_index, importer_index, Edge::Factory);
+            }
         }
 
         // Add dependency edges for interceptor clones' own imports.
@@ -209,6 +221,7 @@ impl ComponentGraph {
         self.graph
             .edges_directed(index, petgraph::Direction::Incoming)
             .map(|edge_ref| (edge_ref.source(), edge_ref.weight()))
+            .filter(|(_, edge)| !matches!(edge, Edge::Factory))
     }
 
     fn dot(&self) -> String {
@@ -244,6 +257,7 @@ impl ComponentGraph {
                 Edge::Interceptor(position) => {
                     format!("[color=red, style=dashed, label=\"interceptor: {position}\"]")
                 }
+                Edge::Factory => "[color=green, style=dotted, label=\"factory\"]".to_string(),
             };
             output.push_str(&format!(
                 "  {} -> {} {};\n",
@@ -327,6 +341,7 @@ pub enum Node {
 pub enum Edge {
     Dependency,
     Interceptor(i32), // Position in chain (0 = innermost)
+    Factory,
 }
 
 /// Builder for constructing a ComponentGraph.

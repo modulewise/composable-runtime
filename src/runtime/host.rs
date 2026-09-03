@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::sync::Arc;
 use wasmtime::{
     Cache, Config, Engine, Store,
     component::{Component as WasmComponent, Linker},
@@ -16,30 +17,36 @@ use wasmtime_wasi_http::{p2 as http_p2, p3 as http_p3};
 use wasmtime_wasi_io::IoView;
 
 use crate::composition::registry::{
-    CapabilityRegistry, ComponentRegistry, WasiVersion, split_wasi_kind,
+    BootstrapRegistry, CapabilityRegistry, ComponentRegistry, ComponentSpec, WasiVersion,
+    split_wasi_kind,
 };
+use crate::composition::resolver::Resolver;
 use crate::context::PROPAGATION_CONTEXT;
-use crate::runtime::component::{ComponentInstance, Val};
+use crate::runtime::component::ComponentInstance;
 use crate::types::{
-    Component, ComponentInvoker, ComponentMetadata, ComponentState, Function, HttpHooks,
-    PROPAGATED_HEADERS,
+    Component, ComponentHost, ComponentInvoker, ComponentMetadata, ComponentState, Function,
+    HttpHooks, PROPAGATED_HEADERS, Val,
 };
 
-// Component host: wasmtime engine + registries, provides instantiation + invocation.
-#[derive(Clone)]
-pub(crate) struct ComponentHost {
+/// The build phase: components are registered as the graph is traversed.
+pub(crate) struct Bootstrapper {
     invoker: Invoker,
-    components: HashMap<String, Component>,
-    pub(crate) component_registry: ComponentRegistry,
+    pub(crate) component_registry: BootstrapRegistry,
     pub(crate) capability_registry: CapabilityRegistry,
 }
 
-impl ComponentHost {
-    pub(crate) fn new(
-        component_registry: ComponentRegistry,
-        capability_registry: CapabilityRegistry,
-    ) -> Result<Self> {
-        let invoker = Invoker::new()?;
+impl Bootstrapper {
+    pub(crate) fn new(invoker: Invoker, capability_registry: CapabilityRegistry) -> Self {
+        Self {
+            invoker,
+            component_registry: BootstrapRegistry::default(),
+            capability_registry,
+        }
+    }
+
+    /// Produce the host with a sealed component registry.
+    pub(crate) fn into_host(self) -> Host {
+        let component_registry = self.component_registry.seal();
         let components = component_registry
             .get_components()
             .map(|spec| {
@@ -57,40 +64,45 @@ impl ComponentHost {
                 (spec.name.clone(), component)
             })
             .collect();
-        Ok(Self {
-            invoker,
+        Host {
+            invoker: self.invoker,
             components,
             component_registry,
-            capability_registry,
-        })
+            capability_registry: self.capability_registry,
+        }
     }
+}
 
+/// Hosts components, managing their lifecycle (instantiate, link, invoke).
+pub(crate) struct Host {
+    invoker: Invoker,
+    components: HashMap<String, Component>,
+    pub(crate) component_registry: ComponentRegistry,
+    pub(crate) capability_registry: CapabilityRegistry,
+}
+
+impl Host {
     pub(crate) async fn invoke(
         &self,
         component_name: &str,
         function_name: &str,
-        args: Vec<serde_json::Value>,
+        args: Vec<Val>,
         env_vars: &[(String, String)],
-    ) -> Result<serde_json::Value> {
+    ) -> Result<Option<Val>> {
         let spec = self
             .component_registry
             .get_component(component_name)
             .ok_or_else(|| anyhow::anyhow!("Component '{component_name}' not found"))?;
 
-        let function = spec.functions.get(function_name).ok_or_else(|| {
-            anyhow::anyhow!("Function '{function_name}' not found in component '{component_name}'")
-        })?;
-
-        self.invoker
-            .invoke(
-                &spec.bytes,
-                &spec.capabilities,
-                &self.capability_registry,
-                function.clone(),
-                args,
-                env_vars,
-            )
-            .await
+        invoke_with_spec(
+            &self.invoker,
+            spec,
+            &self.capability_registry,
+            function_name,
+            args,
+            env_vars,
+        )
+        .await
     }
 
     pub(crate) async fn instantiate(
@@ -114,15 +126,39 @@ impl ComponentHost {
     }
 }
 
-impl ComponentInvoker for ComponentHost {
+async fn invoke_with_spec(
+    invoker: &Invoker,
+    spec: &ComponentSpec,
+    capability_registry: &CapabilityRegistry,
+    function_name: &str,
+    args: Vec<Val>,
+    env_vars: &[(String, String)],
+) -> Result<Option<Val>> {
+    let function = spec.functions.get(function_name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Function '{function_name}' not found in component '{}'",
+            spec.name
+        )
+    })?;
+
+    invoker
+        .invoke(
+            &spec.bytes,
+            &spec.capabilities,
+            capability_registry,
+            function.clone(),
+            args,
+            env_vars,
+        )
+        .await
+}
+
+impl ComponentHost for Host {
     fn get_component(&self, name: &str) -> Option<&Component> {
         self.components.get(name)
     }
 
-    fn list_components(
-        &self,
-        selector: Option<&crate::config::types::Selector>,
-    ) -> Vec<&Component> {
+    fn list_components(&self, selector: Option<&crate::selector::Selector>) -> Vec<&Component> {
         match selector {
             Some(selector) => self
                 .components
@@ -132,16 +168,17 @@ impl ComponentInvoker for ComponentHost {
             None => self.components.values().collect(),
         }
     }
+}
 
+impl ComponentInvoker for Host {
     fn invoke<'a>(
         &'a self,
         component_name: &'a str,
         function_name: &'a str,
-        args: Vec<serde_json::Value>,
+        args: Vec<Val>,
         env: Option<HashMap<String, String>>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Option<Val>>> + Send + 'a>>
+    {
         Box::pin(async move {
             let env_pairs: Vec<(String, String)> =
                 env.map(|m| m.into_iter().collect()).unwrap_or_default();
@@ -150,6 +187,77 @@ impl ComponentInvoker for ComponentHost {
         })
     }
 }
+
+impl ComponentInvoker for Bootstrapper {
+    fn invoke<'a>(
+        &'a self,
+        component_name: &'a str,
+        function_name: &'a str,
+        args: Vec<Val>,
+        env: Option<HashMap<String, String>>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Option<Val>>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let env_pairs: Vec<(String, String)> =
+                env.map(|m| m.into_iter().collect()).unwrap_or_default();
+            let spec = self
+                .component_registry
+                .get_component(component_name)
+                .ok_or_else(|| anyhow::anyhow!("Component '{component_name}' not found"))?;
+            invoke_with_spec(
+                &self.invoker,
+                &spec,
+                &self.capability_registry,
+                function_name,
+                args,
+                &env_pairs,
+            )
+            .await
+        })
+    }
+}
+
+/// Produces a component's bytes by invoking the factory its `uri` references.
+/// Unlike the File and OCI resolvers, this one requires the runtime, since a
+/// factory is an invoked component.
+pub(crate) struct FactoryResolver {
+    component_invoker: Arc<dyn ComponentInvoker>,
+}
+
+impl FactoryResolver {
+    pub(crate) fn new(component_invoker: Arc<dyn ComponentInvoker>) -> Self {
+        Self { component_invoker }
+    }
+}
+
+impl Resolver for FactoryResolver {
+    fn resolve<'a>(
+        &'a self,
+        uri: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send + 'a>> {
+        Box::pin(async move {
+            let name = uri
+                .strip_prefix("factory:")
+                .ok_or_else(|| anyhow::anyhow!("not a factory uri: {uri}"))?;
+
+            let result = self
+                .component_invoker
+                .invoke(name, FACTORY_BUILD, Vec::new(), None)
+                .await
+                .map_err(|e| anyhow::anyhow!("factory '{name}' failed to build: {e}"))?;
+
+            match result {
+                Some(Val::Bytes(bytes)) => Ok(bytes),
+                Some(_) | None => Err(anyhow::anyhow!(
+                    "factory '{name}' did not return component bytes"
+                )),
+            }
+        })
+    }
+}
+
+// The exported interface and function from `composable:factory`.
+const FACTORY_BUILD: &str = "factory.build";
 
 impl IoView for ComponentState {
     fn table(&mut self) -> &mut ResourceTable {
@@ -280,7 +388,7 @@ impl http_p3::WasiHttpHooks for HttpHooks {
 }
 
 #[derive(Clone)]
-struct Invoker {
+pub(crate) struct Invoker {
     engine: Engine,
 }
 
@@ -573,25 +681,23 @@ impl Invoker {
         capabilities: &[String],
         capability_registry: &CapabilityRegistry,
         function: Function,
-        args: Vec<serde_json::Value>,
+        args: Vec<Val>,
         env_vars: &[(String, String)],
-    ) -> Result<serde_json::Value> {
+    ) -> Result<Option<Val>> {
         let mut instance = self
             .instantiate_from_bytes(bytes, capabilities, capability_registry, env_vars)
             .await?;
 
-        let args = args.into_iter().map(Val::Json).collect();
-        let results = instance.call(&function, args).await?;
+        let result = instance.call(&function, args).await?;
 
-        match results {
-            None => Ok(serde_json::Value::Null),
-            Some(Val::Json(value)) => Ok(value),
-            Some(Val::Resource(_)) => Err(anyhow::anyhow!(
-                "function '{}' returned a resource, which has no JSON value representation; \
+        if matches!(result, Some(Val::Resource(_))) {
+            return Err(anyhow::anyhow!(
+                "function '{}' returned a resource, which does not outlive this call; \
                  instantiate the component and use `ComponentInstance::call` instead",
                 function.function_name()
-            )),
+            ));
         }
+        Ok(result)
     }
 }
 

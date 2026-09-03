@@ -6,7 +6,7 @@ use anyhow::Result;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use composable_runtime::{ComponentInvoker, ConfigHandler, MessagePublisher, Service};
+use composable_runtime::{ComponentHost, ConfigHandler, MessagePublisher, Service};
 
 use crate::config::{self, HttpServerConfigHandler, ServerConfig, SharedConfig};
 use crate::server::HttpServer;
@@ -17,8 +17,8 @@ use crate::server::HttpServer;
 /// Handles `[server.*]` definitions where `type = "http"`.
 pub struct HttpService {
     servers: SharedConfig,
-    invoker: Mutex<Option<Arc<dyn ComponentInvoker>>>,
-    publisher: Mutex<Option<Arc<dyn MessagePublisher>>>,
+    component_host: Mutex<Option<Arc<dyn ComponentHost>>>,
+    message_publisher: Mutex<Option<Arc<dyn MessagePublisher>>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -29,8 +29,8 @@ impl Default for HttpService {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         Self {
             servers: config::shared_config(),
-            invoker: Mutex::new(None),
-            publisher: Mutex::new(None),
+            component_host: Mutex::new(None),
+            message_publisher: Mutex::new(None),
             shutdown_tx,
             shutdown_rx,
             tasks: Mutex::new(Vec::new()),
@@ -45,23 +45,23 @@ impl Service for HttpService {
         ))))
     }
 
-    fn set_invoker(&self, invoker: Arc<dyn ComponentInvoker>) {
-        *self.invoker.lock().unwrap() = Some(invoker);
+    fn set_component_host(&self, component_host: Arc<dyn ComponentHost>) {
+        *self.component_host.lock().unwrap() = Some(component_host);
     }
 
-    fn set_publisher(&self, publisher: Arc<dyn MessagePublisher>) {
-        *self.publisher.lock().unwrap() = Some(publisher);
+    fn set_message_publisher(&self, message_publisher: Arc<dyn MessagePublisher>) {
+        *self.message_publisher.lock().unwrap() = Some(message_publisher);
     }
 
     fn start(&self) -> Result<()> {
-        let invoker = self
-            .invoker
+        let component_host = self
+            .component_host
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("HttpService: invoker not set"))?;
+            .ok_or_else(|| anyhow::anyhow!("HttpService: component host not set"))?;
 
-        let publisher = self.publisher.lock().unwrap().clone();
+        let message_publisher = self.message_publisher.lock().unwrap().clone();
 
         let servers: Vec<ServerConfig> = {
             let mut lock = self.servers.lock().unwrap();
@@ -76,7 +76,11 @@ impl Service for HttpService {
         for config in servers {
             let name = config.name.clone();
             let port = config.port;
-            let server = HttpServer::new(config, Arc::clone(&invoker), publisher.clone())?;
+            let server = HttpServer::new(
+                config,
+                Arc::clone(&component_host),
+                message_publisher.clone(),
+            )?;
 
             tracing::info!(server = %name, port, "starting HTTP server");
 

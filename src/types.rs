@@ -216,6 +216,32 @@ impl Function {
         self.result.as_ref()
     }
 
+    /// Whether this function's result is a `list<u8>`.
+    ///
+    /// The generated schema for such a result is an array of numbers with
+    /// `minimum: 0` and `maximum: 255`.
+    pub fn returns_bytes(&self) -> bool {
+        let Some(schema) = self.result.as_ref() else {
+            return false;
+        };
+        // `result<T, E>` is encoded as a two-arm `oneOf`; take the `ok` arm.
+        let schema = schema
+            .get("oneOf")
+            .and_then(|arms| arms.as_array())
+            .and_then(|arms| arms.iter().find_map(|arm| arm.pointer("/properties/ok")))
+            .unwrap_or(schema);
+
+        if schema.get("type").and_then(|t| t.as_str()) != Some("array") {
+            return false;
+        }
+        let Some(items) = schema.get("items") else {
+            return false;
+        };
+        items.get("type").and_then(|t| t.as_str()) == Some("number")
+            && items.get("minimum").and_then(|m| m.as_i64()) == Some(0)
+            && items.get("maximum").and_then(|m| m.as_i64()) == Some(255)
+    }
+
     /// Get the function key used in maps and invoke calls.
     /// - Direct function exports: `function_name`
     /// - Interface function exports: `unqualified_interface.function_name`
@@ -297,13 +323,87 @@ pub struct Component {
     pub functions: HashMap<String, Function>,
 }
 
+/// A value crossing the call boundary.
+pub enum Val {
+    /// Data passed by value.
+    Json(serde_json::Value),
+    /// A `list<u8>`, kept as bytes rather than a JSON array of numbers.
+    Bytes(Vec<u8>),
+    /// Reference to a resource owned by a component instance.
+    Resource(ComponentResource),
+}
+
+impl Val {
+    /// The JSON value, if this is data (and not a bytes list).
+    pub fn as_json(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Json(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// The bytes, if this is a byte list.
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Bytes(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+
+    /// The reference handle, if this is a resource.
+    pub fn as_resource(&self) -> Option<&ComponentResource> {
+        match self {
+            Self::Resource(resource) => Some(resource),
+            _ => None,
+        }
+    }
+
+    /// The JSON value, for callers whose payload model is inherently
+    /// JSON-based. Bytes convert to an array of numbers. A Resource has no
+    /// JSON representation, and therefore errors.
+    pub fn into_json(self) -> Result<serde_json::Value> {
+        match self {
+            Self::Json(value) => Ok(value),
+            Self::Bytes(bytes) => Ok(serde_json::Value::Array(
+                bytes.into_iter().map(serde_json::Value::from).collect(),
+            )),
+            Self::Resource(_) => Err(anyhow::anyhow!(
+                "a resource has no JSON value representation"
+            )),
+        }
+    }
+}
+
+impl From<serde_json::Value> for Val {
+    fn from(value: serde_json::Value) -> Self {
+        Self::Json(value)
+    }
+}
+
+impl From<Vec<u8>> for Val {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Bytes(bytes)
+    }
+}
+
+impl From<ComponentResource> for Val {
+    fn from(resource: ComponentResource) -> Self {
+        Self::Resource(resource)
+    }
+}
+
+/// A reference handle to a resource owned by a component instance.
+///
+/// Can only be used with its owning instance, as the "receiver" (first arg) of
+/// a call or as an arg passed to another call. It is no longer valid once the
+/// owning instance drops.
+#[derive(Clone, Copy)]
+pub struct ComponentResource {
+    pub(crate) resource: wasmtime::component::ResourceAny,
+}
+
 /// Invoke components by name.
 pub trait ComponentInvoker: Send + Sync {
-    fn get_component(&self, name: &str) -> Option<&Component>;
-
-    fn list_components(&self, selector: Option<&crate::config::types::Selector>)
-    -> Vec<&Component>;
-
     /// Invoke a component function.
     ///
     /// Propagation context (e.g. W3C tracecontext) is read from the ambient
@@ -314,7 +414,14 @@ pub trait ComponentInvoker: Send + Sync {
         &'a self,
         component_name: &'a str,
         function_name: &'a str,
-        args: Vec<serde_json::Value>,
+        args: Vec<Val>,
         env: Option<HashMap<String, String>>,
-    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Val>>> + Send + 'a>>;
+}
+
+/// Invocation plus lookup and discovery of the components available to invoke.
+pub trait ComponentHost: ComponentInvoker {
+    fn get_component(&self, name: &str) -> Option<&Component>;
+
+    fn list_components(&self, selector: Option<&crate::selector::Selector>) -> Vec<&Component>;
 }
