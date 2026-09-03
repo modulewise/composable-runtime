@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::config::loaders::{TomlLoader, WasmLoader};
 use crate::config::processor::ConfigProcessor;
-use crate::types::{CapabilityDefinition, ComponentDefinition, factory_uri_target};
+use crate::types::{CapabilityDefinition, ComponentDefinition};
 
 /// Directed graph of component and capability definitions
 /// with dependency and interceptor edges.
@@ -151,7 +151,7 @@ impl ComponentGraph {
             }
 
             // A factory uri references the component that generates this one.
-            if let Some(factory_name) = factory_uri_target(&definition.uri) {
+            if let Some(factory_name) = definition.uri.strip_prefix("factory:") {
                 let factory_index = node_map.get(factory_name).copied().ok_or_else(|| {
                     anyhow::anyhow!(
                         "Component '{}' references factory '{}', which is not defined.",

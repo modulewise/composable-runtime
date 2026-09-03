@@ -25,7 +25,7 @@ use crate::context::PROPAGATION_CONTEXT;
 use crate::runtime::component::ComponentInstance;
 use crate::types::{
     Component, ComponentHost, ComponentInvoker, ComponentMetadata, ComponentState, Function,
-    HttpHooks, PROPAGATED_HEADERS, Val, factory_uri_target,
+    HttpHooks, PROPAGATED_HEADERS, Val,
 };
 
 /// The build phase: components are registered as the graph is traversed.
@@ -236,7 +236,8 @@ impl Resolver for FactoryResolver {
         uri: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send + 'a>> {
         Box::pin(async move {
-            let name = factory_uri_target(uri)
+            let name = uri
+                .strip_prefix("factory:")
                 .ok_or_else(|| anyhow::anyhow!("not a factory uri: {uri}"))?;
 
             let result = self

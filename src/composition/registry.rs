@@ -219,7 +219,7 @@ impl CapabilityRegistry {
 
 impl BootstrapRegistry {
     /// Register a component spec.
-    pub fn insert(&self, spec: ComponentSpec) {
+    pub fn register(&self, spec: ComponentSpec) {
         let mut components = self.components.write().unwrap();
         components.insert(spec.name.clone(), Arc::new(spec));
     }
@@ -337,7 +337,7 @@ pub async fn build_components(
             )
             .await?;
 
-            component_registry.insert(component_spec);
+            component_registry.register(component_spec);
         }
     }
 

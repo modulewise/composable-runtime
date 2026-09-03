@@ -35,12 +35,6 @@ pub struct ComponentDefinition {
     pub labels: HashMap<String, String>,
 }
 
-/// The name of a component referenced by a `factory:` uri.
-pub fn factory_uri_target(uri: &str) -> Option<&str> {
-    let name = uri.strip_prefix("factory:")?;
-    Some(name.strip_prefix("//").unwrap_or(name))
-}
-
 /// Per-store `wasi:http` hooks, configured from the `wasi:http` capability
 /// properties. The `WasiHttpHooks` trait impl lives in `runtime::host`.
 #[derive(Default)]
@@ -340,7 +334,7 @@ pub enum Val {
 }
 
 impl Val {
-    /// The JSON value, if this is data.
+    /// The JSON value, if this is data (and not a bytes list).
     pub fn as_json(&self) -> Option<&serde_json::Value> {
         match self {
             Self::Json(value) => Some(value),
