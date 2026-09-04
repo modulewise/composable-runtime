@@ -19,7 +19,7 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
             }
         }
 
-        // String-to-number coercion (e.g. CLI arguments)
+        // Numeric strings convert to numbers.
         (serde_json::Value::String(s), wasmtime::component::Type::U8) => Ok(Val::U8(
             s.parse::<u8>()
                 .map_err(|_| anyhow::anyhow!("Invalid u8: {s}"))?,
@@ -65,22 +65,22 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
         (serde_json::Value::Number(n), wasmtime::component::Type::U8) => {
             let val = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for u8: {n}"))?
-                as u8;
+                .and_then(|v| u8::try_from(v).ok())
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for u8: {n}"))?;
             Ok(Val::U8(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::U16) => {
             let val = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for u16: {n}"))?
-                as u16;
+                .and_then(|v| u16::try_from(v).ok())
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for u16: {n}"))?;
             Ok(Val::U16(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::U32) => {
             let val = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for u32: {n}"))?
-                as u32;
+                .and_then(|v| u32::try_from(v).ok())
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for u32: {n}"))?;
             Ok(Val::U32(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::U64) => {
@@ -92,22 +92,22 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
         (serde_json::Value::Number(n), wasmtime::component::Type::S8) => {
             let val = n
                 .as_i64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for s8: {n}"))?
-                as i8;
+                .and_then(|v| i8::try_from(v).ok())
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for s8: {n}"))?;
             Ok(Val::S8(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::S16) => {
             let val = n
                 .as_i64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for s16: {n}"))?
-                as i16;
+                .and_then(|v| i16::try_from(v).ok())
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for s16: {n}"))?;
             Ok(Val::S16(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::S32) => {
             let val = n
                 .as_i64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid number for s32: {n}"))?
-                as i32;
+                .and_then(|v| i32::try_from(v).ok())
+                .ok_or_else(|| anyhow::anyhow!("Invalid number for s32: {n}"))?;
             Ok(Val::S32(val))
         }
         (serde_json::Value::Number(n), wasmtime::component::Type::S64) => {
@@ -116,6 +116,7 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
                 .ok_or_else(|| anyhow::anyhow!("Invalid number for s64: {n}"))?;
             Ok(Val::S64(val))
         }
+        // Narrowing to f32 loses precision rather than failing.
         (serde_json::Value::Number(n), wasmtime::component::Type::Float32) => {
             let val = n
                 .as_f64()
@@ -245,7 +246,8 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
             Ok(Val::Option(Some(Box::new(inner_val))))
         }
 
-        // Variants: {"type": "case-name", "value": payload} or {"type": "case-name", ...fields}
+        // Variants: {"type": "case-name"}, plus "value" when the case has a
+        // payload. The payload fields do not collide with the case tag.
         (serde_json::Value::Object(obj), wasmtime::component::Type::Variant(variant_type)) => {
             let case_name = obj.get("type").and_then(|v| v.as_str()).ok_or_else(|| {
                 anyhow::anyhow!("Variant object must have a \"type\" field with the case name")
@@ -259,24 +261,35 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
                     anyhow::anyhow!("Unknown variant case '{case_name}'. Valid cases: {valid:?}")
                 })?;
 
+            for key in obj.keys() {
+                if key != "type" && key != "value" {
+                    return Err(anyhow::anyhow!(
+                        "Unexpected field '{key}' in variant. A variant object \
+                         has only \"type\" and, when the case has a payload, \
+                         \"value\""
+                    ));
+                }
+            }
+
             let payload = match &case.ty {
                 Some(payload_type) => {
-                    // Try "value" key first, then try reconstructing from remaining fields
-                    let payload_json = if let Some(value) = obj.get("value") {
-                        value.clone()
-                    } else {
-                        // Collect all fields except "variant" into an object
-                        let mut payload_obj = serde_json::Map::new();
-                        for (k, v) in obj {
-                            if k != "variant" {
-                                payload_obj.insert(k.clone(), v.clone());
-                            }
-                        }
-                        serde_json::Value::Object(payload_obj)
-                    };
-                    Some(json_to_val(&payload_json, payload_type)?)
+                    let value = obj.get("value").ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Variant case '{case_name}' has a payload, which must be \
+                             under a \"value\" key"
+                        )
+                    })?;
+                    Some(json_to_val(value, payload_type)?)
                 }
-                None => None,
+                None => {
+                    if obj.contains_key("value") {
+                        return Err(anyhow::anyhow!(
+                            "Variant case '{case_name}' has no payload, so it must \
+                             not have a \"value\" key"
+                        ));
+                    }
+                    None
+                }
             };
 
             Ok(Val::Variant(case_name.to_string(), payload.map(Box::new)))
@@ -429,18 +442,7 @@ pub(crate) fn val_to_json(val: &Val) -> Result<serde_json::Value> {
             let mut obj = serde_json::Map::new();
             obj.insert("type".to_string(), serde_json::Value::String(name.clone()));
             if let Some(v) = val {
-                match val_to_json(v)? {
-                    serde_json::Value::Object(payload_obj) => {
-                        for (k, v) in payload_obj {
-                            obj.insert(k, v);
-                        }
-                    }
-                    other => {
-                        // If payload is not an object (primitive, array, etc.),
-                        // fall back to "value" key to maintain valid JSON
-                        obj.insert("value".to_string(), other);
-                    }
-                }
+                obj.insert("value".to_string(), val_to_json(v)?);
             }
             serde_json::Value::Object(obj)
         }
@@ -488,4 +490,114 @@ pub(crate) fn val_to_json(val: &Val) -> Result<serde_json::Value> {
         }
     };
     Ok(json)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // A variant has case name as "type" and payload, if any, as "value".
+
+    #[test]
+    fn a_variant_without_a_payload_has_type_only() {
+        let val = Val::Variant("pending".into(), None);
+        assert_eq!(val_to_json(&val).unwrap(), json!({"type": "pending"}));
+    }
+
+    #[test]
+    fn a_primitive_payload_on_a_variant_is_represented_as_value() {
+        let val = Val::Variant("count".into(), Some(Box::new(Val::U32(7))));
+        assert_eq!(
+            val_to_json(&val).unwrap(),
+            json!({"type": "count", "value": 7})
+        );
+    }
+
+    #[test]
+    fn a_record_payload_on_a_variant_nests_under_value() {
+        let val = Val::Variant(
+            "created".into(),
+            Some(Box::new(Val::Record(vec![
+                ("id".into(), Val::U32(1)),
+                ("name".into(), Val::String("widget".into())),
+            ]))),
+        );
+        assert_eq!(
+            val_to_json(&val).unwrap(),
+            json!({"type": "created", "value": {"id": 1, "name": "widget"}})
+        );
+    }
+
+    #[test]
+    fn a_variant_payload_may_contain_a_type_field() {
+        // A field named "type" does not collide with the case tag.
+        let val = Val::Variant(
+            "created".into(),
+            Some(Box::new(Val::Record(vec![
+                ("type".into(), Val::String("widget".into())),
+                ("id".into(), Val::U32(1)),
+            ]))),
+        );
+        assert_eq!(
+            val_to_json(&val).unwrap(),
+            json!({"type": "created", "value": {"type": "widget", "id": 1}})
+        );
+    }
+
+    // Numbers outside a type's range must be rejected, not silently truncated.
+
+    #[test]
+    fn a_number_above_the_u8_range_is_rejected() {
+        assert!(json_to_val(&json!(300), &Type::U8).is_err());
+    }
+
+    #[test]
+    fn a_number_above_the_u16_range_is_rejected() {
+        assert!(json_to_val(&json!(70_000), &Type::U16).is_err());
+    }
+
+    #[test]
+    fn a_number_above_the_u32_range_is_rejected() {
+        assert!(json_to_val(&json!(5_000_000_000_u64), &Type::U32).is_err());
+    }
+
+    #[test]
+    fn a_number_above_the_s8_range_is_rejected() {
+        assert!(json_to_val(&json!(200), &Type::S8).is_err());
+    }
+
+    #[test]
+    fn a_number_below_the_s8_range_is_rejected() {
+        assert!(json_to_val(&json!(-200), &Type::S8).is_err());
+    }
+
+    #[test]
+    fn a_number_above_the_s16_range_is_rejected() {
+        assert!(json_to_val(&json!(40_000), &Type::S16).is_err());
+    }
+
+    #[test]
+    fn a_number_above_the_s32_range_is_rejected() {
+        assert!(json_to_val(&json!(3_000_000_000_u64), &Type::S32).is_err());
+    }
+
+    #[test]
+    fn a_negative_number_for_an_unsigned_type_is_rejected() {
+        assert!(json_to_val(&json!(-1), &Type::U8).is_err());
+    }
+
+    #[test]
+    fn numbers_within_range_convert() {
+        assert_eq!(json_to_val(&json!(255), &Type::U8).unwrap(), Val::U8(255));
+        assert_eq!(json_to_val(&json!(-128), &Type::S8).unwrap(), Val::S8(-128));
+        assert_eq!(json_to_val(&json!(127), &Type::S8).unwrap(), Val::S8(127));
+    }
+
+    #[test]
+    fn a_string_input_agrees_with_a_number_input_on_range() {
+        // The two paths agree on what is representable within range.
+        assert!(json_to_val(&json!("300"), &Type::U8).is_err());
+        assert!(json_to_val(&json!("255"), &Type::U8).is_ok());
+    }
 }
