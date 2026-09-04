@@ -1,4 +1,4 @@
-package composable:http@0.3.0;
+package composable:http@0.4.0;
 
 interface client {
     enum method {
@@ -11,6 +11,10 @@ interface client {
         options,
         trace,
         query,
+    }
+
+    variant error-code {
+        other(option<string>),
     }
 
     /// Per-request options. None fields fall through to host defaults.
@@ -27,39 +31,39 @@ interface client {
         status: u16,
         headers: list<tuple<string, string>>,
         body: stream<u8>,
-        trailers: future<result<list<tuple<string, string>>, string>>,
+        trailers: future<result<list<tuple<string, string>>, error-code>>,
     }
 
     /// Send an HTTP request with an explicit method. Both the request body and
     /// the response body stream.
-    request: async func(method: method, url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, string>;
+    request: async func(method: method, url: string, headers: list<tuple<string, string>>, body: option<stream<u8>>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP GET request.
-    get: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, string>;
+    get: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP POST request.
-    post: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, string>;
+    post: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP PUT request.
-    put: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, string>;
+    put: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP DELETE request.
-    delete: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, string>;
+    delete: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP PATCH request.
-    patch: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, string>;
+    patch: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP HEAD request.
-    head: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, string>;
+    head: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP OPTIONS request.
-    options: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, string>;
+    options: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP TRACE request.
-    trace: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, string>;
+    trace: async func(url: string, headers: list<tuple<string, string>>, options: option<request-options>) -> result<http-response, error-code>;
 
     /// HTTP QUERY request.
-    query: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, string>;
+    query: async func(url: string, headers: list<tuple<string, string>>, body: stream<u8>, options: option<request-options>) -> result<http-response, error-code>;
 }
 
 world http-client {

@@ -6,12 +6,11 @@ HTTP client support, including a WIT definition and a Wasm Component.
 
 ## The `composable:http/client` Interface
 
-Every function is `async` and returns `result<http-response, string>`.
+Every function is `async` and returns `result<http-response, error-code>`.
 Request and response bodies are both `stream<u8>`.
 
 Functions that accept a request body:
 
-- `request(method, url, headers, body, options)`
 - `post(url, headers, body, options)`
 - `put(url, headers, body, options)`
 - `patch(url, headers, body, options)`
@@ -24,6 +23,10 @@ Functions without a request body:
 - `head(url, headers, options)`
 - `options(url, headers, options)`
 - `trace(url, headers, options)`
+
+And each delegates to the underlying request function, whose `body` is optional
+since its `method` is a parameter:
+`request(method, url, headers, body, options)`
 
 An `http-response` carries `status` and `headers`. The response `body` streams, and `trailers`
 resolve once the body stream is fully consumed.
