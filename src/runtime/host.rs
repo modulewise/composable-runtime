@@ -402,6 +402,7 @@ impl Invoker {
         config.wasm_component_model_more_async_builtins(true);
         // Stackful async lift, so an async call can block on those reads.
         config.wasm_component_model_async_stackful(true);
+        config.wasm_component_model_fixed_length_lists(true);
         config.wasm_component_model_map(true);
         config.memory_init_cow(true);
         config.wasm_gc(true);
