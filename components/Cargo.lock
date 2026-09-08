@@ -15,6 +15,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
+name = "composable-factory"
+version = "0.1.0"
+source = "git+https://github.com/modulewise/composable-factory?branch=main#4c8c9fb2c69cdbe767ad5495cc4a3051a750b17e"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "serde_json",
+ "wasm-encoder",
+ "wasmparser",
+ "wit-component",
+ "wit-parser",
+]
+
+[[package]]
 name = "displaydoc"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -44,6 +58,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "function-adapter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "composable-factory",
+ "wasm-encoder",
+ "wit-parser",
+]
+
+[[package]]
+name = "function-factory"
+version = "0.1.0"
+dependencies = [
+ "composable-factory",
+ "function-adapter",
+ "wit-bindgen",
 ]
 
 [[package]]
@@ -114,6 +147,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
 dependencies = [
  "foldhash",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -495,6 +530,7 @@ dependencies = [
  "hashbrown",
  "indexmap",
  "semver",
+ "serde",
 ]
 
 [[package]]

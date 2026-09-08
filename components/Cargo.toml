@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "function-factory",
     "http/client",
 ]
 resolver = "3"
