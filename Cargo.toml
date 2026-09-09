@@ -10,7 +10,13 @@ categories = ["wasm"]
 keywords = ["wasm"]
 
 [workspace]
-members = [".", "crates/http-server", "crates/interceptor", "crates/opentelemetry"]
+members = [
+    ".",
+    "crates/function-adapter",
+    "crates/http-server",
+    "crates/interceptor",
+    "crates/opentelemetry",
+]
 
 [workspace.package]
 version = "0.5.0-alpha.5"
