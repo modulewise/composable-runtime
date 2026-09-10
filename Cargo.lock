@@ -464,7 +464,7 @@ dependencies = [
 [[package]]
 name = "composable-factory"
 version = "0.1.0"
-source = "git+https://github.com/modulewise/composable-factory?branch=main#4c8c9fb2c69cdbe767ad5495cc4a3051a750b17e"
+source = "git+https://github.com/modulewise/composable-factory?branch=main#4311c4df04085392c3b5e40ac4892b6740208de0"
 dependencies = [
  "anyhow",
  "indexmap 2.14.0",
@@ -1188,6 +1188,13 @@ dependencies = [
  "composable-factory",
  "wasm-encoder 0.258.0",
  "wit-parser 0.258.0",
+]
+
+[[package]]
+name = "function-invoker"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

@@ -13,6 +13,7 @@ keywords = ["wasm"]
 members = [
     ".",
     "crates/function-adapter",
+    "crates/function-invoker",
     "crates/http-server",
     "crates/interceptor",
     "crates/opentelemetry",

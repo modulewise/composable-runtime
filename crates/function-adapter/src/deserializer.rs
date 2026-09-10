@@ -236,10 +236,25 @@ impl WriteVisitor for JsonDeserializer {
         found.assert_case("some")
     }
 
+    /// Asks the mapper what fields are present in the JSON input received at
+    /// runtime, so the walk can handle absent fields based on type. The answer
+    /// is a bitmask, keeping string handling out of the generated component.
+    fn field_presence(&mut self, names: &[&str]) -> Result<Value> {
+        let presence = self.method("field-presence")?;
+        let names_value = presence.param("names")?.value()?;
+        names_value.write(&ValueSpec::list(
+            names.iter().map(|n| ValueSpec::string(*n)),
+        ))?;
+        let h = self.handle.clone();
+        presence
+            .call(&[h, names_value])?
+            .ok_or_else(|| anyhow::anyhow!("deserializer.field-presence must return a mask"))
+    }
+
+    /// Asks the mapper which flags are set in the value received at runtime.
+    /// The answer is the bits themselves, keeping string handling out of the
+    /// generated component.
     fn on_flags(&mut self, declared: &[String]) -> Result<ValueSpec> {
-        // Which flags are set is only known at runtime, so the deserializer
-        // answers with the bits themselves: it matches the names against
-        // `declared`, keeping that comparison out of the generated component.
         let flags = self.method("flag-bits")?;
         let names = flags.param("names")?.value()?;
         names.write(&ValueSpec::list(declared.iter().map(ValueSpec::string)))?;
