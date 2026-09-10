@@ -16,8 +16,8 @@ checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "composable-factory"
-version = "0.1.0"
-source = "git+https://github.com/modulewise/composable-factory?branch=main#4311c4df04085392c3b5e40ac4892b6740208de0"
+version = "0.2.0"
+source = "git+https://github.com/modulewise/composable-factory?branch=main#24d4a11040f2c5506af875e650120c22d66a2c42"
 dependencies = [
  "anyhow",
  "indexmap",

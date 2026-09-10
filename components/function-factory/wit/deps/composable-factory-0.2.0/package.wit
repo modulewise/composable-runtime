@@ -1,4 +1,4 @@
-package composable:factory@0.1.0;
+package composable:factory@0.2.0;
 
 interface deserializer {
   resource deserializer {
