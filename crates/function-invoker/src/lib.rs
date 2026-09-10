@@ -1,8 +1,8 @@
 //! Wraps a `composable:runtime/function` for a caller that has a request type
 //! with body and headers. It merges configured request headers into the body,
-//! calls the function, and then extracts configured result fields into the
-//! configured response headers. The function to call is provided as a closure,
-//! for consistent support across host-side or inter-component calls.
+//! calls the function, and then extracts configured response headers from
+//! result fields. The function to call is provided as a closure, which enables
+//! both host-side and inter-component calls.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -24,7 +24,7 @@ pub struct Response {
     pub headers: Vec<(String, String)>,
 }
 
-/// Headers to map into params or extract out of results.
+/// Headers to map into params or out of results.
 #[derive(Debug, Default, Clone)]
 pub struct HeaderMapping {
     /// `param = "header"`, or `param = *` for all headers as a map.
@@ -58,7 +58,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// Call a function after merging the body with any configured request headers,
-/// and return the result after extracting any configured response headers.
+/// and return the result after splitting out any configured response headers.
 pub async fn invoke<F, Fut>(
     request: Request,
     mapping: &HeaderMapping,
@@ -73,9 +73,9 @@ where
     split_output(output, mapping)
 }
 
-/// Prepare the JSON string for a function by combining the body's fields with
-/// any configured request headers. Does not fail on missing headers since that
-/// should be handled by the target, whether optional or required.
+/// Prepare the JSON string for a function call by combining the body's fields
+/// with any configured request headers. Does not fail on missing headers since
+/// that should be handled by the target, which knows what fields are required.
 fn merge_input(
     body: Option<&str>,
     headers: &[(String, String)],
@@ -84,8 +84,6 @@ fn merge_input(
     let mut params = params_from(body)?;
 
     for (param, source) in &mapping.request_headers {
-        // When all headers are expected on a param, they can be read as a
-        // `map<string, string>` or as a record whose fields are header names.
         if source == ALL_HEADERS {
             let all: Map<String, Value> = headers
                 .iter()
@@ -142,7 +140,7 @@ fn split_output(output: String, mapping: &HeaderMapping) -> Result<Response, Err
     })
 }
 
-/// The function's params read from the request body, empty if the body is
+/// The function's params as read from the request body, empty if the body is
 /// itself empty or `None`.
 fn params_from(body: Option<&str>) -> Result<Map<String, Value>, Error> {
     match body {
