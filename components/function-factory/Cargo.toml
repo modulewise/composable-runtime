@@ -1,7 +1,11 @@
 [package]
 name = "function-factory"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+description = "Builds a JSON-based component that targets a function on any other component"
+homepage = "https://github.com/modulewise/composable-runtime/tree/main/components/function-factory"
+license = "Apache-2.0"
+repository = "https://github.com/modulewise/composable-runtime"
 
 [lib]
 crate-type = ["cdylib"]

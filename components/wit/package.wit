@@ -7,7 +7,7 @@ interface function {
         name: string,
         description: option<string>,
         input-schema: json,
-        output-schema: option<json>,
+        output-schema: json,
     }
 
     metadata: async func() -> result<function-metadata, string>;

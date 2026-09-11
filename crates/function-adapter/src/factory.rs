@@ -62,12 +62,14 @@ impl Factory {
         if candidates.is_empty() {
             anyhow::bail!("target exports no functions to adapt");
         }
-        // A single-function target needs no selector.
-        if candidates.len() == 1 {
-            return Ok(candidates.into_iter().next().expect("just checked len"));
-        }
-        let selected = self.function.as_deref().with_context(|| {
-            format!(
+        let selected = match self.function.as_deref() {
+            // A selector is always matched, not overridden by a lone function.
+            Some(selected) => selected,
+            // Absent selector is okay if there is exactly one function.
+            None if candidates.len() == 1 => {
+                return Ok(candidates.into_iter().next().expect("exactly one function"));
+            }
+            None => anyhow::bail!(
                 "target exports {} functions; a `function` selector must choose one ({})",
                 candidates.len(),
                 candidates
@@ -75,8 +77,8 @@ impl Factory {
                     .map(|(q, _)| q.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
-            )
-        })?;
+            ),
+        };
         candidates
             .into_iter()
             .find(|(qualified, f)| qualified == selected || f.name() == selected)
@@ -117,10 +119,7 @@ impl Factory {
                 ValueSpec::optional_string(self.description.as_deref()),
             ),
             ("input-schema", ValueSpec::string(input_schema)),
-            (
-                "output-schema",
-                ValueSpec::optional_string(Some(output_schema)),
-            ),
+            ("output-schema", ValueSpec::string(output_schema)),
         ]));
 
         function
@@ -137,9 +136,6 @@ impl Factory {
         use composable_factory::world::WriteVisitor;
 
         let (_, target) = self.target(imports)?;
-        target
-            .result_type()
-            .context("target function has no result")?; // no result should be allowed
 
         let input = function.param("input")?.receive()?;
 
@@ -155,16 +151,17 @@ impl Factory {
         }
 
         // Call the target with the deserialized args.
-        let result = target
-            .call(&args)?
-            .context("target function must return a result")?;
+        let result = target.call(&args)?;
 
         // Release the deserializer.
         deserializer.close()?;
 
         // Serialize the target function's result to JSON.
         let mut serializer = JsonSerializer::new(imports.interface("serializer")?)?;
-        result.read_with(&mut serializer)?;
+        match result {
+            Some(result) => result.read_with(&mut serializer)?,
+            None => serializer.add_null()?,
+        }
         let json = serializer.into_json()?;
 
         // Write the JSON to the `ok` case of the function's result.

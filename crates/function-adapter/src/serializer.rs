@@ -59,6 +59,13 @@ impl JsonSerializer {
         Ok(())
     }
 
+    /// Write a JSON `null`, for a target function that returns nothing.
+    pub fn add_null(&self) -> Result<()> {
+        let h = self.handle.clone();
+        self.method("add-null")?.call(&[h])?;
+        Ok(())
+    }
+
     /// Whether the entry being written belongs to a string-keyed map.
     fn in_string_keyed_map(&self) -> bool {
         self.open_maps.last().copied().unwrap_or(false)
