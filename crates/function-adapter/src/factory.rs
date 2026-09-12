@@ -133,20 +133,20 @@ impl Factory {
     /// deserializer visitor, serialize its result to JSON via the serializer
     /// visitor, and write the JSON value as the function result.
     fn build_call(&self, function: &ExportedFunction, imports: &Imports) -> Result<()> {
-        use composable_factory::world::WriteVisitor;
-
         let (_, target) = self.target(imports)?;
 
         let input = function.param("input")?.receive()?;
 
         // Deserialize one arg per target param from the JSON.
-        let mut deserializer = JsonDeserializer::new(imports.interface("deserializer")?, input)?;
+        let params = target.params();
+        let names: Vec<&str> = params.iter().map(|p| p.name()).collect();
+        let mut deserializer =
+            JsonDeserializer::new(imports.interface("deserializer")?, input, &names)?;
+
         let mut args = Vec::new();
-        for param in target.params() {
-            deserializer.begin_field(param.name())?;
+        for param in &params {
             let arg = param.value()?;
             arg.write_with(&mut deserializer)?;
-            deserializer.end_field()?;
             args.push(arg);
         }
 

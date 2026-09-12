@@ -1,6 +1,6 @@
 [package]
 name = "function-factory"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Builds a JSON-based component that targets a function on any other component"
 homepage = "https://github.com/modulewise/composable-runtime/tree/main/components/function-factory"

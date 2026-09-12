@@ -34,8 +34,8 @@ implementation is in the `composable-factory` repository.
 
 ## The `function-factory` World
 
-- exports `composable:factory/factory@0.2.0` which provides the `build()` function
-- imports `composable:factory/loader@0.2.0` to read the target's bytes and extract WIT
+- exports `composable:factory/factory@0.3.0` which provides the `build()` function
+- imports `composable:factory/loader@0.3.0` to read the target's bytes and extract WIT
 - imports `wasi:config/store@0.2.0-rc.1` for its own configuration
 
 ## Configuration
@@ -57,7 +57,7 @@ uri = "factory:greeter-factory"
 imports = ["target", "mapper"]
 
 [component.greeter-factory]
-uri = "oci://ghcr.io/modulewise/component/function-factory:0.2.0"
+uri = "oci://ghcr.io/modulewise/component/function-factory:0.3.0"
 imports = ["loader"]
 config.target = "/lib/greeter.wasm"
 config.function = "greeter.greet"
@@ -66,10 +66,10 @@ config.function = "greeter.greet"
 uri = "./lib/greeter.wasm"
 
 [component.mapper]
-uri = "oci://ghcr.io/modulewise/component/json-mapper:0.2.0"
+uri = "oci://ghcr.io/modulewise/component/json-mapper:0.3.0"
 
 [component.loader]
-uri = "oci://ghcr.io/modulewise/component/filesystem-loader:0.2.0"
+uri = "oci://ghcr.io/modulewise/component/filesystem-loader:0.3.0"
 imports = ["filesystem"]
 
 [capability.filesystem]
