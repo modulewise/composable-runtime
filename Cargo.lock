@@ -463,8 +463,8 @@ dependencies = [
 
 [[package]]
 name = "composable-factory"
-version = "0.1.0"
-source = "git+https://github.com/modulewise/composable-factory?branch=main#4311c4df04085392c3b5e40ac4892b6740208de0"
+version = "0.3.0"
+source = "git+https://github.com/modulewise/composable-factory?branch=main#d0878e2c5f71b43f9d65c6f6c2f691b373702d2a"
 dependencies = [
  "anyhow",
  "indexmap 2.14.0",
@@ -1182,7 +1182,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "function-adapter"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "composable-factory",
@@ -3238,6 +3238,7 @@ version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
+ "indexmap 2.14.0",
  "itoa",
  "memchr",
  "serde",

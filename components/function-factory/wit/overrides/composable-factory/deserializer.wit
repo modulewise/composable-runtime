@@ -3,6 +3,11 @@ interface deserializer {
         // Parse the input JSON (an object keyed by param name).
         constructor(input: string);
 
+        // Descend into `name` at the cursor, for a value where a walk starts
+        // rather than a record's field. False if not present, thus leaving the
+        // cursor where it is, with no `exit` owed.
+        enter-value: func(name: string) -> bool;
+
         // The bitmask of `names` the object at the cursor holds, where bit N
         // is names[N]. Asked once per record, before its fields are read, so
         // the caller can handle absent fields appropriately. At most 32 names.

@@ -12,10 +12,14 @@ pub struct JsonDeserializer {
     interface: Interface,
     /// The `deserializer` resource handle.
     handle: Value,
+    /// The name of the value each walk starts from, in the order the walks
+    /// will ask for them. Which one a walk enters is known while emitting,
+    /// so this advances per walk rather than per instruction.
+    walk_names: std::vec::IntoIter<String>,
     /// The key type of each map currently being read, innermost last. It
     /// indicates what form to expect: an object for string keys, an array of
     /// pairs otherwise. It also determines what accessor retrieves the key.
-    open_maps: Vec<MapKey>,
+    open_map_keys: Vec<MapKey>,
     /// Which entry of the innermost map is being read, held across the whole
     /// entry, because an object reaches both its key and its value by index.
     entry_index: Option<Value>,
@@ -26,7 +30,7 @@ pub struct JsonDeserializer {
 
 impl JsonDeserializer {
     /// Acquire the resource handle by calling the constructor.
-    pub fn new(interface: Interface, json: Value) -> Result<Self> {
+    pub fn new(interface: Interface, json: Value, walk_names: &[&str]) -> Result<Self> {
         let handle = interface
             .function("[constructor]deserializer")?
             .call(&[json])?
@@ -34,7 +38,12 @@ impl JsonDeserializer {
         Ok(JsonDeserializer {
             interface,
             handle,
-            open_maps: Vec::new(),
+            walk_names: walk_names
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>()
+                .into_iter(),
+            open_map_keys: Vec::new(),
             entry_index: None,
             reading_key: false,
         })
@@ -51,6 +60,14 @@ impl JsonDeserializer {
             .function(&format!("[method]deserializer.{name}"))
     }
 
+    /// Call a method taking the handle and an index, returning its result.
+    fn call_with_index(&self, name: &str, index: &Value) -> Result<Value> {
+        let h = self.handle.clone();
+        self.method(name)?
+            .call(&[h, index.clone()])?
+            .ok_or_else(|| anyhow::anyhow!("deserializer.{name} must return a value"))
+    }
+
     /// Pull one leaf via the named method.
     fn get(&mut self, name: &str) -> Result<ValueSpec> {
         Ok(self.pull(name)?.into())
@@ -61,14 +78,6 @@ impl JsonDeserializer {
         let h = self.handle.clone();
         self.method(name)?
             .call(&[h])?
-            .ok_or_else(|| anyhow::anyhow!("deserializer.{name} must return a value"))
-    }
-
-    /// Call a method taking the handle and an index, returning its result.
-    fn call_with_index(&self, name: &str, index: &Value) -> Result<Value> {
-        let h = self.handle.clone();
-        self.method(name)?
-            .call(&[h, index.clone()])?
             .ok_or_else(|| anyhow::anyhow!("deserializer.{name} must return a value"))
     }
 
@@ -91,7 +100,7 @@ impl JsonDeserializer {
 
     /// The key type of the map whose entry is being read.
     fn entry_key(&self) -> Result<MapKey> {
-        self.open_maps
+        self.open_map_keys
             .last()
             .copied()
             .ok_or_else(|| anyhow::anyhow!("a map entry outside any map"))
@@ -118,6 +127,24 @@ impl JsonDeserializer {
 }
 
 impl WriteVisitor for JsonDeserializer {
+    fn begin_walk(&mut self) -> Result<Value> {
+        let name = self
+            .walk_names
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("more root walks than deserializer values"))?;
+        let enter = self.method("enter-value")?;
+        let key = enter.param("name")?.value()?;
+        key.write(&ValueSpec::string(&name))?;
+        let h = self.handle.clone();
+        enter.call(&[h, key])?.ok_or_else(|| {
+            anyhow::anyhow!("deserialize.enter-value must report whether it entered")
+        })
+    }
+
+    fn end_walk(&mut self) -> Result<()> {
+        self.exit()
+    }
+
     fn begin_field(&mut self, name: &str) -> Result<()> {
         let h = self.handle.clone();
         let enter_field = self.method("enter-field")?;
@@ -142,12 +169,12 @@ impl WriteVisitor for JsonDeserializer {
     // A map with string keys is read from a JSON object. A map with any other
     // key type is read from an array of [key, value] entry arrays.
     fn begin_map(&mut self, key: MapKey, _value: &Type) -> Result<()> {
-        self.open_maps.push(key);
+        self.open_map_keys.push(key);
         Ok(())
     }
 
     fn end_map(&mut self) -> Result<()> {
-        self.open_maps.pop();
+        self.open_map_keys.pop();
         Ok(())
     }
 
