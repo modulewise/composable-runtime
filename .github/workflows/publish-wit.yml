@@ -38,6 +38,12 @@ jobs:
             echo "Failed to extract namespace from $package_wit" >&2
             exit 1
           fi
+          # The package must declare the same version as the tag name.
+          declared=$(sed -nE 's/^package [a-z][a-z0-9-]*:[a-z][a-z0-9-]*@(.+);$/\1/p' "$package_wit" | head -1)
+          if [ "$declared" != "$version" ]; then
+            echo "Tag version ($version) does not match $package_wit ($declared)" >&2
+            exit 1
+          fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "namespace=$ns" >> "$GITHUB_OUTPUT"
