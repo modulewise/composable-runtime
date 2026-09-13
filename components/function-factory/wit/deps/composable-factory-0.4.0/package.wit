@@ -1,4 +1,4 @@
-package composable:factory@0.3.0;
+package composable:factory@0.4.0;
 
 interface deserializer {
   resource deserializer {
@@ -25,6 +25,10 @@ interface deserializer {
     key-at: func(index: u32) -> string;
     /// Index of the active case within `names`, or none if it's not listed.
     case-index: func(names: list<string>) -> option<u32>;
+    /// Whether there is a value at the cursor, for an `option`. Separate
+    /// from `case-index` because an option's cases are always `some` or
+    /// `none`, so a source can report presence without matching case names.
+    has-value: func() -> bool;
     /// Descend into the active case's payload. Only called when a case has
     /// a payload, which the caller knows from the case `case-index` named.
     enter-payload: func();
