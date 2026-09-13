@@ -1,8 +1,8 @@
-package composable-runtime:function-factory@0.3.0;
+package composable-runtime:function-factory@0.4.0;
 
 world function-factory {
     import wasi:config/store@0.2.0-rc.1;
-    import composable:factory/loader@0.3.0;
+    import composable:factory/loader@0.4.0;
 
-    export composable:factory/factory@0.3.0;
+    export composable:factory/factory@0.4.0;
 }

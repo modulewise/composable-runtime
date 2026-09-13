@@ -263,6 +263,11 @@ impl WriteVisitor for JsonDeserializer {
         found.assert_case("some")
     }
 
+    /// Asks the mapper whether there is a value at the cursor, for an option.
+    fn has_value(&mut self) -> Result<Value> {
+        self.pull("has-value")
+    }
+
     /// Asks the mapper what fields are present in the JSON input received at
     /// runtime, so the walk can handle absent fields based on type. The answer
     /// is a bitmask, keeping string handling out of the generated component.
