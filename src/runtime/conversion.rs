@@ -131,7 +131,7 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
             Ok(Val::Float64(val))
         }
 
-        // Arrays map to lists
+        // Arrays map to lists.
         (serde_json::Value::Array(arr), wasmtime::component::Type::List(list_type)) => {
             let element_type = list_type.ty();
             let mut items = Vec::new();
@@ -141,6 +141,25 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
                 })?);
             }
             Ok(Val::List(items))
+        }
+
+        // Arrays map to fixed-length lists.
+        (serde_json::Value::Array(arr), wasmtime::component::Type::FixedLengthList(list_type)) => {
+            let expected = list_type.len() as usize;
+            if arr.len() != expected {
+                return Err(anyhow::anyhow!(
+                    "Fixed-length list expects {expected} items, got {}",
+                    arr.len()
+                ));
+            }
+            let element_type = list_type.ty();
+            let mut items = Vec::with_capacity(arr.len());
+            for (index, item) in arr.iter().enumerate() {
+                items.push(json_to_val(item, &element_type).map_err(|e| {
+                    anyhow::anyhow!("Error converting list item at index {index}: {e}")
+                })?);
+            }
+            Ok(Val::FixedLengthList(items))
         }
 
         // Objects map to map<string, V>
@@ -182,7 +201,7 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
             Ok(Val::Map(entries))
         }
 
-        // Arrays map to tuples
+        // Arrays map to tuples.
         (serde_json::Value::Array(arr), wasmtime::component::Type::Tuple(tuple_type)) => {
             let tuple_types: Vec<_> = tuple_type.types().collect();
             if arr.len() != tuple_types.len() {
@@ -201,7 +220,7 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
             Ok(Val::Tuple(items))
         }
 
-        // Objects map to records
+        // Objects map to records.
         (serde_json::Value::Object(obj), wasmtime::component::Type::Record(record_type)) => {
             let mut fields = Vec::new();
             for field in record_type.fields() {
@@ -226,7 +245,7 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
                 }
             }
 
-            // Check for extra fields that aren't in the WIT record
+            // Check for extra fields that aren't in the WIT record.
             for (key, _) in obj {
                 if !record_type.fields().any(|field| field.name == key) {
                     return Err(anyhow::anyhow!("Unexpected field '{key}' in record"));
@@ -236,10 +255,10 @@ pub(crate) fn json_to_val(json_value: &serde_json::Value, val_type: &Type) -> Re
             Ok(Val::Record(fields))
         }
 
-        // Handle null for options
+        // Handle null for options.
         (serde_json::Value::Null, wasmtime::component::Type::Option(_)) => Ok(Val::Option(None)),
 
-        // Handle non-null values for options
+        // Handle non-null values for options.
         (json_val, wasmtime::component::Type::Option(option_type)) => {
             let inner_type = option_type.ty();
             let inner_val = json_to_val(json_val, &inner_type)?;
@@ -368,7 +387,7 @@ pub(crate) fn val_to_json(val: &Val) -> Result<serde_json::Value> {
         Val::String(s) => serde_json::Value::String(s.clone()),
         Val::Char(c) => serde_json::Value::String(c.to_string()),
 
-        // All numbers become JSON numbers
+        // All numbers become JSON numbers.
         Val::U8(n) => serde_json::Value::Number((*n as u64).into()),
         Val::U16(n) => serde_json::Value::Number((*n as u64).into()),
         Val::U32(n) => serde_json::Value::Number((*n as u64).into()),
@@ -384,8 +403,7 @@ pub(crate) fn val_to_json(val: &Val) -> Result<serde_json::Value> {
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null),
 
-        // Collections
-        Val::List(items) => {
+        Val::List(items) | Val::FixedLengthList(items) => {
             let mut json_items = Vec::with_capacity(items.len());
             for item in items {
                 json_items.push(val_to_json(item)?);
@@ -424,7 +442,6 @@ pub(crate) fn val_to_json(val: &Val) -> Result<serde_json::Value> {
             serde_json::Value::Object(obj)
         }
 
-        // Options
         Val::Option(opt) => match opt {
             Some(val) => val_to_json(val)?,
             None => serde_json::Value::Null,

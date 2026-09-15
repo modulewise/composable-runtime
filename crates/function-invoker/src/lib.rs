@@ -211,7 +211,7 @@ mod tests {
         .expect("merge");
         assert_eq!(
             merged,
-            r#"{"meta":{"traceparent":"00-abc","x-request-id":"42"}}"#
+            r#"{"meta":{"x-request-id":"42","traceparent":"00-abc"}}"#
         );
     }
 

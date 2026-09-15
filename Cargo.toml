@@ -37,16 +37,16 @@ opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", default-features = false }
 opentelemetry_sdk = "0.31"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-wasm-encoder = "0.258"
-wasmparser = "0.258"
-wasmtime = { version = "47", features = ["component-model-async"] }
-wat = "1.258"
-wit-parser = "0.258"
+wasm-encoder = "0.259"
+wasmparser = "0.259"
+wasmtime = { version = "48", features = ["component-model-async"] }
+wat = "1.259"
+wit-parser = "0.259"
 
 [dependencies]
 anyhow.workspace = true
@@ -74,11 +74,11 @@ wac-graph = "0.10"
 wac-types = "0.10"
 wasm-pkg-client = "0.16"
 wasmtime = { workspace = true }
-wasmtime-wasi = { version = "47", features = ["p3"] }
-wasmtime-wasi-config = "47"
-wasmtime-wasi-http = { version = "47", features = ["p3"] }
-wasmtime-wasi-io = "47"
-wit-component = "0.258"
+wasmtime-wasi = { version = "48", features = ["p3"] }
+wasmtime-wasi-config = "48"
+wasmtime-wasi-http = { version = "48", features = ["p3"] }
+wasmtime-wasi-io = "48"
+wit-component = "0.259"
 wit-parser.workspace = true
 
 [dev-dependencies]

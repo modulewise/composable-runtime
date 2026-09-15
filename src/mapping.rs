@@ -1403,7 +1403,7 @@ mod tests {
         let result = json!({ "name": "Alice", "age": 30 });
         let propagated = HashMap::new();
         let reply = m.from_invocation_result(&result, propagated).unwrap();
-        assert_eq!(reply.body(), br#"{"user":{"a":30,"n":"Alice"}}"#);
+        assert_eq!(reply.body(), br#"{"user":{"n":"Alice","a":30}}"#);
     }
 
     #[test]
