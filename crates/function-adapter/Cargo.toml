@@ -6,5 +6,5 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 composable-factory = { git = "https://github.com/modulewise/composable-factory", branch = "main" }
-wasm-encoder = "0.258"
-wit-parser = "0.258"
+wasm-encoder = "0.259"
+wit-parser = "0.259"

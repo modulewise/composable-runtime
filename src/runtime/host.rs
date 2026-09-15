@@ -11,9 +11,11 @@ use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
 use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
 use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
 use wasmtime_wasi::sockets::{WasiSockets, WasiSocketsView};
-use wasmtime_wasi::{DirPerms, FilePerms, ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
-use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_wasi_http::{p2 as http_p2, p3 as http_p3};
+use wasmtime_wasi::{FsPerms, ResourceTable, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi_http::{
+    Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
+    WasiHttpView,
+};
 use wasmtime_wasi_io::IoView;
 
 use crate::composition::registry::{
@@ -303,9 +305,11 @@ impl HttpHooks {
     }
 }
 
-impl http_p2::WasiHttpView for ComponentState {
-    fn http(&mut self) -> http_p2::WasiHttpCtxView<'_> {
-        http_p2::WasiHttpCtxView {
+type WasiIoFuture = Box<dyn std::future::Future<Output = Result<(), HttpError>> + Send>;
+
+impl WasiHttpView for ComponentState {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
             hooks: &mut self.http_hooks,
             table: &mut self.resource_table,
             ctx: self.wasi_http_ctx.as_mut().expect(
@@ -315,54 +319,15 @@ impl http_p2::WasiHttpView for ComponentState {
     }
 }
 
-impl http_p3::WasiHttpView for ComponentState {
-    fn http(&mut self) -> http_p3::WasiHttpCtxView<'_> {
-        http_p3::WasiHttpCtxView {
-            hooks: &mut self.http_hooks,
-            table: &mut self.resource_table,
-            ctx: self.wasi_http_ctx.as_mut().expect(
-                "Component requires 'http' capability, so HTTP context should be available",
-            ),
-        }
-    }
-}
-
-impl http_p2::WasiHttpHooks for HttpHooks {
+impl WasiHttpHooks for HttpHooks {
     fn send_request(
         &mut self,
-        mut request: hyper::Request<http_p2::body::HyperOutgoingBody>,
-        config: http_p2::types::OutgoingRequestConfig,
-    ) -> http_p2::HttpResult<http_p2::types::HostFutureIncomingResponse> {
-        Self::propagate_headers(&mut request);
-
-        if self.h2c_for_grpc && Self::is_grpc(&request) {
-            if request.uri().scheme_str() == Some("https") {
-                tracing::error!("h2c-for-grpc does not support TLS (https)");
-                return Err(http_p2::bindings::http::types::ErrorCode::HttpProtocolError.into());
-            }
-            Ok(super::grpc::send_grpc_request_p2(request, config))
-        } else {
-            Ok(http_p2::default_send_request(request, config))
-        }
-    }
-}
-
-type P3ErrorCode = http_p3::bindings::http::types::ErrorCode;
-type P3Body = http_body_util::combinators::UnsyncBoxBody<bytes::Bytes, P3ErrorCode>;
-type P3IoFuture = Box<dyn std::future::Future<Output = Result<(), P3ErrorCode>> + Send>;
-
-impl http_p3::WasiHttpHooks for HttpHooks {
-    fn send_request(
-        &mut self,
-        mut request: http::Request<P3Body>,
-        options: Option<http_p3::RequestOptions>,
-        fut: P3IoFuture,
+        mut request: http::Request<WasiBody>,
+        options: Option<RequestOptions>,
+        fut: WasiIoFuture,
     ) -> Box<
         dyn std::future::Future<
-                Output = Result<
-                    (http::Response<P3Body>, P3IoFuture),
-                    wasmtime_wasi::TrappableError<P3ErrorCode>,
-                >,
+                Output = Result<(http::Response<WasiBody>, WasiIoFuture), HttpError>,
             > + Send,
     > {
         Self::propagate_headers(&mut request);
@@ -370,18 +335,17 @@ impl http_p3::WasiHttpHooks for HttpHooks {
         if self.h2c_for_grpc && Self::is_grpc(&request) {
             if request.uri().scheme_str() == Some("https") {
                 tracing::error!("h2c-for-grpc does not support TLS (https)");
-                let err = P3ErrorCode::HttpProtocolError;
-                return Box::new(async move { Err(err.into()) });
+                return Box::new(async move { Err(HttpError::HttpProtocolError) });
             }
-            super::grpc::send_grpc_request_p3(request, options)
+            super::grpc::send_grpc_request(request, options)
         } else {
             // `fut` is the guest-side request-error channel,
             // unused by `default_send_request`.
             let _ = fut;
             Box::new(async move {
                 use http_body_util::BodyExt;
-                let (res, io) = http_p3::default_send_request(request, options).await?;
-                Ok((res.map(BodyExt::boxed_unsync), Box::new(io) as P3IoFuture))
+                let (res, io) = wasmtime_wasi_http::default_send_request(request, options).await?;
+                Ok((res.map(BodyExt::boxed_unsync), Box::new(io) as WasiIoFuture))
             })
         }
     }
@@ -739,12 +703,9 @@ fn add_preopens(
 
         let host = field("host")?;
         let guest = field("guest")?;
-        let (dir_perms, file_perms) = match field("perms")?.as_str() {
-            "read-only" => (DirPerms::READ, FilePerms::READ),
-            "read-write" => (
-                DirPerms::READ | DirPerms::MUTATE,
-                FilePerms::READ | FilePerms::WRITE,
-            ),
+        let perms = match field("perms")?.as_str() {
+            "read-only" => FsPerms::ReadOnly,
+            "read-write" => FsPerms::ReadWrite,
             other => {
                 return Err(ctx(format!(
                     "'perms' must be \"read-only\" or \"read-write\", got \"{other}\""
@@ -753,7 +714,7 @@ fn add_preopens(
         };
 
         builder
-            .preopened_dir(&host, &guest, dir_perms, file_perms)
+            .preopened_dir(&host, &guest, perms)
             .map_err(|e| ctx(format!("cannot open host path '{host}': {e}")))?;
     }
     Ok(())

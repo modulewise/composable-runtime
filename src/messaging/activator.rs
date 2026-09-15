@@ -283,9 +283,9 @@ mod tests {
                 )
                 (core instance $i (instantiate $m))
                 (func $greet (param "name" string) (result string)
-                    (canon lift (core func $i "greet") (memory $i "mem")
-                        (realloc (func $i "cabi_realloc"))
-                        (post-return (func $i "cabi_post_greet"))
+                    (canon lift (core func $i "greet") (memory (core memory $i "mem"))
+                        (realloc (core func $i "cabi_realloc"))
+                        (post-return (core func $i "cabi_post_greet"))
                     )
                 )
                 (export "greet" (func $greet))
@@ -913,6 +913,6 @@ mod tests {
         assert!(result.is_ok(), "handle failed: {:?}", result.err());
 
         let (reply, _) = consumer.await.unwrap().unwrap();
-        assert_eq!(reply.body(), br#"{"label":"doubled","status":"ok"}"#);
+        assert_eq!(reply.body(), br#"{"status":"ok","label":"doubled"}"#);
     }
 }

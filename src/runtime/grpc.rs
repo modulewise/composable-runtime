@@ -5,109 +5,30 @@
 //! instead of HTTP/1.1. Only plaintext HTTP/2 (h2c / prior knowledge) is
 //! supported; gRPC over TLS requires a future update.
 
-use bytes::Bytes;
-use http_body_util::combinators::UnsyncBoxBody;
-
-// === p2 ======================================================================
-
-use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode as ErrorCodeP2;
-use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
-use wasmtime_wasi_http::p2::types::{
-    HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig,
-};
-
-pub(crate) fn send_grpc_request_p2(
-    request: hyper::Request<HyperOutgoingBody>,
-    config: OutgoingRequestConfig,
-) -> HostFutureIncomingResponse {
-    let handle = wasmtime_wasi::runtime::spawn(async move {
-        Ok(send_grpc_request_p2_handler(request, config).await)
-    });
-    HostFutureIncomingResponse::pending(handle)
-}
-
-async fn send_grpc_request_p2_handler(
-    mut request: hyper::Request<HyperOutgoingBody>,
-    config: OutgoingRequestConfig,
-) -> Result<IncomingResponse, ErrorCodeP2> {
-    use http_body_util::BodyExt;
-    use tokio::net::TcpStream;
-    use tokio::time::timeout;
-    use wasmtime_wasi_http::io::TokioIo;
-
-    let authority = grpc_authority(request.uri()).ok_or(ErrorCodeP2::HttpRequestUriInvalid)?;
-
-    let start = tokio::time::Instant::now();
-
-    let tcp_stream = timeout(config.connect_timeout, TcpStream::connect(&authority))
-        .await
-        .map_err(|_| ErrorCodeP2::ConnectionTimeout)?
-        .map_err(|_| ErrorCodeP2::ConnectionRefused)?;
-
-    let remaining = config.connect_timeout.saturating_sub(start.elapsed());
-    let tcp_stream = TokioIo::new(tcp_stream);
-
-    let (mut sender, conn) = timeout(
-        remaining,
-        hyper::client::conn::http2::handshake(TokioExec, tcp_stream),
-    )
-    .await
-    .map_err(|_| ErrorCodeP2::ConnectionTimeout)?
-    .map_err(wasmtime_wasi_http::p2::hyper_request_error)?;
-
-    let worker = wasmtime_wasi::runtime::spawn(async move {
-        if let Err(e) = conn.await {
-            tracing::warn!("h2 connection error: {e}");
-        }
-    });
-
-    strip_authority(&mut request).map_err(|_| ErrorCodeP2::HttpRequestUriInvalid)?;
-
-    let resp = timeout(config.first_byte_timeout, sender.send_request(request))
-        .await
-        .map_err(|_| ErrorCodeP2::ConnectionReadTimeout)?
-        .map_err(wasmtime_wasi_http::p2::hyper_request_error)?
-        .map(|body| {
-            body.map_err(wasmtime_wasi_http::p2::hyper_request_error)
-                .boxed_unsync()
-        });
-
-    Ok(IncomingResponse {
-        resp,
-        worker: Some(worker),
-        between_bytes_timeout: config.between_bytes_timeout,
-    })
-}
-
-// === p3 ======================================================================
-
 use std::future::Future;
 use std::time::Duration;
-use wasmtime_wasi::TrappableError;
-use wasmtime_wasi_http::p3::RequestOptions;
-use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
+use wasmtime_wasi_http::{Error, RequestOptions, WasiBody};
 
-type P3Body = UnsyncBoxBody<Bytes, ErrorCode>;
-type P3IoFuture = Box<dyn Future<Output = Result<(), ErrorCode>> + Send>;
-type P3SendOutput = Result<(http::Response<P3Body>, P3IoFuture), TrappableError<ErrorCode>>;
+type IoFuture = Box<dyn Future<Output = Result<(), Error>> + Send>;
+type SendOutput = Result<(http::Response<WasiBody>, IoFuture), Error>;
 
 // Defaults when `request-options` omits a timeout.
-// Mirror the fallbacks used by `p3::default_send_request`.
+// Mirror the fallbacks used by `default_send_request`.
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(600);
 const DEFAULT_FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(600);
 const DEFAULT_BETWEEN_BYTES_TIMEOUT: Duration = Duration::from_secs(600);
 
-pub(crate) fn send_grpc_request_p3(
-    request: http::Request<P3Body>,
+pub(crate) fn send_grpc_request(
+    request: http::Request<WasiBody>,
     options: Option<RequestOptions>,
-) -> Box<dyn Future<Output = P3SendOutput> + Send> {
-    Box::new(send_grpc_request_p3_handler(request, options))
+) -> Box<dyn Future<Output = SendOutput> + Send> {
+    Box::new(send_grpc_request_handler(request, options))
 }
 
-async fn send_grpc_request_p3_handler(
-    mut request: http::Request<P3Body>,
+async fn send_grpc_request_handler(
+    mut request: http::Request<WasiBody>,
     options: Option<RequestOptions>,
-) -> P3SendOutput {
+) -> SendOutput {
     use tokio::net::TcpStream;
     use tokio::time::timeout;
     use wasmtime_wasi_http::io::TokioIo;
@@ -125,37 +46,37 @@ async fn send_grpc_request_p3_handler(
         .and_then(|o| o.between_bytes_timeout)
         .unwrap_or(DEFAULT_BETWEEN_BYTES_TIMEOUT);
 
-    let authority = grpc_authority(request.uri()).ok_or(ErrorCode::HttpRequestUriInvalid)?;
+    let authority = grpc_authority(request.uri()).ok_or(Error::HttpRequestUriInvalid)?;
 
     let start = tokio::time::Instant::now();
 
     let tcp_stream = timeout(connect_timeout, TcpStream::connect(&authority))
         .await
-        .map_err(|_| ErrorCode::ConnectionTimeout)?
-        .map_err(|_| ErrorCode::ConnectionRefused)?;
+        .map_err(|_| Error::ConnectionTimeout)?
+        .map_err(Error::Connect)?;
 
     let remaining = connect_timeout.saturating_sub(start.elapsed());
     let tcp_stream = TokioIo::new(tcp_stream);
 
     let (mut sender, conn) = timeout(
         remaining,
-        hyper::client::conn::http2::handshake::<_, _, P3Body>(TokioExec, tcp_stream),
+        hyper::client::conn::http2::handshake::<_, _, WasiBody>(TokioExec, tcp_stream),
     )
     .await
-    .map_err(|_| ErrorCode::ConnectionTimeout)?
-    .map_err(ErrorCode::from_hyper_request_error)?;
+    .map_err(|_| Error::ConnectionTimeout)?
+    .map_err(Error::from)?;
 
-    strip_authority(&mut request).map_err(|_| ErrorCode::HttpRequestUriInvalid)?;
+    strip_authority(&mut request).map_err(|_| Error::HttpRequestUriInvalid)?;
 
     use http_body_util::BodyExt;
 
-    // Map errors to `ErrorCode` here so both poll_fn arms share one type. The
+    // Map errors to `Error` here so both poll_fn arms share one type. The
     // response body is wrapped in `TimeoutBody` to enforce between-bytes timeout.
     let send = async move {
         let res = timeout(first_byte_timeout, sender.send_request(request))
             .await
-            .map_err(|_| ErrorCode::ConnectionReadTimeout)?
-            .map_err(ErrorCode::from_hyper_request_error)?;
+            .map_err(|_| Error::ConnectionReadTimeout)?
+            .map_err(Error::from)?;
         let mut interval = tokio::time::interval(between_bytes_timeout);
         interval.reset();
         Ok(res.map(|incoming| TimeoutBody { incoming, interval }.boxed_unsync()))
@@ -163,7 +84,7 @@ async fn send_grpc_request_p3_handler(
 
     // The hyper connection must be polled to drive HTTP/2 I/O. Poll the send
     // future and, while it is pending, drive `conn` so the exchange can make
-    // progress (mirrors `p3::default_send_request`). `conn` is then returned as
+    // progress (mirrors `default_send_request`). `conn` is then returned as
     // the io future to drive the response body.
     let mut send = std::pin::pin!(send);
     let mut conn = Some(conn);
@@ -177,13 +98,13 @@ async fn send_grpc_request_p3_handler(
             conn = None;
             match res {
                 Ok(()) => send.as_mut().poll(cx),
-                Err(e) => std::task::Poll::Ready(Err(ErrorCode::from_hyper_request_error(e))),
+                Err(e) => std::task::Poll::Ready(Err(Error::from(e))),
             }
         }
     })
     .await?;
 
-    let conn_fut: P3IoFuture = Box::new(async move {
+    let conn_fut: IoFuture = Box::new(async move {
         if let Some(conn) = conn {
             conn.await.map_err(hyper_response_error)?;
         }
@@ -203,7 +124,7 @@ struct TimeoutBody {
 
 impl http_body::Body for TimeoutBody {
     type Data = <hyper::body::Incoming as http_body::Body>::Data;
-    type Error = ErrorCode;
+    type Error = Error;
 
     fn poll_frame(
         mut self: std::pin::Pin<&mut Self>,
@@ -219,7 +140,7 @@ impl http_body::Body for TimeoutBody {
             }
             Poll::Pending => {
                 std::task::ready!(self.interval.poll_tick(cx));
-                Poll::Ready(Some(Err(ErrorCode::ConnectionReadTimeout)))
+                Poll::Ready(Some(Err(Error::ConnectionReadTimeout)))
             }
         }
     }
@@ -233,23 +154,13 @@ impl http_body::Body for TimeoutBody {
     }
 }
 
-// Map a hyper error from the response phase to a wasi-http `ErrorCode`.
-// Mirrors wasmtime's `from_hyper_response_error`, which is not public.
-fn hyper_response_error(err: hyper::Error) -> ErrorCode {
-    use std::error::Error as _;
+// Map a hyper error from the response phase, matching `default_send_request`.
+fn hyper_response_error(err: hyper::Error) -> Error {
     if err.is_timeout() {
-        return ErrorCode::HttpResponseTimeout;
+        return Error::HttpResponseTimeout;
     }
-    if let Some(cause) = err.source()
-        && let Some(code) = cause.downcast_ref::<ErrorCode>()
-    {
-        return code.clone();
-    }
-    tracing::warn!("hyper response error: {err:?}");
-    ErrorCode::HttpProtocolError
+    Error::from(err)
 }
-
-// === shared ==================================================================
 
 // Build a connect authority (host:port), defaulting to port 80 for h2c.
 fn grpc_authority(uri: &http::Uri) -> Option<String> {
