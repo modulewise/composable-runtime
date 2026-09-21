@@ -245,7 +245,10 @@ impl RuntimeBuilder {
         // The factory resolver invokes components as they are built, so it
         // needs the bootstrapper. The others need nothing from the runtime.
         let resolvers = Resolvers::new(HashMap::from([
-            ("oci", Box::new(OciResolver) as Box<dyn Resolver>),
+            (
+                "oci",
+                Box::new(OciResolver::new().await?) as Box<dyn Resolver>,
+            ),
             (
                 "factory",
                 Box::new(FactoryResolver::new(bootstrapper.clone())) as Box<dyn Resolver>,

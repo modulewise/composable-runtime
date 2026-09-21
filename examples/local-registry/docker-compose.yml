@@ -1,0 +1,6 @@
+services:
+  registry:
+    image: registry:2
+    container_name: composable-local-registry
+    ports:
+      - "5001:5000"
