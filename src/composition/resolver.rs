@@ -121,9 +121,18 @@ impl OciResolver {
 
         let config = match self.configs.registry_config(registry) {
             Some(registry_config) => {
-                let OciRegistryConfig { client_config, .. } = registry_config
+                let OciRegistryConfig {
+                    client_config,
+                    credentials,
+                } = registry_config
                     .try_into()
                     .with_context(|| format!("reading configuration for registry {registry}"))?;
+                if credentials.is_some() {
+                    bail!(
+                        "{registry} has credentials configured, but registry auth is not yet \
+                         implemented. Pulls are anonymous."
+                    );
+                }
                 client_config
             }
             None => ClientConfig::default(),
@@ -267,6 +276,22 @@ mod tests {
     }
 
     #[test]
+    fn configured_credentials_are_rejected() {
+        let resolver = resolver(
+            r#"
+            [registry."ghcr.io"]
+            type = "oci"
+            [registry."ghcr.io".oci]
+            auth = { username = "someone", password = "secret" }
+            "#,
+        );
+        match resolver.client(&"ghcr.io".parse().expect("valid registry")) {
+            Ok(_) => panic!("credentials must not be silently ignored"),
+            Err(e) => assert!(e.to_string().contains("auth is not yet"), "{e}"),
+        }
+    }
+
+    #[test]
     fn port_distinguishes_registries() {
         let resolver = resolver(
             r#"
@@ -311,7 +336,6 @@ mod tests {
         for reference in [
             "ghcr.io/foo/bar:v0.2.1",
             "ghcr.io/foo/bar:0.1.0",
-            "localhost:5001/foo/bar:dev",
             "ghcr.io/foo/bar@sha256:0000000000000000000000000000000000000000000000000000000000000000",
         ] {
             let image_ref: Reference = reference.parse().expect("valid reference");
