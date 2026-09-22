@@ -75,7 +75,7 @@ const REGISTRY_CONFIG_VAR: &str = "COMPOSABLE_OCI_REGISTRY_CONFIG";
 /// Pulls from an OCI registry: `oci://`.
 ///
 /// Clients are stored in a map per-registry since each has its own config.
-/// A registry with no entry in the config, gets a default client (HTTPS and
+/// A registry with no entry in the config gets a default client (HTTPS and
 /// anonymous). A tag other than `latest` is considered immutable, so a cache
 /// hit for such a tag avoids any pull.
 pub struct OciResolver {

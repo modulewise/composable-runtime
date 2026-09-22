@@ -6,7 +6,7 @@ REGISTRY="${REGISTRY:-localhost:5001}"
 BASE="http://$REGISTRY/v2"
 
 if ! curl -sf "$BASE/" -o /dev/null; then
-  echo "Error: no registry responding at $BASE (./setup.sh starts one)"
+  echo "Error: no registry responding at $BASE (./start-registry.sh starts one)"
   exit 1
 fi
 
