@@ -1,0 +1,2 @@
+[component.greeter]
+uri = "oci://localhost:5001/example/greeter:0.1.0"

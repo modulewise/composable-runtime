@@ -1,0 +1,5 @@
+[registry."localhost:5001"]
+type = "oci"
+
+[registry."localhost:5001".oci]
+protocol = "http"

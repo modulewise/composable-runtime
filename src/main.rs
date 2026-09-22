@@ -106,6 +106,12 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    let mut filter = EnvFilter::from_default_env();
+    if matches!(cli.command, Command::Publish { .. }) {
+        filter = filter.add_directive("composable_runtime::messaging=info".parse().unwrap());
+    }
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
     match cli.command {
         Command::Graph { definitions, dot } => {
             let graph = build_graph(&definitions)?;
@@ -148,13 +154,6 @@ async fn main() -> Result<()> {
             content_type,
             reply_timeout,
         } => {
-            tracing_subscriber::fmt()
-                .with_env_filter(
-                    EnvFilter::from_default_env()
-                        .add_directive("composable_runtime::messaging=info".parse().unwrap()),
-                )
-                .init();
-
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
             runtime.start()?;
 
@@ -180,9 +179,6 @@ async fn main() -> Result<()> {
             runtime.shutdown().await;
         }
         Command::Run { definitions } => {
-            tracing_subscriber::fmt()
-                .with_env_filter(EnvFilter::from_default_env())
-                .init();
             let runtime = Runtime::builder().from_paths(&definitions).build().await?;
             runtime.run().await?;
         }

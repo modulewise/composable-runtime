@@ -53,6 +53,7 @@ anyhow.workspace = true
 bytes = "1"
 clap.workspace = true
 composable-interceptor = { version = "0.5.0-alpha.5", path = "crates/interceptor" }
+etcetera = "0.11"
 http = "1"
 http-body.workspace = true
 http-body-util.workspace = true
@@ -63,7 +64,9 @@ rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] 
 rustyline = "18"
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.11"
 static-config = "0.2"
+tempfile.workspace = true
 tokio.workspace = true
 tokio-util = { version = "0.7", optional = true }
 toml = "1"
@@ -83,7 +86,6 @@ wit-parser.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
-tempfile.workspace = true
 wat.workspace = true
 
 [features]
