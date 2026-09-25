@@ -5,6 +5,27 @@ use wit_parser::{Resolve, Type};
 
 use crate::types::{Function, FunctionParam, Interface};
 
+/// Extract the WIT from a component's bytes.
+pub(crate) fn extract_wit(component_bytes: &[u8]) -> Result<String> {
+    let wit_parser::decoding::DecodedWasm::Component(resolve, world) =
+        wit_parser::decoding::decode(component_bytes)?
+    else {
+        anyhow::bail!("expected a component, found a WIT package");
+    };
+    let package = resolve.worlds[world]
+        .package
+        .ok_or_else(|| anyhow::anyhow!("the component's world has no package"))?;
+    let nested: Vec<_> = resolve
+        .packages
+        .iter()
+        .map(|(id, _)| id)
+        .filter(|id| *id != package)
+        .collect();
+    let mut printer = wit_component::WitPrinter::default();
+    printer.print(&resolve, package, &nested)?;
+    Ok(printer.output.to_string())
+}
+
 #[derive(Debug, Clone)]
 pub struct PackageMetadata {
     pub namespace: Option<String>,
@@ -528,6 +549,43 @@ mod tests {
         if v.validate(value).is_ok() {
             panic!("expected reject but got accept\nschema: {schema:#}\nvalue: {value:#}");
         }
+    }
+
+    // --- wit extraction ---
+
+    #[test]
+    fn extracted_wit_parses_with_the_components_exports() {
+        let component = wat::parse_str(
+            r#"
+            (component
+                (core module $m (func (export "query")))
+                (core instance $i (instantiate $m))
+                (func $f (canon lift (core func $i "query")))
+                (instance $client (export "query" (func $f)))
+                (export "modulewise:test/client@0.1.0" (instance $client))
+            )
+            "#,
+        )
+        .expect("valid component");
+
+        let wit = extract_wit(&component).expect("extract WIT");
+
+        let mut resolve = Resolve::default();
+        let package = resolve.push_str("extracted.wit", &wit).expect("parse WIT");
+        let world = resolve
+            .select_world(&[package], Some("root"))
+            .expect("world `root`");
+        let exports: Vec<String> = resolve.worlds[world]
+            .exports
+            .keys()
+            .map(|key| resolve.name_world_key(key))
+            .collect();
+        assert_eq!(exports, ["modulewise:test/client@0.1.0"], "{wit}");
+    }
+
+    #[test]
+    fn extract_wit_rejects_non_components() {
+        assert!(extract_wit(b"not wasm").is_err());
     }
 
     // --- primitives ---

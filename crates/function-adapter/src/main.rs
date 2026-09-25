@@ -1,26 +1,48 @@
 //! Function Adapter CLI
 //!
-//! Usage:
-//!   function-adapter <target.wasm> <out.wasm> [function] [description]
-//! e.g.
-//!   function-adapter calc.wasm calc-function.wasm calc.add "Adds two ints"
+//! Example:
+//!   wasm-tools component wit calc.wasm > calc.wit
+//!   function-adapter calc.wit -o calc-function.wasm --function calc.add --description "Adds two ints"
 
 use anyhow::{Context, Result, bail};
+use clap::Parser;
+use std::path::PathBuf;
+
+/// Build a function component that adapts a function of a target component.
+#[derive(Parser)]
+#[command(name = "function-adapter")]
+struct Cli {
+    /// The target's WIT
+    wit: PathBuf,
+
+    /// The world in the WIT whose exported functions may be adapted
+    #[arg(long, default_value = "root")]
+    world: String,
+
+    /// The target function to expose, if it exports more than one
+    #[arg(long)]
+    function: Option<String>,
+
+    /// A description, returned in the function's metadata
+    #[arg(long)]
+    description: Option<String>,
+
+    /// Where to write the function component
+    #[arg(short, long)]
+    output: PathBuf,
+}
 
 fn main() -> Result<()> {
-    let mut argv = std::env::args().skip(1);
-    let usage = "usage: function-adapter <target.wasm> <out.wasm> [function] [description]";
-    let target_path = argv.next().context(usage)?;
-    let out_path = argv.next().context(usage)?;
-    let function = argv.next().filter(|s| !s.is_empty());
-    let description = argv.next().filter(|s| !s.is_empty());
+    let cli = Cli::parse();
 
-    let target = std::fs::read(&target_path).with_context(|| format!("reading {target_path}"))?;
+    let wit = std::fs::read_to_string(&cli.wit)
+        .with_context(|| format!("reading {}", cli.wit.display()))?;
 
-    match function_adapter::build(target, function, description) {
+    match function_adapter::build(wit, Some(cli.world), cli.function, cli.description) {
         Ok(bytes) => {
-            std::fs::write(&out_path, &bytes).with_context(|| format!("writing {out_path}"))?;
-            eprintln!("wrote {out_path} ({} bytes)", bytes.len());
+            std::fs::write(&cli.output, &bytes)
+                .with_context(|| format!("writing {}", cli.output.display()))?;
+            eprintln!("wrote {} ({} bytes)", cli.output.display(), bytes.len());
             Ok(())
         }
         Err(e) => bail!("build failed: {e:#}"),

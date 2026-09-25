@@ -8,18 +8,17 @@ struct Factory;
 
 impl exports::composable::factory::factory::Guest for Factory {
     async fn build() -> Result<Vec<u8>, String> {
-        let source = wasi::config::store::get("target")
-            .map_err(|e| format!("reading config 'target': {e:?}"))?
-            .ok_or_else(|| "no `config.target` set".to_string())?;
-        let target = composable::factory::loader::load(source).await?;
+        let wit = config("wit")?.ok_or_else(|| "no `config.wit` set".to_string())?;
+        let world = config("world")?;
+        let function = config("function")?;
+        let description = config("description")?;
 
-        let function = wasi::config::store::get("function")
-            .map_err(|e| format!("reading config 'function': {e:?}"))?;
-        let description = wasi::config::store::get("description")
-            .map_err(|e| format!("reading config 'description': {e:?}"))?;
-
-        function_adapter::build(target, function, description).map_err(|e| format!("{e:#}"))
+        function_adapter::build(wit, world, function, description).map_err(|e| format!("{e:#}"))
     }
+}
+
+fn config(key: &str) -> Result<Option<String>, String> {
+    wasi::config::store::get(key).map_err(|e| format!("reading config '{key}': {e:?}"))
 }
 
 export!(Factory);

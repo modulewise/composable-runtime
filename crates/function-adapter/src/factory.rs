@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 
-use composable_factory::wit::{PackageSource, WorldSource};
+use composable_factory::wit::PackageSource;
 use composable_factory::world::{ExportedFunction, ImportedFunction, Imports, Param, ValueSpec};
 use composable_factory::{ComponentBuilder, World};
 
@@ -12,10 +12,15 @@ use crate::serializer::JsonSerializer;
 const MAPPER_WIT: &str = include_str!("../wit/mapper.wit");
 const FUNCTION_WIT: &str = include_str!("../wit/function.wit");
 
+/// The name wit-parser uses for the world of a decoded component.
+const DEFAULT_WORLD: &str = "root";
+
 /// The function-adapter factory.
 pub struct Factory {
-    /// The component to adapt.
-    target: Vec<u8>,
+    /// The WIT of the component to adapt.
+    wit: String,
+    /// The world in `wit` that contains the exported function to be exposed.
+    world: Option<String>,
     /// The function on the target to expose. If only one, that is the default.
     function: Option<String>,
     /// Optional function description, surfaced in `metadata`.
@@ -23,9 +28,15 @@ pub struct Factory {
 }
 
 impl Factory {
-    pub fn new(target: Vec<u8>, function: Option<String>, description: Option<String>) -> Self {
+    pub fn new(
+        wit: String,
+        world: Option<String>,
+        function: Option<String>,
+        description: Option<String>,
+    ) -> Self {
         Factory {
-            target,
+            wit,
+            world,
             function,
             description,
         }
@@ -34,7 +45,8 @@ impl Factory {
 
 impl ComponentBuilder for Factory {
     fn build_world(&self, world: &mut World) -> Result<()> {
-        let target = WorldSource::from_component(&self.target)?;
+        let target = PackageSource::from_text(&self.wit)?
+            .world(self.world.as_deref().unwrap_or(DEFAULT_WORLD))?;
         world.add_imports(target.exports())?;
 
         let mapper = PackageSource::from_text(MAPPER_WIT)?;

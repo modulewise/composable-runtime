@@ -1,10 +1,11 @@
 [package]
 name = "function-adapter"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
 anyhow = "1"
+clap.workspace = true
 composable-factory = { git = "https://github.com/modulewise/composable-factory", branch = "main" }
 wasm-encoder = "0.259"
 wit-parser = "0.259"

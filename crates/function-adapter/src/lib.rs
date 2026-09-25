@@ -10,9 +10,10 @@ pub use factory::Factory;
 
 /// Build the function component.
 pub fn build(
-    target: Vec<u8>,
+    wit: String,
+    world: Option<String>,
     function: Option<String>,
     description: Option<String>,
 ) -> Result<Vec<u8>> {
-    composable_factory::build(&Factory::new(target, function, description))
+    composable_factory::build(&Factory::new(wit, world, function, description))
 }

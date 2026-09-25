@@ -87,6 +87,7 @@ impl ConfigProcessor {
         validate_scopes(&component_definitions, &capability_definitions)?;
         validate_names(&component_definitions, &capability_definitions)?;
         validate_imports(&component_definitions, &capability_definitions)?;
+        validate_wit_references(&component_definitions, &capability_definitions)?;
 
         Ok((component_definitions, capability_definitions))
     }
@@ -330,8 +331,44 @@ fn resolve_placeholders_in_value(value: &mut serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+/// The component named by a `${wit(<component>)}` expression, if present.
+pub(crate) fn wit_reference(value: &str) -> Option<&str> {
+    value.strip_prefix("${wit(")?.strip_suffix(")}")
+}
+
+/// Every component named in a `${wit(...)}` expression within `config`.
+pub(crate) fn wit_references(config: &HashMap<String, serde_json::Value>) -> Vec<&str> {
+    let mut names = Vec::new();
+    for value in config.values() {
+        collect_wit_references(value, &mut names);
+    }
+    names
+}
+
+fn collect_wit_references<'a>(value: &'a serde_json::Value, names: &mut Vec<&'a str>) {
+    match value {
+        serde_json::Value::String(s) => names.extend(wit_reference(s)),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_wit_references(item, names);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                collect_wit_references(item, names);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn resolve_placeholder(s: &str) -> Result<Option<String>> {
     if !s.starts_with("${") || !s.ends_with('}') {
+        return Ok(None);
+    }
+
+    // Evaluated during the build, once the named component exists.
+    if wit_reference(s).is_some() {
         return Ok(None);
     }
 
@@ -417,6 +454,36 @@ fn validate_name_chars(name: &str) -> Result<()> {
         return Err(anyhow::anyhow!(
             "Definition name '{name}' is invalid: names cannot start with '_' or contain '$' (reserved for internal use)"
         ));
+    }
+    Ok(())
+}
+
+fn validate_wit_references(
+    components: &[ComponentDefinition],
+    capabilities: &[CapabilityDefinition],
+) -> Result<()> {
+    // Capabilities are built before components.
+    for def in capabilities {
+        if !wit_references(&def.properties).is_empty() {
+            return Err(anyhow::anyhow!(
+                "Capability '{}' has ${{wit(...)}}, which is only valid in component config",
+                def.name
+            ));
+        }
+    }
+
+    let component_names: HashSet<&str> = components.iter().map(|d| d.name.as_str()).collect();
+    for def in components {
+        for name in wit_references(&def.config) {
+            validate_name_chars(name)
+                .map_err(|e| anyhow::anyhow!("Invalid ${{wit(...)}} in '{}': {e}", def.name))?;
+            if !component_names.contains(name) {
+                return Err(anyhow::anyhow!(
+                    "Component '{}' uses ${{wit({name})}}, but no component '{name}' is defined",
+                    def.name
+                ));
+            }
+        }
     }
     Ok(())
 }

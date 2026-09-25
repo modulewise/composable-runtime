@@ -9,7 +9,8 @@ use wasmtime::component::{HasData, Linker};
 use super::composer::Composer;
 use super::graph::{ComponentGraph, Edge, Node};
 use super::resolver::Resolvers;
-use super::wit::Parser;
+use super::wit::{Parser, extract_wit};
+use crate::config::processor::wit_reference;
 use crate::types::{
     CapabilityDefinition, ComponentDefinition, ComponentMetadata, ComponentState, Function,
 };
@@ -605,7 +606,9 @@ async fn process_component(
         .any(|import| import.starts_with("wasi:config/store"));
 
     if imports_config {
-        bytes = Composer::compose_with_config(&bytes, &definition.config).map_err(|e| {
+        let config = resolve_wit_references(&definition.config, component_registry)
+            .map_err(|e| anyhow::anyhow!("Component '{}': {e}", definition.name))?;
+        bytes = Composer::compose_with_config(&bytes, &config).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to compose component '{}' with config: {}",
                 definition.name,
@@ -752,8 +755,109 @@ async fn process_component(
     })
 }
 
+// A copy of `config` with any `${wit(<component>)}` replaced by the referenced
+// component's WIT. Every such component precedes this one in the graph.
+fn resolve_wit_references(
+    config: &HashMap<String, serde_json::Value>,
+    component_registry: &BootstrapRegistry,
+) -> Result<HashMap<String, serde_json::Value>> {
+    let mut config = config.clone();
+    for value in config.values_mut() {
+        resolve_wit_references_in_value(value, component_registry)?;
+    }
+    Ok(config)
+}
+
+fn resolve_wit_references_in_value(
+    value: &mut serde_json::Value,
+    component_registry: &BootstrapRegistry,
+) -> Result<()> {
+    match value {
+        serde_json::Value::String(s) => {
+            if let Some(name) = wit_reference(s) {
+                let spec = component_registry.get_component(name).ok_or_else(|| {
+                    anyhow::anyhow!("${{wit({name})}} names a component that is not built")
+                })?;
+                *s = extract_wit(&spec.bytes)
+                    .map_err(|e| anyhow::anyhow!("${{wit({name})}}: {e}"))?;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                resolve_wit_references_in_value(item, component_registry)?;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values_mut() {
+                resolve_wit_references_in_value(item, component_registry)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn is_advice_component(exports: &[String]) -> bool {
     exports
         .iter()
         .any(|e| e.starts_with("modulewise:interceptor/advice"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn registry_with_target() -> BootstrapRegistry {
+        let bytes = wat::parse_str(
+            r#"
+            (component
+                (core module $m (func (export "call")))
+                (core instance $i (instantiate $m))
+                (func $f (canon lift (core func $i "call")))
+                (instance $target (export "call" (func $f)))
+                (export "modulewise:test/target@0.1.0" (instance $target))
+            )
+            "#,
+        )
+        .expect("valid component");
+        let registry = BootstrapRegistry::default();
+        registry.register(ComponentSpec {
+            name: "target".to_string(),
+            namespace: None,
+            package: None,
+            labels: HashMap::new(),
+            bytes: Arc::from(bytes),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            capabilities: Vec::new(),
+            dependents: Vec::new(),
+            functions: HashMap::new(),
+        });
+        registry
+    }
+
+    #[test]
+    fn wit_references_are_replaced_at_any_depth() {
+        let config = HashMap::from([
+            ("top-level".to_string(), json!("${wit(target)}")),
+            ("nested".to_string(), json!({ "inner": ["${wit(target)}"] })),
+            ("no-ref".to_string(), json!("just a string")),
+        ]);
+
+        let resolved = resolve_wit_references(&config, &registry_with_target()).expect("resolve");
+
+        let target = resolved["top-level"].as_str().expect("string");
+        assert!(target.contains("modulewise:test/target@0.1.0"), "{target}");
+        assert_eq!(resolved["nested"]["inner"][0], resolved["top-level"]);
+        assert_eq!(resolved["no-ref"], "just a string");
+    }
+
+    #[test]
+    fn a_wit_reference_to_an_unbuilt_component_fails() {
+        let config = HashMap::from([("target".to_string(), json!("${wit(missing)}"))]);
+        let err = resolve_wit_references(&config, &registry_with_target())
+            .expect_err("missing component");
+        assert!(err.to_string().contains("missing"), "{err}");
+    }
 }
