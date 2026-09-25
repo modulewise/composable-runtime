@@ -35,14 +35,14 @@ implementation is in the `composable-factory` repository.
 ## The `function-factory` World
 
 - exports `composable:factory/factory@0.4.0` which provides the `build()` function
-- imports `composable:factory/loader@0.4.0` to read the target's bytes and extract WIT
 - imports `wasi:config/store@0.2.0-rc.1` for its own configuration
 
 ## Configuration
 
 | Key | |
 | --- | --- |
-| `target` | Required. Path for the loader to read the target component bytes. |
+| `wit` | Required. The target's WIT. |
+| `world` | Optional. The world in `wit` which contains the exported function to be adapted. Defaults to `root`. |
 | `function` | Which function of the target component to call. May be omitted if exactly one. If ambiguous, should be qualified as `interface.function`. |
 | `description` | Optional. Sets the description returned in the metadata. |
 
@@ -58,8 +58,7 @@ imports = ["target", "mapper"]
 
 [component.greeter-factory]
 uri = "oci://ghcr.io/modulewise/component/function-factory:0.4.0"
-imports = ["loader"]
-config.target = "/lib/greeter.wasm"
+config.wit = "${wit(target)}"
 config.function = "greeter.greet"
 
 [component.target]
@@ -67,19 +66,23 @@ uri = "./lib/greeter.wasm"
 
 [component.mapper]
 uri = "oci://ghcr.io/modulewise/component/json-mapper:0.4.0"
-
-[component.loader]
-uri = "oci://ghcr.io/modulewise/component/filesystem-loader:0.4.0"
-imports = ["filesystem"]
-
-[capability.filesystem]
-type = "wasi:filesystem"
-
-[[capability.filesystem.preopens]]
-host = "./lib"
-guest = "/lib"
-perms = "read-only"
 ```
 
-The `target` config path is the loader's view of the target, so it resolves
-against the preopened guest path with the permissions configured for that path.
+The `${wit(target)}` expression in a definition extracts the WIT of the named `target` component.
+
+## Use outside Composable Runtime
+
+The `function-adapter` CLI builds the same component directly from a WIT file:
+
+```bash
+wasm-tools component wit greeter.wasm > greeter.wit
+function-adapter greeter.wit -o greeter-function.wasm --function greeter.greet
+```
+
+To run the function-factory component as a standalone component, provide a
+`wasi:config/store` import, which can be created with `static-config`:
+
+```bash
+static-config -p "wit=$(wasm-tools component wit greeter.wasm)" \
+  -p "function=greeter.greet" -o config.wasm
+```

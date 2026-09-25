@@ -6,7 +6,7 @@ use std::ops::{Index, IndexMut};
 use std::path::PathBuf;
 
 use crate::config::loaders::{TomlLoader, WasmLoader};
-use crate::config::processor::ConfigProcessor;
+use crate::config::processor::{ConfigProcessor, wit_references};
 use crate::types::{CapabilityDefinition, ComponentDefinition};
 
 /// Directed graph of component and capability definitions
@@ -161,6 +161,8 @@ impl ComponentGraph {
                 })?;
                 graph.update_edge(factory_index, importer_index, Edge::Factory);
             }
+
+            add_wit_edges(&mut graph, &node_map, importer_index, definition)?;
         }
 
         // Add dependency edges for interceptor clones' own imports.
@@ -168,19 +170,19 @@ impl ComponentGraph {
             let Node::Component(def) = &graph[*clone_index] else {
                 continue;
             };
-            let clone_name = def.name.clone();
-            let imports = def.imports.clone();
-            for exporter_name in &imports {
+            let def = def.clone();
+            for exporter_name in &def.imports {
                 if let Some(exporter_index) = node_map.get(exporter_name).copied() {
                     graph.update_edge(exporter_index, *clone_index, Edge::Dependency);
                 } else {
                     tracing::warn!(
                         "Interceptor '{}' imports '{}', which is not defined.",
-                        clone_name,
+                        def.name,
                         exporter_name
                     );
                 }
             }
+            add_wit_edges(&mut graph, &node_map, *clone_index, &def)?;
         }
 
         // Validate the graph for cycles
@@ -221,7 +223,7 @@ impl ComponentGraph {
         self.graph
             .edges_directed(index, petgraph::Direction::Incoming)
             .map(|edge_ref| (edge_ref.source(), edge_ref.weight()))
-            .filter(|(_, edge)| !matches!(edge, Edge::Factory))
+            .filter(|(_, edge)| !matches!(edge, Edge::Factory | Edge::Wit))
     }
 
     fn dot(&self) -> String {
@@ -258,6 +260,7 @@ impl ComponentGraph {
                     format!("[color=red, style=dashed, label=\"interceptor: {position}\"]")
                 }
                 Edge::Factory => "[color=green, style=dotted, label=\"factory\"]".to_string(),
+                Edge::Wit => "[color=purple, style=dotted, label=\"wit\"]".to_string(),
             };
             output.push_str(&format!(
                 "  {} -> {} {};\n",
@@ -330,6 +333,25 @@ impl IndexMut<NodeIndex> for ComponentGraph {
     }
 }
 
+// A component referenced in `${wit(...)}` must precede the referencing node.
+fn add_wit_edges(
+    graph: &mut DiGraph<Node, Edge>,
+    node_map: &HashMap<String, NodeIndex>,
+    user_index: NodeIndex,
+    definition: &ComponentDefinition,
+) -> Result<()> {
+    for name in wit_references(&definition.config) {
+        let source_index = node_map.get(name).copied().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Component '{}' has ${{wit({name})}}, but '{name}' is not a component in the graph",
+                definition.name
+            )
+        })?;
+        graph.update_edge(source_index, user_index, Edge::Wit);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub enum Node {
     Component(ComponentDefinition),
@@ -342,6 +364,7 @@ pub enum Edge {
     Dependency,
     Interceptor(i32), // Position in chain (0 = innermost)
     Factory,
+    Wit, // The referencing config uses the referenced component's WIT
 }
 
 /// Builder for constructing a ComponentGraph.

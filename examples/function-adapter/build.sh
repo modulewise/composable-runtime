@@ -13,4 +13,7 @@ if [[ ! -f "lib/json-mapper.wasm" ]]; then
   wkg oci pull -o lib/json-mapper.wasm ghcr.io/modulewise/component/json-mapper:0.4.0
 fi
 
-cargo run -p function-adapter -- ./lib/greeter.wasm ./lib/greeter-function.wasm greeter.greet "Greet someone by name"
+wasm-tools component wit ./lib/greeter.wasm > ./lib/greeter.wit
+
+cargo run -p function-adapter -- ./lib/greeter.wit -o ./lib/greeter-function.wasm \
+  --function greeter.greet --description "Greet someone by name"

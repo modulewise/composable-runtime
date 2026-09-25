@@ -1173,9 +1173,10 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "function-adapter"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
+ "clap",
  "composable-factory",
  "wasm-encoder 0.259.0",
  "wit-parser 0.259.0",
