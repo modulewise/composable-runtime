@@ -44,7 +44,7 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 wasm-encoder = "0.259"
 wasmparser = "0.259"
-wasmtime = { version = "48", features = ["component-model-async"] }
+wasmtime = { version = "49", features = ["component-model-async"] }
 wat = "1.259"
 wit-parser = "0.259"
 
@@ -77,10 +77,10 @@ wac-graph = "0.11"
 wac-types = "0.11"
 wasm-pkg-client = "0.16"
 wasmtime = { workspace = true }
-wasmtime-wasi = { version = "48", features = ["p3"] }
-wasmtime-wasi-config = "48"
-wasmtime-wasi-http = { version = "48", features = ["p3"] }
-wasmtime-wasi-io = "48"
+wasmtime-wasi = { version = "49", features = ["p3"] }
+wasmtime-wasi-config = "49"
+wasmtime-wasi-http = { version = "49", features = ["p3"] }
+wasmtime-wasi-io = "49"
 wit-component = "0.259"
 wit-parser.workspace = true
 
