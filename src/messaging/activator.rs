@@ -77,7 +77,7 @@ impl Activator {
 
     fn exports_handler_interface(component: &Component) -> bool {
         component.functions.values().any(|f| {
-            f.interface()
+            f.interface_name()
                 .is_some_and(|iface| iface.as_str().starts_with("modulewise:messaging/handler"))
         })
     }

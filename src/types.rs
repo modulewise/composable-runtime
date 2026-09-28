@@ -86,10 +86,16 @@ impl ComponentState {
     }
 }
 
-/// A validated WebAssembly Interface Type (WIT) interface name.
-/// Format: `namespace:package/interface[@version]`
+/// A Wasm Interface Type (WIT) interface. An inline interface has no name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Interface {
+    pub name: Option<InterfaceName>,
+}
+
+/// A validated WIT interface name.
+/// Format: `namespace:package/interface[@version]`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InterfaceName {
     namespace: String,
     package: String,
     interface: String,
@@ -97,7 +103,7 @@ pub struct Interface {
     full_name: String,
 }
 
-impl Interface {
+impl InterfaceName {
     /// Parse and validate a WIT interface string.
     pub fn parse(s: &str) -> Result<Self> {
         if let Some((namespace, rest)) = s.split_once(':')
@@ -149,9 +155,71 @@ impl Interface {
     }
 }
 
-impl fmt::Display for Interface {
+impl fmt::Display for InterfaceName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.full_name)
+    }
+}
+
+/// A component import.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Import {
+    /// The name of the import.
+    pub name: String,
+    /// The interface imported, or None for a function.
+    pub interface: Option<Interface>,
+}
+
+impl Import {
+    /// The name of the interface imported, if it has one.
+    pub fn interface_name(&self) -> Option<&InterfaceName> {
+        self.interface.as_ref()?.name.as_ref()
+    }
+
+    /// Whether this import's name differs from its interface's name.
+    pub fn is_named(&self) -> bool {
+        self.interface_name()
+            .is_some_and(|interface| interface.as_str() != self.name)
+    }
+}
+
+impl fmt::Display for Import {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.interface_name() {
+            Some(interface) if self.is_named() => write!(f, "{}: {interface}", self.name),
+            _ => write!(f, "{}", self.name),
+        }
+    }
+}
+
+/// A component export.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Export {
+    /// The name of the export.
+    pub name: String,
+    /// The interface exported, or None for a function.
+    pub interface: Option<Interface>,
+}
+
+impl Export {
+    /// The name of the interface exported, if it has one.
+    pub fn interface_name(&self) -> Option<&InterfaceName> {
+        self.interface.as_ref()?.name.as_ref()
+    }
+
+    /// Whether this export's name differs from its interface's name.
+    pub fn is_named(&self) -> bool {
+        self.interface_name()
+            .is_some_and(|interface| interface.as_str() != self.name)
+    }
+}
+
+impl fmt::Display for Export {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.interface_name() {
+            Some(interface) if self.is_named() => write!(f, "{}: {interface}", self.name),
+            _ => write!(f, "{}", self.name),
+        }
     }
 }
 
@@ -160,6 +228,8 @@ impl fmt::Display for Interface {
 pub struct Function {
     interface: Option<Interface>,
     function_name: String,
+    /// The explicit name of a named or inline interface export.
+    export_name: Option<String>,
     docs: String,
     params: Vec<FunctionParam>,
     result: Option<serde_json::Value>,
@@ -168,9 +238,10 @@ pub struct Function {
 
 impl Function {
     /// Create a new function specification.
-    pub fn new(
+    pub(crate) fn new(
         interface: Option<Interface>,
         function_name: String,
+        export_name: Option<String>,
         docs: String,
         params: Vec<FunctionParam>,
         result: Option<serde_json::Value>,
@@ -179,6 +250,7 @@ impl Function {
         Self {
             interface,
             function_name,
+            export_name,
             docs,
             params,
             result,
@@ -191,14 +263,29 @@ impl Function {
         self.is_invokable
     }
 
-    /// Get the interface (None for direct function exports)
+    /// Get the interface (None for a world-level function)
     pub fn interface(&self) -> Option<&Interface> {
         self.interface.as_ref()
+    }
+
+    /// Get the name of the interface, if it has one.
+    pub fn interface_name(&self) -> Option<&InterfaceName> {
+        self.interface.as_ref()?.name.as_ref()
     }
 
     /// Get the function name.
     pub fn function_name(&self) -> &str {
         &self.function_name
+    }
+
+    /// Get the export name: its own if explicit, else its interface's, else
+    /// the function's.
+    pub(crate) fn export_name(&self) -> &str {
+        match (&self.export_name, self.interface_name()) {
+            (Some(name), _) => name,
+            (None, Some(interface)) => interface.as_str(),
+            (None, None) => &self.function_name,
+        }
     }
 
     /// Get the function documentation.
@@ -245,18 +332,24 @@ impl Function {
     /// Get the function key used in maps and invoke calls.
     /// - Direct function exports: `function_name`
     /// - Interface function exports: `unqualified_interface.function_name`
+    /// - Named and inline interface exports: `export_name.function_name`
     pub fn key(&self) -> String {
-        match &self.interface {
-            Some(iface) => format!("{}.{}", iface.interface_name(), self.function_name),
-            None => self.function_name.clone(),
+        if self.interface.is_none() {
+            return self.function_name.clone();
         }
+        let prefix = match (&self.export_name, self.interface_name()) {
+            (Some(name), _) => name,
+            (None, Some(interface)) => interface.interface_name(),
+            (None, None) => &self.function_name,
+        };
+        format!("{prefix}.{}", self.function_name)
     }
 }
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.interface {
-            Some(iface) => write!(f, "{}#{}", iface, self.function_name),
+            Some(_) => write!(f, "{}#{}", self.export_name(), self.function_name),
             None => write!(f, "{}", self.function_name),
         }
     }
@@ -279,7 +372,7 @@ pub struct ComponentMetadata {
     pub package: Option<String>,
     pub labels: HashMap<String, String>,
     pub dependents: Option<Vec<String>>,
-    pub exports: Vec<String>,
+    pub exports: Vec<Export>,
 }
 
 impl ComponentMetadata {
@@ -304,9 +397,19 @@ impl ComponentMetadata {
             );
         }
         if !self.exports.is_empty() {
+            // An export is selected by its interface name if it has one.
+            let exports: Vec<&str> = self
+                .exports
+                .iter()
+                .map(|export| {
+                    export
+                        .interface_name()
+                        .map_or(export.name.as_str(), |interface| interface.as_str())
+                })
+                .collect();
             map.insert(
                 "exports".to_string(),
-                Some(format!("[{}]", self.exports.join(","))),
+                Some(format!("[{}]", exports.join(","))),
             );
         }
         for (k, v) in &self.labels {

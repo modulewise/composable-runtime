@@ -1,0 +1,19 @@
+package example:named-imports;
+
+interface translator {
+    /// Translate an English word, or return it unchanged if unknown.
+    translate: func(word: string) -> string;
+}
+
+/// Greets in English and in each language it imports a translator for.
+world greeter {
+    import spanish: translator;
+    import french: translator;
+    export greet: func(name: string) -> list<string>;
+}
+
+/// Translates each word configured with its translation.
+world dictionary {
+    import wasi:config/store@0.2.0-rc.1;
+    export translator;
+}

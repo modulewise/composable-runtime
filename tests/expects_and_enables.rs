@@ -55,7 +55,8 @@ async fn test_imports_and_scope() {
     let handler = component_registry.get_component("handler").unwrap();
     assert_eq!(handler.name, "handler");
     assert_eq!(handler.imports.len(), 0);
-    assert_eq!(handler.exports, vec!["modulewise:test/handler@0.1.0"]);
+    let exports: Vec<_> = handler.exports.iter().map(|e| e.to_string()).collect();
+    assert_eq!(exports, ["modulewise:test/handler@0.1.0"]);
     assert_eq!(handler.capabilities, ["infra"]);
     let functions = handler.functions.clone();
     assert_eq!(functions.len(), 1);
@@ -63,7 +64,7 @@ async fn test_imports_and_scope() {
     assert!(function.params().is_empty());
     assert_eq!(function.result(), None);
     assert_eq!(
-        function.interface().map(|i| i.as_str()),
+        function.interface_name().map(|i| i.as_str()),
         Some("modulewise:test/handler@0.1.0")
     );
 }
