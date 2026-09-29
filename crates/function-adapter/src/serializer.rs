@@ -3,13 +3,13 @@
 use anyhow::Result;
 
 use composable_factory::world::{
-    ImportedFunction, Interface, MapKey, ReadVisitor, Type, Value, ValueSpec,
+    ImportedFunction, ImportedInterface, MapKey, ReadVisitor, Type, Value, ValueSpec,
 };
 
 /// Serializes a value into JSON.
 pub struct JsonSerializer {
     /// The `serializer` interface.
-    interface: Interface,
+    interface: ImportedInterface,
     /// The `serializer` resource handle.
     handle: Value,
     /// One entry per currently open map, innermost last. True for any map with
@@ -23,7 +23,7 @@ pub struct JsonSerializer {
 }
 
 impl JsonSerializer {
-    pub fn new(interface: Interface) -> Result<Self> {
+    pub fn new(interface: ImportedInterface) -> Result<Self> {
         let handle = interface
             .function("[constructor]serializer")?
             .call(&[])?

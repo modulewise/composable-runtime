@@ -3,13 +3,13 @@
 use anyhow::Result;
 
 use composable_factory::world::{
-    ImportedFunction, Interface, MapKey, Type, Value, ValueSpec, WriteVisitor,
+    ImportedFunction, ImportedInterface, MapKey, Type, Value, ValueSpec, WriteVisitor,
 };
 
 /// Produces call arg values from JSON via a `deserializer` resource handle.
 pub struct JsonDeserializer {
     /// The `deserializer` interface.
-    interface: Interface,
+    interface: ImportedInterface,
     /// The `deserializer` resource handle.
     handle: Value,
     /// The name of the value each walk starts from, in the order the walks
@@ -30,7 +30,7 @@ pub struct JsonDeserializer {
 
 impl JsonDeserializer {
     /// Acquire the resource handle by calling the constructor.
-    pub fn new(interface: Interface, json: Value, walk_names: &[&str]) -> Result<Self> {
+    pub fn new(interface: ImportedInterface, json: Value, walk_names: &[&str]) -> Result<Self> {
         let handle = interface
             .function("[constructor]deserializer")?
             .call(&[json])?

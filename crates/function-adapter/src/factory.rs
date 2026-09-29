@@ -100,14 +100,18 @@ impl Factory {
     fn candidates(&self, imports: &Imports) -> Result<Vec<(String, ImportedFunction)>> {
         let mut candidates = Vec::new();
         for interface in imports.interfaces() {
-            let Some(name) = interface.name() else {
-                continue;
-            };
-            if name == "serializer" || name == "deserializer" {
+            if matches!(interface.name(), Some("serializer" | "deserializer")) {
                 continue;
             }
+            // Keyed by the interface's leaf name, or its explicit name for a
+            // named or inline interface.
+            let import_name = interface.import_name();
+            let prefix = match (interface.name(), interface.qualified_name()) {
+                (Some(name), Some(qualified)) if qualified == import_name => name.to_string(),
+                _ => import_name,
+            };
             for func in interface.functions()? {
-                candidates.push((format!("{name}.{}", func.name()), func));
+                candidates.push((format!("{prefix}.{}", func.name()), func));
             }
         }
         // World-level exports of the target.

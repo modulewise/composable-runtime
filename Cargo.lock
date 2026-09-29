@@ -439,8 +439,8 @@ dependencies = [
 
 [[package]]
 name = "composable-factory"
-version = "0.4.0"
-source = "git+https://github.com/modulewise/composable-factory?branch=main#176a2f73b97869de3fc0c790c84606aad666545e"
+version = "0.5.0"
+source = "git+https://github.com/modulewise/composable-factory?branch=main#45412dfb0e898c9a0229731e1577a35426c8526d"
 dependencies = [
  "anyhow",
  "indexmap 2.14.2",
