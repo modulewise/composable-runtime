@@ -3,7 +3,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use wit_parser::{Resolve, Type};
 
-use crate::types::{Function, FunctionParam, Interface};
+use crate::types::{Export, Function, FunctionParam, Import, Interface, InterfaceName};
 
 /// Extract the WIT from a component's bytes.
 pub(crate) fn extract_wit(component_bytes: &[u8]) -> Result<String> {
@@ -40,8 +40,8 @@ impl Parser {
         component_bytes: &[u8],
     ) -> Result<(
         PackageMetadata,
-        Vec<String>,
-        Vec<String>,
+        Vec<Import>,
+        Vec<Export>,
         HashMap<String, Function>,
     )> {
         let decoded = wit_parser::decoding::decode(component_bytes)?;
@@ -70,46 +70,53 @@ impl Parser {
 
         // Extract imports
         let mut imports = Vec::new();
-        for (_, item) in &world.imports {
-            if let wit_parser::WorldItem::Interface { id, .. } = item {
-                let interface = resolve.interfaces.get(*id).unwrap();
-                // Skip type-only interfaces (no functions to satisfy at runtime)
-                if interface.functions.is_empty() {
-                    continue;
+        for (key, item) in &world.imports {
+            match item {
+                wit_parser::WorldItem::Interface { id, .. } => {
+                    // Skip type-only interfaces (no functions to satisfy at runtime)
+                    if resolve.interfaces[*id].functions.is_empty() {
+                        continue;
+                    }
+                    imports.push(Import {
+                        name: resolve.name_world_key(key),
+                        interface: Some(Self::interface(&resolve, *id)?),
+                    });
                 }
-                let interface_name = Self::build_full_interface_name(&resolve, *id)?;
-                imports.push(interface_name);
+                wit_parser::WorldItem::Function(_) => imports.push(Import {
+                    name: resolve.name_world_key(key),
+                    interface: None,
+                }),
+                wit_parser::WorldItem::Type { .. } => {}
             }
         }
 
-        // Extract exports
+        // Extract exports and their functions
         let mut exports = Vec::new();
-        for (_, item) in &world.exports {
-            if let wit_parser::WorldItem::Interface { id, .. } = item {
-                let interface_name = Self::build_full_interface_name(&resolve, *id)?;
-                exports.push(interface_name);
+        let mut functions = Vec::new();
+        for (key, item) in &world.exports {
+            match item {
+                wit_parser::WorldItem::Interface { id, .. } => {
+                    let export = Export {
+                        name: resolve.name_world_key(key),
+                        interface: Some(Self::interface(&resolve, *id)?),
+                    };
+                    for func in resolve.interfaces[*id].functions.values() {
+                        functions.push(Self::parse_function(func, &export, &resolve)?);
+                    }
+                    exports.push(export);
+                }
+                wit_parser::WorldItem::Function(func) => {
+                    let export = Export {
+                        name: resolve.name_world_key(key),
+                        interface: None,
+                    };
+                    functions.push(Self::parse_function(func, &export, &resolve)?);
+                    exports.push(export);
+                }
+                wit_parser::WorldItem::Type { .. } => {}
             }
         }
-
-        let function_map = {
-            let mut functions = Vec::new();
-            for (_, item) in &world.exports {
-                match item {
-                    wit_parser::WorldItem::Interface { id, .. } => {
-                        let interface_functions = Self::parse_interface(id, &resolve)?;
-                        functions.extend(interface_functions);
-                    }
-                    wit_parser::WorldItem::Function(func) => {
-                        let function = Self::parse_function(func, None, &resolve)?;
-                        functions.push(function);
-                    }
-                    wit_parser::WorldItem::Type { .. } => {
-                        // No functions
-                    }
-                }
-            }
-            Self::build_function_map(functions)?
-        };
+        let function_map = Self::build_function_map(functions)?;
 
         Ok((component_metadata, imports, exports, function_map))
     }
@@ -143,25 +150,24 @@ impl Parser {
         }
     }
 
-    fn parse_interface(
-        interface_id: &wit_parser::InterfaceId,
-        resolve: &Resolve,
-    ) -> Result<Vec<Function>> {
-        let interface = resolve.interfaces.get(*interface_id).unwrap();
-        let full_interface_name = Self::build_full_interface_name(resolve, *interface_id)?;
-        let interface_obj = Interface::parse(&full_interface_name)?;
-
-        let mut functions = Vec::new();
-        for (_, func) in &interface.functions {
-            let function_obj = Self::parse_function(func, Some(interface_obj.clone()), resolve)?;
-            functions.push(function_obj);
-        }
-        Ok(functions)
+    // An inline interface has no name.
+    fn interface(
+        resolve: &wit_parser::Resolve,
+        interface_id: wit_parser::InterfaceId,
+    ) -> Result<Interface> {
+        let name = match resolve.interfaces[interface_id].name {
+            Some(_) => Some(InterfaceName::parse(&Self::build_full_interface_name(
+                resolve,
+                interface_id,
+            )?)?),
+            None => None,
+        };
+        Ok(Interface { name })
     }
 
     fn parse_function(
         func: &wit_parser::Function,
-        interface: Option<Interface>,
+        export: &Export,
         resolve: &Resolve,
     ) -> Result<Function> {
         // A function is invokable only if all its param types and its result
@@ -187,9 +193,17 @@ impl Parser {
             .result
             .map(|result_type| Self::wit_type_to_json_schema(result_type, resolve));
 
+        // Only a named or inline interface export has an explicit name.
+        let export_name = match (&export.interface, export.interface_name()) {
+            (Some(_), Some(_)) if export.is_named() => Some(export.name.clone()),
+            (Some(_), None) => Some(export.name.clone()),
+            _ => None,
+        };
+
         Ok(Function::new(
-            interface,
+            export.interface.clone(),
             func.name.clone(),
+            export_name,
             func.docs.contents.as_deref().unwrap_or("").to_string(),
             params,
             result,
@@ -198,8 +212,8 @@ impl Parser {
     }
 
     // Build a function map keyed by Function::key().
-    // Returns an error if more than one interface with the same unqualified
-    // name exports the same function name.
+    // Returns an error if more than one export with the same key exports the
+    // same function name.
     fn build_function_map(functions: Vec<Function>) -> Result<HashMap<String, Function>> {
         let mut result: HashMap<String, Function> = HashMap::new();
 
@@ -208,9 +222,9 @@ impl Parser {
 
             if let Some(existing) = result.get(&key) {
                 return Err(anyhow::anyhow!(
-                    "Ambiguous function: interfaces '{}' and '{}' both export '{}'.",
-                    existing.interface().unwrap().as_str(),
-                    func.interface().unwrap().as_str(),
+                    "Ambiguous function: exports '{}' and '{}' both export '{}'.",
+                    existing.export_name(),
+                    func.export_name(),
                     key
                 ));
             }

@@ -1,0 +1,13 @@
+[component.greeter]
+uri = "./lib/greeter.wasm"
+imports = ["spanish", "french"]
+
+[component.spanish]
+uri = "./lib/translator.wasm"
+config.hello = "hola"
+config.world = "mundo"
+
+[component.french]
+uri = "./lib/translator.wasm"
+config.hello = "bonjour"
+config.world = "le monde"

@@ -1834,10 +1834,16 @@ mod tests {
         use crate::types::{ComponentMetadata, Function};
         let mut function_map = std::collections::HashMap::new();
         for (name, params) in functions {
-            function_map.insert(
+            let function = Function::new(
+                None,
                 name.to_string(),
-                Function::new(None, name.to_string(), String::new(), params, None, true),
+                None,
+                String::new(),
+                params,
+                None,
+                true,
             );
+            function_map.insert(name.to_string(), function);
         }
         Component {
             metadata: ComponentMetadata {
@@ -1904,17 +1910,16 @@ mod tests {
             }
         });
         let mut functions = std::collections::HashMap::new();
-        functions.insert(
+        let function = Function::new(
+            None,
             "fetch".to_string(),
-            Function::new(
-                None,
-                "fetch".to_string(),
-                String::new(),
-                vec![],
-                Some(result_schema),
-                true,
-            ),
+            None,
+            String::new(),
+            vec![],
+            Some(result_schema),
+            true,
         );
+        functions.insert("fetch".to_string(), function);
         Component {
             metadata: ComponentMetadata {
                 name: "envelope".to_string(),

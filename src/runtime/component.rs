@@ -48,18 +48,16 @@ impl ComponentInstance {
     fn resolve_function(&mut self, function: &Function) -> Result<ComponentExportIndex> {
         let name = function.function_name();
         let export = match function.interface() {
-            Some(interface) => {
-                let interface_name = interface.as_str();
+            Some(_) => {
+                let export_name = function.export_name();
                 let interface_export = self
                     .instance
-                    .get_export(&mut self.store, None, interface_name)
-                    .ok_or_else(|| anyhow::anyhow!("Interface '{interface_name}' not found"))?;
+                    .get_export(&mut self.store, None, export_name)
+                    .ok_or_else(|| anyhow::anyhow!("Export '{export_name}' not found"))?;
                 self.instance
                     .get_export(&mut self.store, Some(&interface_export.1), name)
                     .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Function '{name}' not found in interface '{interface_name}'"
-                        )
+                        anyhow::anyhow!("Function '{name}' not found in export '{export_name}'")
                     })?
             }
             None => self

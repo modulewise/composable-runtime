@@ -6,13 +6,14 @@ use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 use wasmtime::component::{HasData, Linker};
 
-use super::composer::Composer;
+use super::composer::{Composable, Composer};
 use super::graph::{ComponentGraph, Edge, Node};
 use super::resolver::Resolvers;
 use super::wit::{Parser, extract_wit};
 use crate::config::processor::wit_reference;
 use crate::types::{
-    CapabilityDefinition, ComponentDefinition, ComponentMetadata, ComponentState, Function,
+    CapabilityDefinition, ComponentDefinition, ComponentMetadata, ComponentState, Export, Function,
+    Import,
 };
 
 /// Trait implemented by host capability instances.
@@ -165,11 +166,23 @@ pub struct ComponentSpec {
     pub package: Option<String>,
     pub labels: HashMap<String, String>,
     pub bytes: Arc<[u8]>,
-    pub imports: Vec<String>,
-    pub exports: Vec<String>,
+    pub imports: Vec<Import>,
+    pub exports: Vec<Export>,
     pub capabilities: Vec<String>,
     pub dependents: Vec<String>,
     pub functions: HashMap<String, Function>,
+}
+
+impl ComponentSpec {
+    /// The Composable view of this component, for use in composition.
+    pub(crate) fn composable(&self) -> Composable {
+        Composable {
+            name: Some(self.name.clone()),
+            bytes: Arc::clone(&self.bytes),
+            imports: self.imports.clone(),
+            exports: self.exports.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -592,23 +605,25 @@ fn parse_semver(version: &str) -> Option<(u32, u32, u32)> {
 // Turn a definition and its resolved bytes into a spec: parse, compose with
 // config and dependencies, then check that every import is satisfied.
 async fn process_component(
-    mut bytes: Vec<u8>,
+    bytes: Vec<u8>,
     definition: &ComponentDefinition,
     dependencies: &[(&Node, &Edge)],
     component_registry: &BootstrapRegistry,
     capability_registry: &CapabilityRegistry,
 ) -> Result<ComponentSpec> {
-    let (metadata, mut imports, mut exports, mut functions) =
+    let (metadata, imports, exports, mut functions) =
         Parser::parse(&bytes).map_err(|e| anyhow::anyhow!("Failed to parse component: {e}"))?;
+    let mut component = Composable {
+        name: Some(definition.name.clone()),
+        bytes: Arc::from(bytes),
+        imports,
+        exports,
+    };
 
-    let imports_config = imports
-        .iter()
-        .any(|import| import.starts_with("wasi:config/store"));
-
-    if imports_config {
+    if component.imports.iter().any(is_config_store) {
         let config = resolve_wit_references(&definition.config, component_registry)
             .map_err(|e| anyhow::anyhow!("Component '{}': {e}", definition.name))?;
-        bytes = Composer::compose_with_config(&bytes, &config).map_err(|e| {
+        component = Composer::compose_with_config(&component, &config).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to compose component '{}' with config: {}",
                 definition.name,
@@ -621,8 +636,6 @@ async fn process_component(
             "Composed component '{}' with config: {config_keys:?}",
             definition.name
         );
-
-        imports.retain(|import| !import.starts_with("wasi:config/store"));
     } else if !definition.config.is_empty() {
         tracing::warn!(
             "Config provided for component '{}' but component doesn't import wasi:config/store",
@@ -638,7 +651,7 @@ async fn process_component(
         package: metadata.name.clone(),
         labels: definition.labels.clone(),
         dependents: None,
-        exports: exports.clone(),
+        exports: component.exports.clone(),
     };
 
     for (dependency_node, edge) in dependencies {
@@ -649,8 +662,9 @@ async fn process_component(
                     definition,
                     &component_metadata,
                 )?;
+                let dependency = component_spec.composable();
 
-                if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&exports) {
+                if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&component.exports) {
                     // Current component is advice; the dependency is the target.
                     // Generate a wrapper from the target, plug in advice + target.
                     let wrapper_bytes = composable_interceptor::create_from_component(
@@ -664,14 +678,28 @@ async fn process_component(
                             dependency_def.name,
                         )
                     })?;
-                    let composed_wrapper = Composer::compose_components(&wrapper_bytes, &bytes)
+                    let (_, wrapper_imports, wrapper_exports, _) = Parser::parse(&wrapper_bytes)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed to parse interceptor wrapper for '{}' targeting '{}': {e}",
+                                definition.name,
+                                dependency_def.name,
+                            )
+                        })?;
+                    let wrapper = Composable {
+                        name: None,
+                        bytes: Arc::from(wrapper_bytes),
+                        imports: wrapper_imports,
+                        exports: wrapper_exports,
+                    };
+                    let composed_wrapper = Composer::compose_components(&wrapper, &component)
                         .map_err(|e| {
                             anyhow::anyhow!(
                                 "Failed composing interceptor wrapper with advice '{}': {e}",
                                 definition.name,
                             )
                         })?;
-                    bytes = Composer::compose_components(&composed_wrapper, &component_spec.bytes)
+                    let composed = Composer::compose_components(&composed_wrapper, &dependency)
                         .map_err(|e| {
                             anyhow::anyhow!(
                                 "Failed composing '{}' with target '{}': {e}",
@@ -682,8 +710,12 @@ async fn process_component(
 
                     // The composed result should be functionally equivalent to
                     // the target: same exports/functions and remaining imports
-                    imports = component_spec.imports.clone();
-                    exports = component_spec.exports.clone();
+                    component = Composable {
+                        name: component.name,
+                        bytes: composed.bytes,
+                        imports: dependency.imports,
+                        exports: dependency.exports,
+                    };
                     functions = component_spec.functions.clone();
 
                     tracing::info!(
@@ -692,15 +724,14 @@ async fn process_component(
                         dependency_def.name
                     );
                 } else {
-                    bytes = Composer::compose_components(&bytes, &component_spec.bytes).map_err(
-                        |e| {
+                    component =
+                        Composer::compose_components(&component, &dependency).map_err(|e| {
                             anyhow::anyhow!(
                                 "Failed composing '{}' with dependency '{}': {e}",
                                 definition.name,
                                 dependency_def.name
                             )
-                        },
-                    )?;
+                        })?;
                     tracing::info!(
                         "Composed component '{}' with dependency '{}'",
                         definition.name,
@@ -708,9 +739,6 @@ async fn process_component(
                     );
                 }
 
-                for export in &component_spec.exports {
-                    imports.retain(|import| import != export);
-                }
                 all_capabilities.extend(component_spec.capabilities.iter().cloned());
             }
             Node::Capability(capability_def) => {
@@ -726,11 +754,23 @@ async fn process_component(
         .flat_map(|cap| cap.interfaces.iter().cloned())
         .collect();
 
-    // Check for imports not satisfied by capabilities
-    let unsatisfied: Vec<_> = imports
+    // Check for imports not satisfied by capabilities. A capability cannot yet
+    // satisfy a named import.
+    let Composable {
+        bytes,
+        imports,
+        exports,
+        ..
+    } = component;
+    let unsatisfied: Vec<String> = imports
         .iter()
-        .filter(|import| !is_import_satisfied(import, &capability_interfaces))
-        .cloned()
+        .filter(|import| {
+            import.is_named()
+                || import.interface_name().is_none_or(|interface| {
+                    !is_import_satisfied(interface.as_str(), &capability_interfaces)
+                })
+        })
+        .map(|import| import.to_string())
         .collect();
 
     if !unsatisfied.is_empty() {
@@ -746,7 +786,7 @@ async fn process_component(
         namespace: metadata.namespace,
         package: metadata.name,
         labels: definition.labels.clone(),
-        bytes: Arc::from(bytes),
+        bytes,
         imports,
         exports,
         capabilities: all_capabilities.into_iter().collect(),
@@ -797,10 +837,20 @@ fn resolve_wit_references_in_value(
     Ok(())
 }
 
-fn is_advice_component(exports: &[String]) -> bool {
-    exports
-        .iter()
-        .any(|e| e.starts_with("modulewise:interceptor/advice"))
+fn is_advice_component(exports: &[Export]) -> bool {
+    exports.iter().any(|export| {
+        export.interface_name().is_some_and(|interface| {
+            interface
+                .as_str()
+                .starts_with("modulewise:interceptor/advice")
+        })
+    })
+}
+
+fn is_config_store(import: &Import) -> bool {
+    import
+        .interface_name()
+        .is_some_and(|interface| interface.as_str().starts_with("wasi:config/store"))
 }
 
 #[cfg(test)]

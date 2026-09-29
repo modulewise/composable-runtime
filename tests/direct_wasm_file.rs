@@ -27,7 +27,8 @@ async fn test_direct_wasm_file() {
         client_wasm.file_stem().unwrap().to_string_lossy()
     );
     assert_eq!(component.imports.len(), 0);
-    assert_eq!(component.exports, vec!["modulewise:test/client@0.1.0"]);
+    let exports: Vec<_> = component.exports.iter().map(|e| e.to_string()).collect();
+    assert_eq!(exports, ["modulewise:test/client@0.1.0"]);
     assert_eq!(component.capabilities.len(), 0);
     let functions = component.functions.clone();
     assert_eq!(functions.len(), 1);
@@ -38,7 +39,7 @@ async fn test_direct_wasm_file() {
     );
     assert_eq!(function.result(), None);
     assert_eq!(
-        function.interface().map(|i| i.as_str()),
+        function.interface_name().map(|i| i.as_str()),
         Some("modulewise:test/client@0.1.0")
     );
 }
