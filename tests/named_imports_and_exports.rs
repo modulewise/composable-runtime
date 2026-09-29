@@ -217,6 +217,31 @@ async fn named_imports_are_satisfied_by_the_dependencies_with_their_names() {
 #[tokio::test]
 async fn named_import_without_a_dependency_of_its_name_is_unsatisfied() {
     let first = value_wasm(1);
+    let consumer = named_imports_wasm();
+    let err = runtime(&format!(
+        r#"
+        [component.first]
+        uri = "{}"
+
+        [component.consumer]
+        uri = "{}"
+        imports = ["first"]
+        "#,
+        first.display(),
+        consumer.display()
+    ))
+    .await
+    .err()
+    .expect("a named import with no dependency of its name must be unsatisfied");
+
+    let message = format!("{err:#}");
+    assert!(message.contains("unsatisfied imports"), "{message}");
+    assert!(message.contains(&format!("second: {VALUE}")), "{message}");
+}
+
+#[tokio::test]
+async fn dependency_of_another_name_does_not_satisfy_a_named_import() {
+    let first = value_wasm(1);
     let other = value_wasm(2);
     let consumer = named_imports_wasm();
     let err = runtime(&format!(
@@ -239,7 +264,9 @@ async fn named_import_without_a_dependency_of_its_name_is_unsatisfied() {
     .err()
     .expect("a named import must not be satisfied by a dependency of another name");
 
-    assert!(format!("{err:#}").contains("other"), "{err:#}");
+    let message = format!("{err:#}");
+    assert!(message.contains("dependency 'other'"), "{message}");
+    assert!(message.contains("no import is satisfied"), "{message}");
 }
 
 #[tokio::test]
@@ -359,7 +386,7 @@ async fn named_imports_are_satisfied_by_named_exports_of_the_same_names() {
 }
 
 #[tokio::test]
-async fn named_export_takes_precedence_over_the_dependency_name() {
+async fn named_export_takes_precedence_over_the_component_name_fallback() {
     let first = unnamed_and_named_export_wasm();
     let second = value_wasm(2);
     let consumer = named_imports_wasm();
