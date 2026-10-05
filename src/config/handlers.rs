@@ -1,21 +1,11 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
-use super::types::{CategoryClaim, ConfigHandler, PropertyMap};
+use super::types::{CategoryClaim, ConfigHandler, Definition, GenericDefinition, PropertyMap};
 use crate::types::{CapabilityDefinition, ComponentDefinition, default_scope};
 
 /// Handles `[component.*]` definitions.
-pub struct ComponentConfigHandler {
-    definitions: Vec<ComponentDefinition>,
-}
-
-impl ComponentConfigHandler {
-    pub fn new() -> Self {
-        Self {
-            definitions: Vec::new(),
-        }
-    }
-}
+pub struct ComponentConfigHandler;
 
 impl ConfigHandler for ComponentConfigHandler {
     fn claimed_categories(&self) -> Vec<CategoryClaim> {
@@ -37,18 +27,18 @@ impl ConfigHandler for ComponentConfigHandler {
         )])
     }
 
-    fn handle_category(
-        &mut self,
-        category: &str,
-        name: &str,
-        mut properties: PropertyMap,
-    ) -> Result<()> {
+    fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+        let GenericDefinition {
+            category,
+            name,
+            mut properties,
+        } = definition;
         if category != "component" {
             return Err(anyhow::anyhow!(
                 "ComponentConfigHandler received unexpected category '{category}'"
             ));
         }
-        let ctx = |e: PropertyError| e.with_context("component", name);
+        let ctx = |e: PropertyError| e.with_context("component", &name);
         let uri = take_required_string(&mut properties, "uri").map_err(ctx)?;
         let scope = take_optional_string(&mut properties, "scope")
             .map_err(ctx)?
@@ -65,35 +55,20 @@ impl ConfigHandler for ComponentConfigHandler {
             ));
         }
 
-        self.definitions.push(ComponentDefinition {
-            name: name.to_string(),
+        Ok(vec![Definition::Component(ComponentDefinition {
+            name,
             uri,
             scope,
             imports,
             interceptors,
             config,
             labels,
-        });
-        Ok(())
-    }
-
-    fn generated_component_definitions(&mut self) -> Vec<ComponentDefinition> {
-        std::mem::take(&mut self.definitions)
+        })])
     }
 }
 
 /// Handles `[capability.*]` definitions.
-pub struct CapabilityConfigHandler {
-    definitions: Vec<CapabilityDefinition>,
-}
-
-impl CapabilityConfigHandler {
-    pub fn new() -> Self {
-        Self {
-            definitions: Vec::new(),
-        }
-    }
-}
+pub struct CapabilityConfigHandler;
 
 impl ConfigHandler for CapabilityConfigHandler {
     fn claimed_categories(&self) -> Vec<CategoryClaim> {
@@ -111,18 +86,18 @@ impl ConfigHandler for CapabilityConfigHandler {
         category == "capability"
     }
 
-    fn handle_category(
-        &mut self,
-        category: &str,
-        name: &str,
-        mut properties: PropertyMap,
-    ) -> Result<()> {
+    fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+        let GenericDefinition {
+            category,
+            name,
+            mut properties,
+        } = definition;
         if category != "capability" {
             return Err(anyhow::anyhow!(
                 "CapabilityConfigHandler received unexpected category '{category}'"
             ));
         }
-        let ctx = |e: PropertyError| e.with_context("capability", name);
+        let ctx = |e: PropertyError| e.with_context("capability", &name);
         let kind = take_required_string(&mut properties, "type").map_err(ctx)?;
         let scope = take_optional_string(&mut properties, "scope")
             .map_err(ctx)?
@@ -131,17 +106,12 @@ impl ConfigHandler for CapabilityConfigHandler {
         // Remaining properties are the capability's direct configuration
         let remaining: HashMap<String, serde_json::Value> = properties.into_iter().collect();
 
-        self.definitions.push(CapabilityDefinition {
-            name: name.to_string(),
+        Ok(vec![Definition::Capability(CapabilityDefinition {
+            name,
             kind,
             scope,
             properties: remaining,
-        });
-        Ok(())
-    }
-
-    fn generated_capability_definitions(&mut self) -> Vec<CapabilityDefinition> {
-        std::mem::take(&mut self.definitions)
+        })])
     }
 }
 

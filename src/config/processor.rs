@@ -1,10 +1,13 @@
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use super::handlers::{CapabilityConfigHandler, ComponentConfigHandler};
-use super::types::{ConfigHandler, DefinitionLoader, GenericDefinition, PropertyMap};
+use super::types::{ConfigHandler, Definition, DefinitionLoader, GenericDefinition, PropertyMap};
 use crate::types::{CapabilityDefinition, ComponentDefinition};
+
+/// Maximum number of handler-produced definitions that can be chained.
+const MAX_DEPTH: usize = 8;
 
 pub struct ConfigProcessor {
     loaders: Vec<Box<dyn DefinitionLoader>>,
@@ -62,22 +65,18 @@ impl ConfigProcessor {
         for loader in &self.loaders {
             definitions.extend(loader.load()?);
         }
+        for definition in &definitions {
+            validate_loaded_name(definition)?;
+        }
 
         // Build unified handler collection: core handlers + registered handlers
         let mut all_handlers: Vec<Box<dyn ConfigHandler>> = Vec::new();
-        all_handlers.push(Box::new(ComponentConfigHandler::new()));
-        all_handlers.push(Box::new(CapabilityConfigHandler::new()));
+        all_handlers.push(Box::new(ComponentConfigHandler));
+        all_handlers.push(Box::new(CapabilityConfigHandler));
         all_handlers.extend(self.handlers);
 
-        dispatch(&mut definitions, &mut all_handlers)?;
-
-        // Collect generated definitions from all handlers
-        let mut component_definitions = Vec::new();
-        let mut capability_definitions = Vec::new();
-        for handler in &mut all_handlers {
-            component_definitions.extend(handler.generated_component_definitions());
-            capability_definitions.extend(handler.generated_capability_definitions());
-        }
+        let (mut component_definitions, mut capability_definitions) =
+            dispatch(definitions, &mut all_handlers)?;
 
         // Resolve placeholders
         resolve_placeholders_in_components(&mut component_definitions)?;
@@ -101,10 +100,20 @@ struct RegisteredClaim {
     claim: CategoryClaim,
 }
 
+// A generic definition to dispatch, with the chain of definitions that
+// produced it, most recent first.
+struct Queued {
+    definition: GenericDefinition,
+    origin: Vec<String>,
+}
+
+// Dispatch every definition to the handler that claims its category,
+// including definitions produced by handlers themselves, until only
+// components and capabilities remain.
 fn dispatch(
-    definitions: &mut Vec<GenericDefinition>,
+    definitions: Vec<GenericDefinition>,
     handlers: &mut [Box<dyn ConfigHandler + '_>],
-) -> Result<()> {
+) -> Result<(Vec<ComponentDefinition>, Vec<CapabilityDefinition>)> {
     // Build category => list of claims (handler index + optional selector).
     // Validate: if any claim on a category has no selector, it must be the only claim.
     let mut category_claims: HashMap<String, Vec<RegisteredClaim>> = HashMap::new();
@@ -130,63 +139,149 @@ fn dispatch(
         }
     }
 
-    // Build claimed properties map: (category, property) => handler index
-    let mut property_claims: HashMap<(String, String), usize> = HashMap::new();
+    // The properties each handler claims on a category it owns, keyed by
+    // handler index and category name. Handlers sharing a category through
+    // selectors never handle the same definition, so these may overlap.
+    let mut owned_properties: HashMap<(usize, String), HashSet<String>> = HashMap::new();
+
+    // The handler that claims each property on a category it does not own,
+    // keyed by category name and property name. The property is routed to that
+    // handler, so each has exactly one handler id.
+    let mut contribution_handlers: HashMap<(String, String), usize> = HashMap::new();
     for (idx, handler) in handlers.iter().enumerate() {
+        let claimed: HashSet<&str> = handler
+            .claimed_categories()
+            .into_iter()
+            .map(|claim| claim.category)
+            .collect();
         for (category, properties) in handler.claimed_properties() {
+            if claimed.contains(category) {
+                owned_properties
+                    .entry((idx, category.to_string()))
+                    .or_default()
+                    .extend(properties.iter().map(|prop| prop.to_string()));
+                continue;
+            }
             for prop in properties {
                 let key = (category.to_string(), prop.to_string());
-                if let Some(&existing_idx) = property_claims.get(&key)
+                if let Some(&existing_idx) = contribution_handlers.get(&key)
                     && existing_idx != idx
                 {
                     return Err(anyhow::anyhow!(
                         "Property '{prop}' on category '{category}' claimed by multiple handlers"
                     ));
                 }
-                property_claims.insert(key, idx);
+                contribution_handlers.insert(key, idx);
             }
         }
     }
+    // A contributed property must not also be owned.
+    for (category, prop) in contribution_handlers.keys() {
+        let is_owned = owned_properties
+            .iter()
+            .any(|((_, owned), properties)| owned == category && properties.contains(prop));
+        if is_owned {
+            return Err(anyhow::anyhow!(
+                "Property '{prop}' on category '{category}' is claimed by both the category's owner and another handler"
+            ));
+        }
+    }
 
-    for def in definitions.drain(..) {
-        let claims = category_claims.get(&def.category).ok_or_else(|| {
+    let mut components = Vec::new();
+    let mut capabilities = Vec::new();
+    let mut queue: VecDeque<Queued> = definitions
+        .into_iter()
+        .map(|definition| Queued {
+            definition,
+            origin: Vec::new(),
+        })
+        .collect();
+
+    while let Some(Queued { definition, origin }) = queue.pop_front() {
+        let generated = generated_by(&origin);
+        let claims = category_claims.get(&definition.category).ok_or_else(|| {
             anyhow::anyhow!(
-                "Unknown category '{}'. Known categories: {:?}",
-                def.category,
+                "Unknown category '{}'{generated}. Known categories: {:?}",
+                definition.category,
                 category_claims.keys().collect::<Vec<_>>()
             )
         })?;
 
-        let owner_idx = resolve_owner(claims, &def)?;
+        let owner_idx =
+            resolve_owner(claims, &definition).map_err(|e| anyhow::anyhow!("{e}{generated}"))?;
 
+        let GenericDefinition {
+            category,
+            name,
+            properties,
+        } = definition;
+        let label = format!("[{category}.{name}]");
         let (core_properties, claimed_by_handler) =
-            split_properties(def.properties, &def.category, owner_idx, &property_claims);
+            split_properties(properties, &category, &contribution_handlers);
 
-        // Reject any top-level property not claimed by any registered handler,
-        // unless the owner handler accepts unclaimed properties as pass-through
+        // Reject any remaining provided property this definition's owner does
+        // not claim, unless it accepts unclaimed properties as pass-through
         // configuration (e.g. capability handlers forwarding type-specific keys).
-        if !handlers[owner_idx].accepts_unclaimed_properties(&def.category) {
+        if !handlers[owner_idx].accepts_unclaimed_properties(&category) {
+            let owned = owned_properties.get(&(owner_idx, category.clone()));
             for key in core_properties.keys() {
-                let lookup = (def.category.clone(), key.clone());
-                if !property_claims.contains_key(&lookup) {
+                if !owned.is_some_and(|properties| properties.contains(key)) {
                     return Err(anyhow::anyhow!(
-                        "Category '{}' definition '{}' has unknown property '{}'",
-                        def.category,
-                        def.name,
-                        key
+                        "Category '{category}' definition '{name}' has unknown property '{key}'{generated}"
                     ));
                 }
             }
         }
 
-        handlers[owner_idx].handle_category(&def.category, &def.name, core_properties)?;
+        let produced_definitions = handlers[owner_idx]
+            .handle_definition(GenericDefinition {
+                category: category.clone(),
+                name: name.clone(),
+                properties: core_properties,
+            })
+            .map_err(|e| anyhow::anyhow!("{e}{generated}"))?;
 
         for (handler_idx, properties) in claimed_by_handler {
-            handlers[handler_idx].handle_properties(&def.category, &def.name, properties)?;
+            handlers[handler_idx].handle_properties(&category, &name, properties)?;
+        }
+
+        for produced_definition in produced_definitions {
+            match produced_definition {
+                Definition::Component(def) => components.push(def),
+                Definition::Capability(def) => capabilities.push(def),
+                Definition::Generic(definition) => {
+                    let mut chain = vec![label.clone()];
+                    chain.extend(origin.iter().cloned());
+                    if chain.len() > MAX_DEPTH {
+                        return Err(anyhow::anyhow!(
+                            "[{}.{}] is more than {MAX_DEPTH} definitions deep{}, which is the max depth",
+                            definition.category,
+                            definition.name,
+                            generated_by(&chain)
+                        ));
+                    }
+                    queue.push_back(Queued {
+                        definition,
+                        origin: chain,
+                    });
+                }
+            }
         }
     }
 
-    Ok(())
+    Ok((components, capabilities))
+}
+
+// Formatted origin string for a definition produced by handlers. The closest
+// is first. Empty string for a definition provided directly by a loader.
+fn generated_by(origin: &[String]) -> String {
+    match origin.split_first() {
+        None => String::new(),
+        Some((closest, [])) => format!(" (generated by {closest})"),
+        Some((closest, rest)) => {
+            format!(" (generated by {closest}, from {})", rest.join(", from "))
+        }
+    }
 }
 
 // Find the single handler that owns a definition.
@@ -264,19 +359,18 @@ fn flatten_recursive(
     }
 }
 
+// Split off the contributed properties, by the handler that claims each.
 fn split_properties(
     mut properties: PropertyMap,
     category: &str,
-    owner_idx: usize,
-    property_claims: &HashMap<(String, String), usize>,
+    contribution_handlers: &HashMap<(String, String), usize>,
 ) -> (PropertyMap, HashMap<usize, PropertyMap>) {
     let mut claimed: HashMap<usize, PropertyMap> = HashMap::new();
 
     let keys: Vec<String> = properties.keys().cloned().collect();
     for key in keys {
         let lookup = (category.to_string(), key.clone());
-        if let Some(&handler_idx) = property_claims.get(&lookup)
-            && handler_idx != owner_idx
+        if let Some(&handler_idx) = contribution_handlers.get(&lookup)
             && let Some(value) = properties.remove(&key)
         {
             claimed.entry(handler_idx).or_default().insert(key, value);
@@ -449,10 +543,24 @@ fn validate_names(
     Ok(())
 }
 
-fn validate_name_chars(name: &str) -> Result<()> {
-    if name.starts_with('_') || name.contains('$') {
+// A name with a leading `_` is internal (hidden from listing and direct
+// invocation) and can only be defined by a config handler. Other config may
+// still refer to such a definition by name, e.g. to import it.
+fn validate_loaded_name(definition: &GenericDefinition) -> Result<()> {
+    if definition.name.starts_with('_') {
         return Err(anyhow::anyhow!(
-            "Definition name '{name}' is invalid: names cannot start with '_' or contain '$' (reserved for internal use)"
+            "Definition name '{}' in category '{}' is invalid: names starting with '_' are reserved for definitions that config handlers generate",
+            definition.name,
+            definition.category
+        ));
+    }
+    Ok(())
+}
+
+fn validate_name_chars(name: &str) -> Result<()> {
+    if name.contains('$') {
+        return Err(anyhow::anyhow!(
+            "Definition name '{name}' is invalid: names cannot contain '$' (reserved for internal use)"
         ));
     }
     Ok(())
@@ -512,4 +620,321 @@ fn validate_imports(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::types::{CategoryClaim, Condition, Operator, Selector};
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+
+    /// Provides fixed definitions, as a file loader would.
+    struct Fixed(Vec<GenericDefinition>);
+
+    impl DefinitionLoader for Fixed {
+        fn load(&self) -> Result<Vec<GenericDefinition>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn generic(category: &str, name: &str, properties: serde_json::Value) -> GenericDefinition {
+        let serde_json::Value::Object(properties) = properties else {
+            panic!("properties must be an object");
+        };
+        GenericDefinition {
+            category: category.to_string(),
+            name: name.to_string(),
+            properties: properties.into_iter().collect(),
+        }
+    }
+
+    /// Expands each `[widget.NAME]` into `[component.NAME]`, importing
+    /// `_shared`, which it emits once. When `stray` is `true`, it also emits a
+    /// definition in a category no handler claims.
+    #[derive(Default)]
+    struct Widget {
+        shared_emitted: bool,
+        stray: bool,
+    }
+
+    impl ConfigHandler for Widget {
+        fn claimed_categories(&self) -> Vec<CategoryClaim> {
+            vec![CategoryClaim::all("widget")]
+        }
+
+        fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+            let mut produced = vec![Definition::Generic(generic(
+                "component",
+                &definition.name,
+                json!({ "uri": "widget.wasm", "imports": ["_shared"] }),
+            ))];
+            if !self.shared_emitted {
+                self.shared_emitted = true;
+                produced.push(Definition::Generic(generic(
+                    "component",
+                    "_shared",
+                    json!({ "uri": "shared.wasm" }),
+                )));
+            }
+            if self.stray {
+                produced.push(Definition::Generic(generic(
+                    "unclaimed",
+                    "stray",
+                    json!({}),
+                )));
+            }
+            Ok(produced)
+        }
+    }
+
+    /// Handles each `[loop.NAME]` by returning the same definition each time.
+    struct Loop;
+
+    impl ConfigHandler for Loop {
+        fn claimed_categories(&self) -> Vec<CategoryClaim> {
+            vec![CategoryClaim::all("loop")]
+        }
+
+        fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+            Ok(vec![Definition::Generic(definition)])
+        }
+    }
+
+    fn process(
+        definitions: Vec<GenericDefinition>,
+        handler: Box<dyn ConfigHandler>,
+    ) -> Result<(Vec<ComponentDefinition>, Vec<CapabilityDefinition>)> {
+        let mut processor = ConfigProcessor::new();
+        processor.add_loader(Box::new(Fixed(definitions)));
+        processor.add_handler(handler);
+        processor.process(&[])
+    }
+
+    #[test]
+    fn generic_definitions_are_dispatched_until_only_components_remain() {
+        let (components, _) = process(
+            vec![
+                generic("widget", "first", json!({})),
+                generic("widget", "second", json!({})),
+                // Config may import an internal definition by name.
+                generic(
+                    "component",
+                    "gadget",
+                    json!({ "uri": "gadget.wasm", "imports": ["_shared"] }),
+                ),
+            ],
+            Box::new(Widget::default()),
+        )
+        .unwrap();
+        let mut names: Vec<&str> = components.iter().map(|c| c.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["_shared", "first", "gadget", "second"]);
+    }
+
+    #[test]
+    fn an_unclaimed_generated_definition_names_its_origin() {
+        let error = process(
+            vec![generic("widget", "first", json!({}))],
+            Box::new(Widget {
+                stray: true,
+                ..Default::default()
+            }),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("Unknown category 'unclaimed'"), "{error}");
+        assert!(error.contains("(generated by [widget.first])"), "{error}");
+    }
+
+    #[test]
+    fn a_chain_deeper_than_the_limit_fails() {
+        let error = process(vec![generic("loop", "again", json!({}))], Box::new(Loop))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("which is the max depth"), "{error}");
+    }
+
+    #[test]
+    fn config_may_not_define_an_internal_name() {
+        let error = process(
+            vec![generic(
+                "component",
+                "_reserved",
+                json!({ "uri": "reserved.wasm" }),
+            )],
+            Box::new(Loop),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("reserved for definitions that config handlers generate"),
+            "{error}"
+        );
+    }
+
+    /// What a test handler received: each definition's name and properties.
+    type Received = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+
+    fn record(received: &Received, name: &str, properties: &PropertyMap) {
+        let mut keys: Vec<String> = properties.keys().cloned().collect();
+        keys.sort();
+        received.lock().unwrap().push((name.to_string(), keys));
+    }
+
+    /// Claims `[server.*]` definitions whose `type` is `kind`, owning the
+    /// `type` and `port` properties.
+    struct Server {
+        kind: &'static str,
+        received: Received,
+    }
+
+    impl Server {
+        fn new(kind: &'static str) -> (Self, Received) {
+            let received = Received::default();
+            let server = Server {
+                kind,
+                received: Arc::clone(&received),
+            };
+            (server, received)
+        }
+    }
+
+    impl ConfigHandler for Server {
+        fn claimed_categories(&self) -> Vec<CategoryClaim> {
+            vec![CategoryClaim::with_selector(
+                "server",
+                Selector {
+                    conditions: vec![Condition {
+                        key: "type".to_string(),
+                        operator: Operator::Equals(self.kind.to_string()),
+                    }],
+                },
+            )]
+        }
+
+        fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
+            HashMap::from([("server", ["type", "port"].as_slice())])
+        }
+
+        fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+            record(&self.received, &definition.name, &definition.properties);
+            Ok(Vec::new())
+        }
+    }
+
+    /// Expands each `[indirect.NAME]` into a `[server.NAME]` of type `b`.
+    struct Indirect;
+
+    impl ConfigHandler for Indirect {
+        fn claimed_categories(&self) -> Vec<CategoryClaim> {
+            vec![CategoryClaim::all("indirect")]
+        }
+
+        fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+            Ok(vec![Definition::Generic(generic(
+                "server",
+                &definition.name,
+                json!({ "type": "b", "port": 2 }),
+            ))])
+        }
+    }
+
+    /// Contributes the `property` property to `[server.*]` definitions,
+    /// without owning the category.
+    struct Contributor {
+        property: &'static [&'static str],
+        received: Received,
+    }
+
+    impl ConfigHandler for Contributor {
+        fn claimed_categories(&self) -> Vec<CategoryClaim> {
+            Vec::new()
+        }
+
+        fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
+            HashMap::from([("server", self.property)])
+        }
+
+        fn handle_definition(&mut self, _: GenericDefinition) -> Result<Vec<Definition>> {
+            unreachable!("claims no category")
+        }
+
+        fn handle_properties(
+            &mut self,
+            _category: &str,
+            name: &str,
+            properties: PropertyMap,
+        ) -> Result<()> {
+            record(&self.received, name, &properties);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_category_claimed_by_selectors_goes_to_the_matching_handler() {
+        let ((a, a_received), (b, b_received)) = (Server::new("a"), Server::new("b"));
+        let mut processor = ConfigProcessor::new();
+        processor.add_loader(Box::new(Fixed(vec![
+            generic("server", "first", json!({ "type": "a", "port": 1 })),
+            generic("server", "second", json!({ "type": "b", "port": 2 })),
+            generic("indirect", "third", json!({})),
+        ])));
+        // Both own `type` and `port` on the category they share.
+        processor.add_handler(Box::new(a));
+        processor.add_handler(Box::new(b));
+        processor.add_handler(Box::new(Indirect));
+        processor.process(&[]).unwrap();
+
+        let names = |received: &Received| -> Vec<String> {
+            received
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect()
+        };
+        assert_eq!(names(&a_received), ["first"]);
+        // Including a definition another handler generated.
+        assert_eq!(names(&b_received), ["second", "third"]);
+    }
+
+    #[test]
+    fn a_contributed_property_goes_to_its_contributor_exclusively() {
+        let (server, server_received) = Server::new("a");
+        let contributed = Received::default();
+        let mut processor = ConfigProcessor::new();
+        processor.add_loader(Box::new(Fixed(vec![generic(
+            "server",
+            "first",
+            json!({ "type": "a", "port": 1, "note": "hello" }),
+        )])));
+        processor.add_handler(Box::new(server));
+        processor.add_handler(Box::new(Contributor {
+            property: &["note"],
+            received: Arc::clone(&contributed),
+        }));
+        processor.process(&[]).unwrap();
+
+        let keys = |received: &Received| received.lock().unwrap()[0].1.clone();
+        assert_eq!(keys(&server_received), ["port", "type"]);
+        assert_eq!(keys(&contributed), ["note"]);
+    }
+
+    #[test]
+    fn a_contributed_property_may_not_also_be_owned() {
+        let (server, _) = Server::new("a");
+        let mut processor = ConfigProcessor::new();
+        processor.add_loader(Box::new(Fixed(Vec::new())));
+        processor.add_handler(Box::new(server));
+        processor.add_handler(Box::new(Contributor {
+            property: &["port"],
+            received: Received::default(),
+        }));
+        let error = processor.process(&[]).unwrap_err().to_string();
+        assert!(
+            error.contains("claimed by both the category's owner and another handler"),
+            "{error}"
+        );
+    }
 }

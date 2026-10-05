@@ -5,8 +5,8 @@ use anyhow::Result;
 use serde_json::Value;
 
 use composable_runtime::{
-    CategoryClaim, Condition, ConfigHandler, MappingConfig, Operator, ParamEncoding, ParamMapping,
-    PropagatedHeader, PropertyMap, ResultDecoding, Selector,
+    CategoryClaim, Condition, ConfigHandler, Definition, GenericDefinition, MappingConfig,
+    Operator, ParamEncoding, ParamMapping, PropagatedHeader, PropertyMap, ResultDecoding, Selector,
 };
 
 /// Parsed route within an HTTP server.
@@ -156,12 +156,12 @@ impl ConfigHandler for HttpServerConfigHandler {
         )])
     }
 
-    fn handle_category(
-        &mut self,
-        category: &str,
-        name: &str,
-        mut properties: PropertyMap,
-    ) -> Result<()> {
+    fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+        let GenericDefinition {
+            category,
+            name,
+            mut properties,
+        } = definition;
         if category != "server" {
             return Err(anyhow::anyhow!(
                 "HttpServerConfigHandler received unexpected category '{category}'"
@@ -211,7 +211,7 @@ impl ConfigHandler for HttpServerConfigHandler {
             None => "grpc".to_string(),
         };
 
-        let routes = parse_routes(name, &mut properties)?;
+        let routes = parse_routes(&name, &mut properties)?;
 
         if !properties.is_empty() {
             let unknown: Vec<_> = properties.keys().collect();
@@ -221,13 +221,13 @@ impl ConfigHandler for HttpServerConfigHandler {
         }
 
         self.servers.lock().unwrap().push(ServerConfig {
-            name: name.to_string(),
+            name,
             port,
             routes,
             otlp_endpoint,
             otlp_protocol,
         });
-        Ok(())
+        Ok(Vec::new())
     }
 }
 
@@ -849,6 +849,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn api_server(properties: PropertyMap) -> GenericDefinition {
+        GenericDefinition {
+            category: "server".to_string(),
+            name: "api".to_string(),
+            properties,
+        }
+    }
+
     fn make_handler() -> (HttpServerConfigHandler, SharedConfig) {
         let config = shared_config();
         let handler = HttpServerConfigHandler::new(Arc::clone(&config));
@@ -878,9 +886,7 @@ mod tests {
             ),
         ]);
 
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
 
         let servers = config.lock().unwrap();
         assert_eq!(servers.len(), 1);
@@ -924,9 +930,7 @@ mod tests {
             ),
         ]);
 
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
 
         let servers = config.lock().unwrap();
         match &servers[0].routes[0].target {
@@ -959,7 +963,7 @@ mod tests {
         ]);
 
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string().contains("apply to component routes only"),
@@ -990,9 +994,7 @@ mod tests {
             ),
         ]);
 
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         assert!(servers[0].routes[0].response_schema.is_some());
         let entries = &servers[0].routes[0].propagate_request_headers;
@@ -1026,9 +1028,7 @@ mod tests {
             ),
         ]);
 
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         let entries = &servers[0].routes[0].propagate_response_headers;
         assert_eq!(entries.len(), 2);
@@ -1058,7 +1058,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err()
             .to_string();
         assert!(
@@ -1088,9 +1088,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         match &servers[0].routes[0].target {
             RouteTarget::Component { mapping, .. } => {
@@ -1119,7 +1117,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err()
             .to_string();
         assert!(
@@ -1149,9 +1147,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         match &servers[0].routes[0].target {
             RouteTarget::Component { mapping, .. } => {
@@ -1180,7 +1176,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err()
             .to_string();
         assert!(
@@ -1212,7 +1208,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err()
             .to_string();
         assert!(
@@ -1243,9 +1239,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
     }
 
     #[test]
@@ -1268,7 +1262,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err()
             .to_string();
         assert!(
@@ -1282,7 +1276,7 @@ mod tests {
         let (mut handler, _) = make_handler();
         let properties = props(vec![("type", json!("http"))]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(err.to_string().contains("missing required 'port'"));
     }
@@ -1299,7 +1293,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(err.to_string().contains("missing required 'path'"));
     }
@@ -1316,7 +1310,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string().contains("missing required 'method'"),
@@ -1344,7 +1338,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(err.to_string().contains("cannot have both"));
     }
@@ -1374,7 +1368,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(err.to_string().contains("conflict"));
     }
@@ -1398,7 +1392,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(err.to_string().contains("duplicate path capture name"));
     }
@@ -1423,7 +1417,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string()
@@ -1451,9 +1445,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
     }
 
     #[test]
@@ -1474,9 +1466,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         assert_eq!(servers[0].routes[0].content_type, Some(ContentType::Json));
     }
@@ -1499,9 +1489,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         assert_eq!(servers[0].routes[0].content_type, None);
     }
@@ -1525,9 +1513,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         assert_eq!(
             servers[0].routes[0].content_type,
@@ -1555,7 +1541,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string().contains("not a supported content-type"),
@@ -1583,7 +1569,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string()
@@ -1613,7 +1599,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string().contains("'param-mapping' is not allowed"),
@@ -1642,7 +1628,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string().contains("'param-encoding' is not allowed"),
@@ -1670,7 +1656,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string()
@@ -1700,7 +1686,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string()
@@ -1735,9 +1721,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         assert_eq!(servers[0].routes.len(), 2);
     }
@@ -1768,7 +1752,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(err.to_string().contains("conflict"), "unexpected: {err}");
     }
@@ -1802,9 +1786,7 @@ mod tests {
             ),
         ]);
 
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
         let servers = config.lock().unwrap();
         assert_eq!(servers[0].routes.len(), 2);
     }
@@ -1836,9 +1818,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
     }
 
     // Two Optional specs are NOT mutually exclusive (both match a request that
@@ -1870,7 +1850,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(
             err.to_string().contains("conflict"),
@@ -1907,7 +1887,7 @@ mod tests {
             ),
         ]);
         let err = handler
-            .handle_category("server", "api", properties)
+            .handle_definition(api_server(properties))
             .unwrap_err();
         assert!(err.to_string().contains("conflict"));
     }
@@ -1940,9 +1920,7 @@ mod tests {
                 }),
             ),
         ]);
-        handler
-            .handle_category("server", "api", properties)
-            .unwrap();
+        handler.handle_definition(api_server(properties)).unwrap();
     }
 
     fn parse_qp(s: &str) -> QueryParamSpec {

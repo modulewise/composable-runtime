@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
-use crate::config::types::{CategoryClaim, ConfigHandler, PropertyMap};
+use crate::config::types::{CategoryClaim, ConfigHandler, Definition, GenericDefinition};
 use crate::message::{Message, MessageBuilder, MessageHeaders, MessagePublisher};
 use crate::service::Service;
 use crate::types::ComponentHost;
@@ -42,12 +42,12 @@ impl ConfigHandler for MessagingConfigHandler {
         )])
     }
 
-    fn handle_category(
-        &mut self,
-        category: &str,
-        name: &str,
-        mut properties: PropertyMap,
-    ) -> Result<()> {
+    fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+        let GenericDefinition {
+            category,
+            name,
+            mut properties,
+        } = definition;
         if category != "subscription" {
             anyhow::bail!("MessagingConfigHandler does not own category '{category}'");
         }
@@ -133,7 +133,7 @@ impl ConfigHandler for MessagingConfigHandler {
                 result_mapping,
             },
         });
-        Ok(())
+        Ok(Vec::new())
     }
 }
 
@@ -221,6 +221,15 @@ impl MessagePublisher for BusPublisher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::types::PropertyMap;
+
+    fn subscription(name: &str, properties: PropertyMap) -> GenericDefinition {
+        GenericDefinition {
+            category: "subscription".to_string(),
+            name: name.to_string(),
+            properties,
+        }
+    }
 
     fn make_handler() -> (MessagingConfigHandler, Arc<Mutex<Vec<SubscriptionConfig>>>) {
         let subs = Arc::new(Mutex::new(Vec::new()));
@@ -245,7 +254,7 @@ mod tests {
             serde_json::json!({ "body": "{headers.content-type}" }),
         );
         handler
-            .handle_category("subscription", "events", props)
+            .handle_definition(subscription("events", props))
             .unwrap();
         let subs = subs.lock().unwrap();
         assert_eq!(subs.len(), 1);
@@ -259,7 +268,7 @@ mod tests {
         props.insert("component".to_string(), serde_json::json!("c"));
         props.insert("result-decoding".to_string(), serde_json::json!("bad"));
         let err = handler
-            .handle_category("subscription", "x", props)
+            .handle_definition(subscription("x", props))
             .unwrap_err()
             .to_string();
         assert!(err.contains("must be an object"), "unexpected error: {err}");
@@ -278,7 +287,7 @@ mod tests {
             serde_json::json!({ "body": "{headers.content-type}" }),
         );
         handler
-            .handle_category("subscription", "events", props)
+            .handle_definition(subscription("events", props))
             .unwrap();
         let subs = subs.lock().unwrap();
         assert_eq!(subs.len(), 1);
@@ -292,7 +301,7 @@ mod tests {
         props.insert("component".to_string(), serde_json::json!("c"));
         props.insert("param-encoding".to_string(), serde_json::json!("bad"));
         let err = handler
-            .handle_category("subscription", "x", props)
+            .handle_definition(subscription("x", props))
             .unwrap_err()
             .to_string();
         assert!(err.contains("must be an object"), "unexpected error: {err}");

@@ -6,7 +6,8 @@
 pub use composition::graph::{ComponentGraph, GraphBuilder};
 pub use composition::registry::{CapabilityStateHasData, HostCapability, HostCapabilityFactory};
 pub use config::types::{
-    CategoryClaim, Condition, ConfigHandler, DefinitionLoader, Operator, PropertyMap, Selector,
+    CategoryClaim, Condition, ConfigHandler, Definition, DefinitionLoader, GenericDefinition,
+    Operator, PropertyMap, Selector,
 };
 pub use context::{PROPAGATION_CONTEXT, PropagationContext};
 pub use mapping::{
