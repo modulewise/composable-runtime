@@ -148,6 +148,7 @@ fn dispatch(
     // keyed by category name and property name. The property is routed to that
     // handler, so each has exactly one handler id.
     let mut contribution_handlers: HashMap<(String, String), usize> = HashMap::new();
+
     for (idx, handler) in handlers.iter().enumerate() {
         let claimed: HashSet<&str> = handler
             .claimed_categories()
@@ -835,7 +836,7 @@ mod tests {
             Ok(vec![Definition::Generic(generic(
                 "server",
                 &definition.name,
-                json!({ "type": "b", "port": 2 }),
+                json!({ "type": "b", "port": 3 }),
             ))])
         }
     }
