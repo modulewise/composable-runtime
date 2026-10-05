@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use composable_runtime::{
-    CategoryClaim, ComponentState, ConfigHandler, HostCapability, HostCapabilityFactory,
-    PropertyMap, Runtime, Service, Val, create_capability, create_state,
+    CategoryClaim, ComponentState, ConfigHandler, Definition, GenericDefinition, HostCapability,
+    HostCapabilityFactory, Runtime, Service, Val, create_capability, create_state,
 };
 use wasmtime::component::{HasSelf, Linker};
 
@@ -78,20 +78,16 @@ impl ConfigHandler for GreetingConfigHandler {
         HashMap::from([("greeting", ["message"].as_slice())])
     }
 
-    fn handle_category(
-        &mut self,
-        category: &str,
-        _name: &str,
-        properties: PropertyMap,
-    ) -> Result<()> {
-        assert_eq!(category, "greeting");
-        let message = properties
+    fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>> {
+        assert_eq!(definition.category, "greeting");
+        let message = definition
+            .properties
             .get("message")
             .and_then(|v| v.as_str())
             .unwrap_or("Hello")
             .to_string();
         *self.config.lock().unwrap() = Some(GreetingConfig { message });
-        Ok(())
+        Ok(Vec::new())
     }
 }
 

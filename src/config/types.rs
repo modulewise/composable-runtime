@@ -7,12 +7,24 @@ use crate::types::{CapabilityDefinition, ComponentDefinition};
 /// Source-agnostic property map with JSON values.
 pub type PropertyMap = HashMap<String, serde_json::Value>;
 
-/// A definition entry from any source (TOML file, .wasm path, programmatic API).
+/// A definition from any source (TOML file, .wasm path, programmatic API,
+/// or another handler), not yet turned into anything specific. It is
+/// dispatched to the handler that claims its category.
 #[derive(Debug, Clone)]
 pub struct GenericDefinition {
     pub category: String,
     pub name: String,
     pub properties: PropertyMap,
+}
+
+/// What a handler produces: a definition for the graph, or a generic
+/// definition to dispatch.
+#[derive(Debug, Clone)]
+pub enum Definition {
+    Component(ComponentDefinition),
+    Capability(CapabilityDefinition),
+    /// Dispatched to the handler that claims its category.
+    Generic(GenericDefinition),
 }
 
 pub use crate::selector::{Condition, Operator, Selector};
@@ -61,10 +73,14 @@ pub trait ConfigHandler {
     /// Multiple handlers may claim the same category only if all use selectors.
     fn claimed_categories(&self) -> Vec<CategoryClaim>;
 
-    /// Properties this handler uses, keyed by category.
-    /// Category owners should include their own properties (under their own category)
-    /// to prevent other handlers from claiming them. Properties claimed on other
-    /// handlers' categories will be split off and routed via `handle_properties`.
+    /// Properties this handler claims, keyed by category.
+    ///
+    /// On a category it owns, these are the properties its definitions may
+    /// provide. Handlers sharing a category through selectors may claim the
+    /// same ones. On a category it does not own, these are the contributed
+    /// properties that will be split from every definition in that category
+    /// and routed to `handle_properties`. Only one handler may contribute
+    /// each property, and no owner of the category may also claim it.
     fn claimed_properties(&self) -> HashMap<&str, &[&str]> {
         HashMap::new()
     }
@@ -79,16 +95,19 @@ pub trait ConfigHandler {
         false
     }
 
-    /// Handle a definition in an owned category.
-    /// Properties claimed by other handlers will be excluded.
-    fn handle_category(
-        &mut self,
-        category: &str,
-        name: &str,
-        properties: PropertyMap,
-    ) -> Result<()>;
+    /// Handle a definition in an owned category, returning what it produces.
+    /// Properties claimed by other handlers are excluded.
+    ///
+    /// A handler may return nothing, e.g. if it only applies configuration to
+    /// a service. Any produced `Definition::Generic` is dispatched in turn to
+    /// the handler claiming its category.
+    ///
+    /// A name with a leading `_` is internal, hidden from listing and direct
+    /// invocation, but importable. Only a handler may define one.
+    fn handle_definition(&mut self, definition: GenericDefinition) -> Result<Vec<Definition>>;
 
-    /// Handle claimed properties from a category this handler does not own.
+    /// Handle the properties this handler contributes to a definition in a
+    /// category it does not own.
     fn handle_properties(
         &mut self,
         _category: &str,
@@ -96,16 +115,6 @@ pub trait ConfigHandler {
         _properties: PropertyMap,
     ) -> Result<()> {
         Ok(())
-    }
-
-    /// Return component definitions generated during config handling.
-    fn generated_component_definitions(&mut self) -> Vec<ComponentDefinition> {
-        vec![]
-    }
-
-    /// Return capability definitions generated during config handling.
-    fn generated_capability_definitions(&mut self) -> Vec<CapabilityDefinition> {
-        vec![]
     }
 }
 
