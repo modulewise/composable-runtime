@@ -246,10 +246,10 @@ impl BootstrapRegistry {
         }
     }
 
+    /// Any registered component, including "internal" ones with a leading `_`
+    /// since those may be factories or providers of referenced WIT. The sealed
+    /// `ComponentRegistry` hides internal names from listing and invocation.
     pub fn get_component(&self, name: &str) -> Option<Arc<ComponentSpec>> {
-        if name.starts_with('_') {
-            return None;
-        }
         let components = self.components.read().unwrap();
         components.get(name).cloned()
     }
@@ -909,5 +909,28 @@ mod tests {
         let err = resolve_wit_references(&config, &registry_with_target())
             .expect_err("missing component");
         assert!(err.to_string().contains("missing"), "{err}");
+    }
+
+    #[test]
+    fn an_internal_component_is_available_for_bootstrap_but_hidden_once_sealed() {
+        let registry = BootstrapRegistry::default();
+        registry.register(ComponentSpec {
+            name: "_internal".to_string(),
+            namespace: None,
+            package: None,
+            labels: HashMap::new(),
+            bytes: Arc::from(Vec::new()),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            capabilities: Vec::new(),
+            dependents: Vec::new(),
+            functions: HashMap::new(),
+        });
+        // A factory or a `${wit(...)}` reference may name it.
+        assert!(registry.get_component("_internal").is_some());
+
+        let sealed = registry.seal();
+        assert!(sealed.get_component("_internal").is_none());
+        assert_eq!(sealed.get_components().count(), 0);
     }
 }
