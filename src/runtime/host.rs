@@ -26,8 +26,8 @@ use crate::composition::resolver::Resolver;
 use crate::context::PROPAGATION_CONTEXT;
 use crate::runtime::component::ComponentInstance;
 use crate::types::{
-    Component, ComponentHost, ComponentInvoker, ComponentMetadata, ComponentState, Function,
-    HttpHooks, PROPAGATED_HEADERS, Val,
+    Component, ComponentError, ComponentHost, ComponentInvoker, ComponentMetadata, ComponentState,
+    Function, HttpHooks, PROPAGATED_HEADERS, Val,
 };
 
 /// The build phase: components are registered as the graph is traversed.
@@ -655,7 +655,20 @@ impl Invoker {
             .instantiate_from_bytes(bytes, capabilities, capability_registry, env_vars)
             .await?;
 
-        let result = instance.call(&function, args).await?;
+        let result = instance.call(&function, args).await.map_err(|e| {
+            let holds_resource = e
+                .downcast_ref::<ComponentError>()
+                .is_some_and(|error| matches!(error.value, Some(Val::Resource(_))));
+            if holds_resource {
+                anyhow::anyhow!(
+                    "function '{}' returned an error resource, which does not outlive this \
+                     call; instantiate the component and use `ComponentInstance::call` instead",
+                    function.function_name()
+                )
+            } else {
+                e
+            }
+        })?;
 
         if matches!(result, Some(Val::Resource(_))) {
             return Err(anyhow::anyhow!(

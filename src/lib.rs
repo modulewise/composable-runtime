@@ -19,9 +19,9 @@ pub use message::{
 pub use runtime::{ComponentInstance, Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{
-    CapabilityDefinition, Component, ComponentDefinition, ComponentHost, ComponentInvoker,
-    ComponentMetadata, ComponentResource, ComponentState, Export, Function, FunctionParam, Import,
-    Interface, InterfaceName, PROPAGATED_HEADERS, Val,
+    CapabilityDefinition, Component, ComponentDefinition, ComponentError, ComponentHost,
+    ComponentInvoker, ComponentMetadata, ComponentResource, ComponentState, Export, Function,
+    FunctionParam, Import, Interface, InterfaceName, PROPAGATED_HEADERS, Val,
 };
 
 // exposed for testing, hidden from docs

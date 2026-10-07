@@ -312,21 +312,17 @@ impl Function {
             return false;
         };
         // `result<T, E>` is encoded as a two-arm `oneOf`; take the `ok` arm.
-        let schema = schema
-            .get("oneOf")
-            .and_then(|arms| arms.as_array())
-            .and_then(|arms| arms.iter().find_map(|arm| arm.pointer("/properties/ok")))
-            .unwrap_or(schema);
+        let schema = result_arm(schema, "ok").unwrap_or(schema);
+        is_byte_list(schema)
+    }
 
-        if schema.get("type").and_then(|t| t.as_str()) != Some("array") {
-            return false;
-        }
-        let Some(items) = schema.get("items") else {
-            return false;
-        };
-        items.get("type").and_then(|t| t.as_str()) == Some("number")
-            && items.get("minimum").and_then(|m| m.as_i64()) == Some(0)
-            && items.get("maximum").and_then(|m| m.as_i64()) == Some(255)
+    /// Whether this function's result is a `result<T, E>` whose `E` is a
+    /// `list<u8>`.
+    pub fn returns_error_bytes(&self) -> bool {
+        self.result
+            .as_ref()
+            .and_then(|schema| result_arm(schema, "error"))
+            .is_some_and(is_byte_list)
     }
 
     /// Get the function key used in maps and invoke calls.
@@ -353,6 +349,30 @@ impl fmt::Display for Function {
             None => write!(f, "{}", self.function_name),
         }
     }
+}
+
+// One arm (`ok` or `error`) of a `result<T, E>` schema, which is encoded as a
+// two-arm `oneOf`. None if the schema is not a `result`.
+fn result_arm<'a>(schema: &'a serde_json::Value, arm: &str) -> Option<&'a serde_json::Value> {
+    schema
+        .get("oneOf")?
+        .as_array()?
+        .iter()
+        .find_map(|branch| branch.pointer(&format!("/properties/{arm}")))
+}
+
+// Whether a schema describes a `list<u8>`: an array of numbers with
+// `minimum: 0` and `maximum: 255`.
+fn is_byte_list(schema: &serde_json::Value) -> bool {
+    if schema.get("type").and_then(|t| t.as_str()) != Some("array") {
+        return false;
+    }
+    let Some(items) = schema.get("items") else {
+        return false;
+    };
+    items.get("type").and_then(|t| t.as_str()) == Some("number")
+        && items.get("minimum").and_then(|m| m.as_i64()) == Some(0)
+        && items.get("maximum").and_then(|m| m.as_i64()) == Some(255)
 }
 
 /// A function parameter specification.
@@ -505,6 +525,35 @@ pub struct ComponentResource {
     pub(crate) resource: wasmtime::component::ResourceAny,
 }
 
+/// The `err` case of a `result` returned from a component function call,
+/// distinct from a failure to call the function. Callers can recover with
+/// `anyhow::Error::downcast_ref::<ComponentError>()`.
+pub struct ComponentError {
+    /// The `err` value, or `None` for a `result` with no error type.
+    pub value: Option<Val>,
+}
+
+impl fmt::Display for ComponentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.value {
+            Some(Val::Json(value)) => write!(f, "Component returned error: {value}"),
+            Some(Val::Bytes(bytes)) => {
+                write!(f, "Component returned error: <{} bytes>", bytes.len())
+            }
+            Some(Val::Resource(_)) => write!(f, "Component returned error: <resource>"),
+            None => write!(f, "Component returned error"),
+        }
+    }
+}
+
+impl fmt::Debug for ComponentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ComponentError({self})")
+    }
+}
+
+impl std::error::Error for ComponentError {}
+
 /// Invoke components by name.
 pub trait ComponentInvoker: Send + Sync {
     /// Invoke a component function.
@@ -527,4 +576,54 @@ pub trait ComponentHost: ComponentInvoker {
     fn get_component(&self, name: &str) -> Option<&Component>;
 
     fn list_components(&self, selector: Option<&crate::selector::Selector>) -> Vec<&Component>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn byte_list() -> serde_json::Value {
+        json!({"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 255}})
+    }
+
+    fn result_schema(ok: serde_json::Value, error: serde_json::Value) -> serde_json::Value {
+        json!({"oneOf": [
+            {"type": "object", "properties": {"ok": ok}, "required": ["ok"]},
+            {"type": "object", "properties": {"error": error}, "required": ["error"]}
+        ]})
+    }
+
+    fn function_returning(result: serde_json::Value) -> Function {
+        Function::new(
+            None,
+            "f".into(),
+            None,
+            String::new(),
+            vec![],
+            Some(result),
+            true,
+        )
+    }
+
+    #[test]
+    fn a_byte_list_result_returns_bytes() {
+        let function = function_returning(byte_list());
+        assert!(function.returns_bytes());
+        assert!(!function.returns_error_bytes());
+    }
+
+    #[test]
+    fn a_result_with_a_byte_list_ok_returns_bytes() {
+        let function = function_returning(result_schema(byte_list(), json!({"type": "string"})));
+        assert!(function.returns_bytes());
+        assert!(!function.returns_error_bytes());
+    }
+
+    #[test]
+    fn a_result_with_a_byte_list_error_returns_error_bytes() {
+        let function = function_returning(result_schema(json!({"type": "string"}), byte_list()));
+        assert!(!function.returns_bytes());
+        assert!(function.returns_error_bytes());
+    }
 }

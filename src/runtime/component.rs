@@ -11,7 +11,7 @@ use wasmtime::component::{
 };
 
 use crate::runtime::conversion::{json_to_val, val_to_json};
-use crate::types::{ComponentResource, ComponentState, Function, Val};
+use crate::types::{ComponentError, ComponentResource, ComponentState, Function, Val};
 
 /// An owned handle to one instantiated component.
 ///
@@ -41,7 +41,11 @@ impl ComponentInstance {
         let results = self
             .call_export(export, args, function.function_name())
             .await?;
-        convert_results(results, function.returns_bytes())
+        convert_results(
+            results,
+            function.returns_bytes(),
+            function.returns_error_bytes(),
+        )
     }
 
     // Resolve an exported function on an interface or directly at world-level.
@@ -144,16 +148,18 @@ impl ComponentInstance {
     }
 }
 
-// Convert a call's wasmtime results into [`Val`]s.
+// Convert wasmtime `results` into a `Val`, or `None` if there are none. A
+// resource remains a handle, a `list<u8>` becomes bytes, and any other value
+// converts to JSON. The bytes flags represent the function's declared result
+// type, since an empty list in `results` cannot show that it is a `list<u8>`.
 //
-// A WIT `result<T, E>` maps onto Rust's `Result`: an `err` becomes an `Err`
-// here, so callers handle failure before ever checking for an `ok` value. A
-// resource remains a handle, a `list<u8>` becomes bytes, and everything else
-// converts to JSON.
-//
-// `as_bytes` is determined from the function's declared result type rather
-// than the returned values, so an empty `list<u8>` can be recognized as bytes.
-fn convert_results(results: Vec<WasmtimeVal>, as_bytes: bool) -> Result<Option<Val>> {
+// For a WIT `result<T, E>`, an `ok` value converts as described. An `err`
+// returns as a [`ComponentError`] holding its value, converted the same way.
+fn convert_results(
+    results: Vec<WasmtimeVal>,
+    as_bytes: bool,
+    error_as_bytes: bool,
+) -> Result<Option<Val>> {
     if results.len() > 1 {
         anyhow::bail!(
             "got {} results; a WIT function declares at most one",
@@ -167,11 +173,12 @@ fn convert_results(results: Vec<WasmtimeVal>, as_bytes: bool) -> Result<Option<V
         WasmtimeVal::Result(Ok(Some(ok_val))) => Ok(Some(convert_value(ok_val, as_bytes)?)),
         WasmtimeVal::Result(Ok(None)) => Ok(None),
         WasmtimeVal::Result(Err(Some(error_val))) => {
-            let error_json =
-                val_to_json(error_val).map_or_else(|e| format!("<{e}>"), |json| json.to_string());
-            anyhow::bail!("Component returned error: {error_json}")
+            let value = convert_value(error_val, error_as_bytes).map_err(|e| {
+                anyhow::anyhow!("Component returned an error that cannot be converted: {e}")
+            })?;
+            Err(ComponentError { value: Some(value) }.into())
         }
-        WasmtimeVal::Result(Err(None)) => anyhow::bail!("Component returned error"),
+        WasmtimeVal::Result(Err(None)) => Err(ComponentError { value: None }.into()),
         value => Ok(Some(convert_value(value, as_bytes)?)),
     }
 }
@@ -193,4 +200,74 @@ fn convert_value(val: &WasmtimeVal, as_bytes: bool) -> Result<Val> {
         }
         other => Val::Json(val_to_json(other)?),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn component_error(result: Result<Option<Val>>) -> ComponentError {
+        result
+            .err()
+            .expect("the call should fail")
+            .downcast::<ComponentError>()
+            .expect("the error should be a ComponentError")
+    }
+
+    #[test]
+    fn an_err_becomes_a_component_error_holding_its_value() {
+        let results = vec![WasmtimeVal::Result(Err(Some(Box::new(
+            WasmtimeVal::Record(vec![
+                ("code".into(), WasmtimeVal::S32(-32602)),
+                ("message".into(), WasmtimeVal::String("Unknown tool".into())),
+            ]),
+        ))))];
+        let error = component_error(convert_results(results, false, false));
+        assert_eq!(
+            error.value.as_ref().and_then(Val::as_json),
+            Some(&json!({"code": -32602, "message": "Unknown tool"}))
+        );
+    }
+
+    #[test]
+    fn an_err_declared_as_bytes_holds_bytes() {
+        let results = vec![WasmtimeVal::Result(Err(Some(Box::new(WasmtimeVal::List(
+            vec![WasmtimeVal::U8(1), WasmtimeVal::U8(2)],
+        )))))];
+        let error = component_error(convert_results(results, false, true));
+        assert_eq!(
+            error.value.as_ref().and_then(Val::as_bytes),
+            Some(&[1, 2][..])
+        );
+    }
+
+    #[test]
+    fn an_err_with_no_error_type_holds_no_value() {
+        let results = vec![WasmtimeVal::Result(Err(None))];
+        let error = component_error(convert_results(results, false, false));
+        assert!(error.value.is_none());
+    }
+
+    #[test]
+    fn a_component_error_message_displays_its_value() {
+        let error = ComponentError {
+            value: Some(Val::Json(json!("denied"))),
+        };
+        assert_eq!(error.to_string(), r#"Component returned error: "denied""#);
+
+        let error = ComponentError {
+            value: Some(Val::Bytes(vec![1, 2])),
+        };
+        assert_eq!(error.to_string(), "Component returned error: <2 bytes>");
+    }
+
+    #[test]
+    fn an_ok_value_converts_to_json() {
+        let results = vec![WasmtimeVal::Result(Ok(Some(Box::new(
+            WasmtimeVal::String("done".into()),
+        ))))];
+        let value = convert_results(results, false, false).unwrap().unwrap();
+        assert_eq!(value.as_json(), Some(&json!("done")));
+    }
 }
