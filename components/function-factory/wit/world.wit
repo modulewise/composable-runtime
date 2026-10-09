@@ -1,4 +1,4 @@
-package composable-runtime:function-factory@0.5.0;
+package composable-runtime:function-factory@0.5.1;
 
 world function-factory {
     import wasi:config/store@0.2.0-rc.1;
