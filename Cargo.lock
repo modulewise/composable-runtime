@@ -439,8 +439,8 @@ dependencies = [
 
 [[package]]
 name = "composable-factory"
-version = "0.5.0"
-source = "git+https://github.com/modulewise/composable-factory?branch=main#45412dfb0e898c9a0229731e1577a35426c8526d"
+version = "0.6.0"
+source = "git+https://github.com/modulewise/composable-factory?branch=main#a86e9b25efcfde110621056b97042f25e9bb13b9"
 dependencies = [
  "anyhow",
  "indexmap 2.14.2",
@@ -1173,7 +1173,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "function-adapter"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap",
