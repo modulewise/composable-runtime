@@ -157,7 +157,7 @@ fn create_config_component(config: &HashMap<String, serde_json::Value>) -> Resul
     for (key, value) in config {
         flatten_config(key, value, &mut config_properties)?;
     }
-    static_config::create_component(config_properties)
+    componentized_static_config::create_component(config_properties)
         .map_err(|e| anyhow::anyhow!("Failed to create config component: {e}"))
 }
 
