@@ -41,9 +41,11 @@ fn send_log(data: &LogRecord) -> Result<(), String> {
                     value: Some(AnyValue {
                         value: Some(any_value::Value::StringValue(kv.value.clone())),
                     }),
+                    key_strindex: 0,
                 })
                 .collect(),
             dropped_attributes_count: 0,
+            entity_refs: Vec::new(),
         })
         .unwrap_or_else(|| OtlpResource {
             attributes: vec![KeyValue {
@@ -51,8 +53,10 @@ fn send_log(data: &LogRecord) -> Result<(), String> {
                 value: Some(AnyValue {
                     value: Some(any_value::Value::StringValue("unknown_service".to_string())),
                 }),
+                key_strindex: 0,
             }],
             dropped_attributes_count: 0,
+            entity_refs: Vec::new(),
         });
 
     let scope = data.instrumentation_scope.as_ref().map(|s| {
@@ -67,6 +71,7 @@ fn send_log(data: &LogRecord) -> Result<(), String> {
                     value: Some(AnyValue {
                         value: Some(any_value::Value::StringValue(kv.value.clone())),
                     }),
+                    key_strindex: 0,
                 })
                 .collect(),
             dropped_attributes_count: 0,
@@ -117,6 +122,7 @@ fn convert_log_record(data: &LogRecord) -> OtlpLogRecord {
                     value: Some(AnyValue {
                         value: Some(any_value::Value::StringValue(kv.value.clone())),
                     }),
+                    key_strindex: 0,
                 })
                 .collect()
         })
