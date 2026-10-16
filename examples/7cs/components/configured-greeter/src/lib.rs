@@ -1,7 +1,7 @@
 wit_bindgen::generate!({
     path: "../../wit",
     world: "configured-greeter",
-    async: false,
+    sync: true,
     generate_all
 });
 
