@@ -602,6 +602,32 @@ fn parse_semver(version: &str) -> Option<(u32, u32, u32)> {
     None
 }
 
+// Composes `component` with `plugs`, the dependencies it imports, in one graph.
+fn compose_with(
+    component: Composable,
+    plugs: Vec<Composable>,
+    definition: &ComponentDefinition,
+) -> Result<Composable> {
+    if plugs.is_empty() {
+        return Ok(component);
+    }
+    let names: Vec<&str> = plugs
+        .iter()
+        .filter_map(|plug| plug.name.as_deref())
+        .collect();
+    let composed = Composer::compose(&component, &plugs).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed composing '{}' with dependencies {names:?}: {e}",
+            definition.name
+        )
+    })?;
+    tracing::info!(
+        "Composed component '{}' with dependencies {names:?}",
+        definition.name
+    );
+    Ok(composed)
+}
+
 // Turn a definition and its resolved bytes into a spec: parse, compose with
 // config and dependencies, then check that every import is satisfied.
 async fn process_component(
@@ -654,6 +680,8 @@ async fn process_component(
         exports: component.exports.clone(),
     };
 
+    // The dependencies composed into the component, together in one graph.
+    let mut plugs = Vec::new();
     for (dependency_node, edge) in dependencies {
         match dependency_node {
             Node::Component(dependency_def) => {
@@ -665,6 +693,9 @@ async fn process_component(
                 let dependency = component_spec.composable();
 
                 if matches!(edge, Edge::Interceptor(_)) && is_advice_component(&component.exports) {
+                    // The advice wraps the component as composed so far, so
+                    // the dependencies before this one are composed first.
+                    component = compose_with(component, std::mem::take(&mut plugs), definition)?;
                     // Current component is advice; the dependency is the target.
                     // Generate a wrapper from the target, plug in advice + target.
                     let wrapper_bytes = composable_interceptor::create_from_component(
@@ -692,21 +723,24 @@ async fn process_component(
                         imports: wrapper_imports,
                         exports: wrapper_exports,
                     };
-                    let composed_wrapper = Composer::compose_components(&wrapper, &component)
-                        .map_err(|e| {
-                            anyhow::anyhow!(
-                                "Failed composing interceptor wrapper with advice '{}': {e}",
-                                definition.name,
-                            )
-                        })?;
-                    let composed = Composer::compose_components(&composed_wrapper, &dependency)
-                        .map_err(|e| {
-                            anyhow::anyhow!(
-                                "Failed composing '{}' with target '{}': {e}",
-                                definition.name,
-                                dependency_def.name,
-                            )
-                        })?;
+                    let composed_wrapper =
+                        Composer::compose(&wrapper, std::slice::from_ref(&component)).map_err(
+                            |e| {
+                                anyhow::anyhow!(
+                                    "Failed composing interceptor wrapper with advice '{}': {e}",
+                                    definition.name,
+                                )
+                            },
+                        )?;
+                    let composed =
+                        Composer::compose(&composed_wrapper, std::slice::from_ref(&dependency))
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed composing '{}' with target '{}': {e}",
+                                    definition.name,
+                                    dependency_def.name,
+                                )
+                            })?;
 
                     // The composed result should be functionally equivalent to
                     // the target: same exports/functions and remaining imports
@@ -724,19 +758,7 @@ async fn process_component(
                         dependency_def.name
                     );
                 } else {
-                    component =
-                        Composer::compose_components(&component, &dependency).map_err(|e| {
-                            anyhow::anyhow!(
-                                "Failed composing '{}' with dependency '{}': {e}",
-                                definition.name,
-                                dependency_def.name
-                            )
-                        })?;
-                    tracing::info!(
-                        "Composed component '{}' with dependency '{}'",
-                        definition.name,
-                        dependency_def.name
-                    );
+                    plugs.push(dependency);
                 }
 
                 all_capabilities.extend(component_spec.capabilities.iter().cloned());
@@ -747,6 +769,7 @@ async fn process_component(
             }
         }
     }
+    let component = compose_with(component, plugs, definition)?;
 
     let capability_interfaces: std::collections::HashSet<String> = all_capabilities
         .iter()
