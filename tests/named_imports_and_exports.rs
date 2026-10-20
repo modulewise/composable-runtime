@@ -3,6 +3,7 @@ mod common;
 use composable_runtime::Runtime;
 
 const VALUE: &str = "modulewise:test/value@0.1.0";
+const COORDINATE: &str = "modulewise:test/coordinate@0.1.0";
 
 // Exports `modulewise:test/value` with `get` returning `value`.
 fn value_wasm(value: u32) -> common::TestFile {
@@ -50,6 +51,72 @@ fn named_imports_wasm() -> common::TestFile {
             (export "run" (func $run))
         )
         "#
+    ))
+}
+
+// Exports `modulewise:test/coordinate`, an interface with a type: `get` returns
+// the record `coordinate` with `x` set to `x`.
+fn coordinate_wasm(x: u32) -> common::TestFile {
+    common::create_wasm_test_file(&format!(
+        r#"
+        (component
+            (type $coordinate (record (field "x" u32)))
+            (core module $m (func (export "get") (result i32) i32.const {x}))
+            (core instance $i (instantiate $m))
+            (func $get (result $coordinate) (canon lift (core func $i "get")))
+            (instance $instance (export "coordinate" (type $coordinate)) (export "get" (func $get)))
+            (export "{COORDINATE}" (instance $instance))
+        )
+        "#
+    ))
+}
+
+// Imports `modulewise:test/coordinate` as `a`, `b` and `c`, and exports `run`
+// returning `a.get().x * 100 + b.get().x * 10 + c.get().x`.
+fn coordinate_imports_wasm() -> common::TestFile {
+    let import = |name: &str| {
+        format!(
+            r#"(import "{name}" (implements "{COORDINATE}") (instance ${name}
+                (type $coordinate (record (field "x" u32)))
+                (export "coordinate" (type $exported (eq $coordinate)))
+                (export "get" (func (result $exported)))
+            ))"#
+        )
+    };
+    common::create_wasm_test_file(&format!(
+        r#"
+        (component
+            {a}
+            {b}
+            {c}
+            (core func $a-get (canon lower (func $a "get")))
+            (core func $b-get (canon lower (func $b "get")))
+            (core func $c-get (canon lower (func $c "get")))
+            (core module $m
+                (import "" "a" (func $a (result i32)))
+                (import "" "b" (func $b (result i32)))
+                (import "" "c" (func $c (result i32)))
+                (func (export "run") (result i32)
+                    (i32.add
+                        (i32.add (i32.mul (call $a) (i32.const 100)) (i32.mul (call $b) (i32.const 10)))
+                        (call $c)
+                    )
+                )
+            )
+            (core instance $i (instantiate $m
+                (with "" (instance
+                    (export "a" (func $a-get))
+                    (export "b" (func $b-get))
+                    (export "c" (func $c-get))
+                ))
+            ))
+            (func $run (result u32) (canon lift (core func $i "run")))
+            (export "run" (func $run))
+        )
+        "#,
+        a = import("a"),
+        b = import("b"),
+        c = import("c"),
     ))
 }
 
@@ -149,23 +216,46 @@ fn inline_export_wasm() -> common::TestFile {
     )
 }
 
-// Exports `modulewise:test/value` unnamed, returning 5, and as `first`,
-// returning 1.
-fn unnamed_and_named_export_wasm() -> common::TestFile {
+// Exports `modulewise:test/value` unnamed, returning 5, and as `name`,
+// returning `value`.
+fn unnamed_and_named_export_wasm(name: &str, value: u32) -> common::TestFile {
     common::create_wasm_test_file(&format!(
         r#"
         (component
             (core module $m
                 (func (export "unnamed") (result i32) i32.const 5)
-                (func (export "first") (result i32) i32.const 1)
+                (func (export "named") (result i32) i32.const {value})
             )
             (core instance $i (instantiate $m))
             (func $unnamed-get (result u32) (canon lift (core func $i "unnamed")))
-            (func $first-get (result u32) (canon lift (core func $i "first")))
+            (func $named-get (result u32) (canon lift (core func $i "named")))
             (instance $unnamed (export "get" (func $unnamed-get)))
-            (instance $first (export "get" (func $first-get)))
+            (instance $named (export "get" (func $named-get)))
             (export "{VALUE}" (instance $unnamed))
-            (export "first" (implements "{VALUE}") (instance $first))
+            (export "{name}" (implements "{VALUE}") (instance $named))
+        )
+        "#
+    ))
+}
+
+// Imports `modulewise:test/value` unnamed and exports `run` returning `get()`.
+fn value_import_wasm() -> common::TestFile {
+    common::create_wasm_test_file(&format!(
+        r#"
+        (component
+            (import "{VALUE}" (instance $value
+                (export "get" (func (result u32)))
+            ))
+            (core func $get (canon lower (func $value "get")))
+            (core module $m
+                (import "" "get" (func $get (result i32)))
+                (func (export "run") (result i32) (call $get))
+            )
+            (core instance $i (instantiate $m
+                (with "" (instance (export "get" (func $get))))
+            ))
+            (func $run (result u32) (canon lift (core func $i "run")))
+            (export "run" (func $run))
         )
         "#
     ))
@@ -212,6 +302,36 @@ async fn named_imports_are_satisfied_by_the_dependencies_with_their_names() {
     .expect("runtime");
 
     assert_eq!(invoke(&runtime, "consumer", "run").await, 12);
+}
+
+#[tokio::test]
+async fn named_imports_of_an_interface_with_a_type_are_each_satisfied_by_their_own_dependency() {
+    let (a, b, c) = (coordinate_wasm(1), coordinate_wasm(2), coordinate_wasm(3));
+    let consumer = coordinate_imports_wasm();
+    let runtime = runtime(&format!(
+        r#"
+        [component.a]
+        uri = "{}"
+
+        [component.b]
+        uri = "{}"
+
+        [component.c]
+        uri = "{}"
+
+        [component.consumer]
+        uri = "{}"
+        imports = ["a", "b", "c"]
+        "#,
+        a.display(),
+        b.display(),
+        c.display(),
+        consumer.display()
+    ))
+    .await
+    .expect("runtime");
+
+    assert_eq!(invoke(&runtime, "consumer", "run").await, 123);
 }
 
 #[tokio::test]
@@ -387,7 +507,7 @@ async fn named_imports_are_satisfied_by_named_exports_of_the_same_names() {
 
 #[tokio::test]
 async fn named_export_takes_precedence_over_the_component_name_fallback() {
-    let first = unnamed_and_named_export_wasm();
+    let first = unnamed_and_named_export_wasm("first", 1);
     let second = value_wasm(2);
     let consumer = named_imports_wasm();
     let runtime = runtime(&format!(
@@ -411,4 +531,100 @@ async fn named_export_takes_precedence_over_the_component_name_fallback() {
 
     // `first` is the named export (1), not the unnamed one (5).
     assert_eq!(invoke(&runtime, "consumer", "run").await, 12);
+}
+
+#[tokio::test]
+async fn named_export_takes_precedence_over_the_dependency_of_the_import_name() {
+    // `exporter` satisfies `first` with its named export, and `first` could
+    // too, as the dependency of that name. `first` also satisfies `second`
+    // with its named export, so neither is left over.
+    let exporter = unnamed_and_named_export_wasm("first", 1);
+    let first = unnamed_and_named_export_wasm("second", 2);
+    let consumer = named_imports_wasm();
+    for imports in [r#"["exporter", "first"]"#, r#"["first", "exporter"]"#] {
+        let runtime = runtime(&format!(
+            r#"
+            [component.exporter]
+            uri = "{}"
+
+            [component.first]
+            uri = "{}"
+
+            [component.consumer]
+            uri = "{}"
+            imports = {imports}
+            "#,
+            exporter.display(),
+            first.display(),
+            consumer.display()
+        ))
+        .await
+        .expect("runtime");
+
+        // `first` is the named export of `exporter` (1), not the unnamed
+        // export of `first` (5), whichever order the imports are listed in.
+        assert_eq!(invoke(&runtime, "consumer", "run").await, 12, "{imports}");
+    }
+}
+
+#[tokio::test]
+async fn import_satisfied_by_more_than_one_dependency_is_rejected() {
+    let first = value_wasm(1);
+    let second = value_wasm(2);
+    let consumer = value_import_wasm();
+    let err = runtime(&format!(
+        r#"
+        [component.first]
+        uri = "{}"
+
+        [component.second]
+        uri = "{}"
+
+        [component.consumer]
+        uri = "{}"
+        imports = ["first", "second"]
+        "#,
+        first.display(),
+        second.display(),
+        consumer.display()
+    ))
+    .await
+    .err()
+    .expect("an import that two dependencies satisfy must be rejected");
+
+    let message = format!("{err:#}");
+    assert!(message.contains("more than one dependency"), "{message}");
+    assert!(message.contains("\"first\""), "{message}");
+    assert!(message.contains("\"second\""), "{message}");
+}
+
+#[tokio::test]
+async fn named_import_satisfied_by_named_exports_of_more_than_one_dependency_is_rejected() {
+    let one = named_exports_wasm();
+    let other = named_exports_wasm();
+    let consumer = named_imports_wasm();
+    let err = runtime(&format!(
+        r#"
+        [component.one]
+        uri = "{}"
+
+        [component.other]
+        uri = "{}"
+
+        [component.consumer]
+        uri = "{}"
+        imports = ["one", "other"]
+        "#,
+        one.display(),
+        other.display(),
+        consumer.display()
+    ))
+    .await
+    .err()
+    .expect("a named import that two named exports satisfy must be rejected");
+
+    let message = format!("{err:#}");
+    assert!(message.contains("more than one dependency"), "{message}");
+    assert!(message.contains("\"one\""), "{message}");
+    assert!(message.contains("\"other\""), "{message}");
 }

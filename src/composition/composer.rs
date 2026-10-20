@@ -9,7 +9,7 @@ use crate::types::{Export, Import, Interface, InterfaceName};
 /// The interface every generated config component exports.
 const CONFIG_STORE: &str = "wasi:config/store@0.2.0-rc.1";
 
-/// A component during the composition phase. Composing two produces another.
+/// A component during the composition phase. Each compose produces a new one.
 #[derive(Debug, Clone)]
 pub struct Composable {
     /// Matches named imports. None for a generated component with no TOML.
@@ -23,40 +23,58 @@ pub struct Composable {
 pub struct Composer;
 
 impl Composer {
-    /// Compose a component with a wasi:config/store generated from the provided config
+    /// Compose a component with a wasi:config/store generated from the
+    /// provided config.
     pub fn compose_with_config(
         component: &Composable,
         config: &HashMap<String, serde_json::Value>,
     ) -> Result<Composable> {
-        Self::compose_components(component, &config_component(None, config)?)
+        Self::compose(component, &[config_component(None, config)?])
     }
 
-    /// Compose a socket component with a plug component. The result has the
-    /// socket's name and exports, and any remaining unsatisfied imports.
-    pub fn compose_components(socket: &Composable, plug: &Composable) -> Result<Composable> {
+    /// Compose a socket component with its plugs in one graph. Each of the
+    /// socket's imports is satisfied by at most one plug, as chosen by
+    /// `select_plug`, and every plug must satisfy at least one. The result has
+    /// the socket's name and exports, and any remaining unsatisfied imports.
+    pub fn compose(socket: &Composable, plugs: &[Composable]) -> Result<Composable> {
         let mut graph = CompositionGraph::new();
 
         let socket_pkg =
             Package::from_bytes("socket", None, socket.bytes.to_vec(), graph.types_mut())?;
-        let plug_pkg = Package::from_bytes("plug", None, plug.bytes.to_vec(), graph.types_mut())?;
-
         let socket_id = graph.register_package(socket_pkg)?;
-        let plug_id = graph.register_package(plug_pkg)?;
-
         let socket_instance = graph.instantiate(socket_id);
-        let mut plug_instance = None;
+
+        // Each plug's package, and its instance once an import needs it.
+        let mut plug_packages = Vec::with_capacity(plugs.len());
+        for (index, plug) in plugs.iter().enumerate() {
+            let package = Package::from_bytes(
+                &format!("plug{index}"),
+                None,
+                plug.bytes.to_vec(),
+                graph.types_mut(),
+            )?;
+            plug_packages.push((graph.register_package(package)?, None));
+        }
+
         let mut imports = Vec::new();
         for import in &socket.imports {
-            let Some(export) = select_export(import, plug.name.as_deref(), &plug.exports) else {
+            let Some((index, export)) = select_plug(import, plugs)? else {
                 imports.push(import.clone());
                 continue;
             };
-            let instance = *plug_instance.get_or_insert_with(|| graph.instantiate(plug_id));
+            let (package, instance) = &mut plug_packages[index];
+            let instance = *instance.get_or_insert_with(|| graph.instantiate(*package));
             let argument = graph.alias_instance_export(instance, &export.name)?;
             graph.set_instantiation_argument(socket_instance, &import.name, argument)?;
         }
-        if plug_instance.is_none() {
-            bail!("no import is satisfied by the plug's exports");
+        if let Some(index) = plug_packages
+            .iter()
+            .position(|(_, instance)| instance.is_none())
+        {
+            match &plugs[index].name {
+                Some(name) => bail!("no import is satisfied by the exports of dependency '{name}'"),
+                None => bail!("no import is satisfied by a plug's exports"),
+            }
         }
 
         let socket_exports: Vec<String> = graph.types()[graph[socket_id].ty()]
@@ -105,6 +123,41 @@ fn config_component(
         imports: Vec::new(),
         exports: vec![export],
     })
+}
+
+/// The plug index along with its export that satisfies `import`, or None if no
+/// such plug exists among those provided. A named export takes precedence over
+/// a plug with the import's name as `select_export` ranks them. A tie produces
+/// an error, so the order of the plugs is not relevant.
+fn select_plug<'a>(
+    import: &Import,
+    plugs: &'a [Composable],
+) -> Result<Option<(usize, &'a Export)>> {
+    let mut candidates: Vec<(usize, &Export)> = plugs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, plug)| {
+            select_export(import, plug.name.as_deref(), &plug.exports).map(|export| (index, export))
+        })
+        .collect();
+    // A candidate's export can match a named import by either a named export
+    // or an unnamed export where the plug itself matches the import's name,
+    // with the named export taking precedence. An unnamed import only matches
+    // unnamed exports, so it keeps all of its candidates.
+    if candidates.iter().any(|(_, export)| export.is_named()) {
+        candidates.retain(|(_, export)| export.is_named());
+    }
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [only] => Ok(Some(*only)),
+        _ => {
+            let names: Vec<&str> = candidates
+                .iter()
+                .filter_map(|(index, _)| plugs[*index].name.as_deref())
+                .collect();
+            bail!("import '{import}' is satisfied by more than one dependency: {names:?}")
+        }
+    }
 }
 
 /// The export, of the component named `provider`, that satisfies `import`. A
