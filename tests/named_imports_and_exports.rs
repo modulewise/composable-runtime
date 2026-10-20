@@ -534,9 +534,9 @@ async fn named_export_takes_precedence_over_the_component_name_fallback() {
 }
 
 #[tokio::test]
-async fn named_export_takes_precedence_over_the_dependency_of_the_import_name() {
+async fn named_export_takes_precedence_over_the_dependency_having_the_import_name() {
     // `exporter` satisfies `first` with its named export, and `first` could
-    // too, as the dependency of that name. `first` also satisfies `second`
+    // too, as the dependency having that name. `first` also satisfies `second`
     // with its named export, so neither is left over.
     let exporter = unnamed_and_named_export_wasm("first", 1);
     let first = unnamed_and_named_export_wasm("second", 2);
