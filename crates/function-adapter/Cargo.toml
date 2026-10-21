@@ -7,5 +7,5 @@ edition = "2024"
 anyhow = "1"
 clap.workspace = true
 composable-factory = { git = "https://github.com/modulewise/composable-factory", branch = "main" }
-wasm-encoder = "0.259"
-wit-parser = "0.259"
+wasm-encoder = "0.262"
+wit-parser = "0.262"
