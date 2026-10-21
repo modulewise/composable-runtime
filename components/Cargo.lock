@@ -163,8 +163,8 @@ dependencies = [
  "anyhow",
  "clap",
  "composable-factory",
- "wasm-encoder 0.259.0",
- "wit-parser 0.259.0",
+ "wasm-encoder 0.262.0",
+ "wit-parser 0.262.0",
 ]
 
 [[package]]
