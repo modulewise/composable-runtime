@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use crate::config::types::{CategoryClaim, ConfigHandler, Definition, GenericDefinition};
+use crate::host::ComponentHost;
 use crate::message::{Message, MessageBuilder, MessageHeaders, MessagePublisher};
 use crate::service::Service;
-use crate::types::ComponentHost;
 
 use super::bus::{Bus, LocalBus, LocalChannelFactory, SubscriptionConfig};
 use super::reply::ReplyHandler;

@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
 
-use crate::types::ComponentHost;
+use crate::host::ComponentHost;
 
 use super::activator::Activator;
 use super::channel::{Channel, ChannelRegistry, ReplyPublisher};

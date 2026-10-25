@@ -4,24 +4,26 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::component::ComponentInstance;
 use crate::composition::graph::ComponentGraph;
 use crate::composition::registry::{
     HostCapability, HostCapabilityFactory, build_capability_registry, build_components,
 };
 use crate::composition::resolver::{OciResolver, Resolver, Resolvers};
 use crate::config::types::{ConfigHandler, DefinitionLoader};
+use crate::host::ComponentHost;
 #[cfg(feature = "messaging")]
 use crate::message::MessagePublisher;
 use crate::service::Service;
-use crate::types::{Component, ComponentHost};
+use crate::types::Component;
 
-pub mod component;
-pub(crate) mod conversion;
+mod engine;
 mod grpc;
 pub(crate) mod host;
+mod wasi;
 
-pub use component::ComponentInstance;
-use host::{Bootstrapper, FactoryResolver, Host, Invoker};
+use engine::ComponentEngine;
+use host::{Bootstrapper, FactoryResolver, Host};
 
 /// Composable Runtime for invoking Wasm Components
 pub struct Runtime {
@@ -240,7 +242,10 @@ impl RuntimeBuilder {
         let capability_registry = build_capability_registry(&graph, factories)?;
 
         // The traverser of the graph and builder of the component registry.
-        let bootstrapper = Arc::new(Bootstrapper::new(Invoker::new()?, capability_registry));
+        let bootstrapper = Arc::new(Bootstrapper::new(
+            ComponentEngine::new()?,
+            capability_registry,
+        ));
 
         // The factory resolver invokes components as they are built, so it
         // needs the bootstrapper. The others need nothing from the runtime.

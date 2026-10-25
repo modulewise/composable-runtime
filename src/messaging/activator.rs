@@ -3,10 +3,11 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::context::{PROPAGATION_CONTEXT, PropagationContext};
+use crate::host::ComponentHost;
 #[cfg(test)]
 use crate::mapping::ParamMapping;
 use crate::mapping::{MappingConfig, MessageMapper};
-use crate::types::{Component, ComponentHost, PROPAGATED_HEADERS, Val};
+use crate::types::{Component, PROPAGATED_HEADERS, Val};
 
 use super::channel::ReplyPublisher;
 use crate::message::{Message, MessageHeaders};

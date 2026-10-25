@@ -6,9 +6,9 @@ use anyhow::Result;
 
 use crate::composition::registry::HostCapabilityFactory;
 use crate::config::types::ConfigHandler;
+use crate::host::ComponentHost;
 #[cfg(feature = "messaging")]
 use crate::message::MessagePublisher;
-use crate::types::ComponentHost;
 
 /// Lifecycle-managed service that participates in config parsing and runtime.
 ///
