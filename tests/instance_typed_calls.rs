@@ -293,7 +293,7 @@ async fn events_written_after_the_export_returns_are_read_as_they_arrive() {
 }
 
 #[tokio::test]
-async fn a_bounded_reader_holds_the_component_back() {
+async fn a_bounded_consumer_applies_backpressure_to_stream_writes() {
     let events = events_wasm();
     let (_runtime, mut instance) = instantiate_events(&events).await;
 

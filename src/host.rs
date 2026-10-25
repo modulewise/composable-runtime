@@ -1,5 +1,7 @@
-//! How callers reach the runtime's components: invoking their functions,
-//! instantiating them, and finding the components available.
+//! The surfaced traits for interacting with the components registered in a
+//! runtime instance. Defines functions for listing and retrieving available
+//! components, for instantiating components when needing to own an instance,
+//! or for invoking a function directly on a single-use component instance.
 
 use anyhow::Result;
 use std::collections::HashMap;
