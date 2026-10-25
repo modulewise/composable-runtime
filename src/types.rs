@@ -4,8 +4,6 @@ use anyhow::Result;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 
 /// Base set of header keys that should be propagated across service boundaries.
 pub const PROPAGATED_HEADERS: &[&str] = &["traceparent", "tracestate", "baggage"];
@@ -553,30 +551,6 @@ impl fmt::Debug for ComponentError {
 }
 
 impl std::error::Error for ComponentError {}
-
-/// Invoke components by name.
-pub trait ComponentInvoker: Send + Sync {
-    /// Invoke a component function.
-    ///
-    /// Propagation context (e.g. W3C tracecontext) is read from the ambient
-    /// task-local [`PROPAGATION_CONTEXT`](crate::PROPAGATION_CONTEXT). Callers
-    /// that need to establish or extend propagation must wrap the call with
-    /// `PROPAGATION_CONTEXT.scope(...).await` at their boundary.
-    fn invoke<'a>(
-        &'a self,
-        component_name: &'a str,
-        function_name: &'a str,
-        args: Vec<Val>,
-        env: Option<HashMap<String, String>>,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Val>>> + Send + 'a>>;
-}
-
-/// Invocation plus lookup and discovery of the components available to invoke.
-pub trait ComponentHost: ComponentInvoker {
-    fn get_component(&self, name: &str) -> Option<&Component>;
-
-    fn list_components(&self, selector: Option<&crate::selector::Selector>) -> Vec<&Component>;
-}
 
 #[cfg(test)]
 mod tests {

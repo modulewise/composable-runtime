@@ -3,6 +3,7 @@
 //! An inversion of control runtime for Wasm Components.
 //! Supports composition, config, and capability management.
 
+pub use component::ComponentInstance;
 pub use composition::graph::{ComponentGraph, GraphBuilder};
 pub use composition::registry::{CapabilityStateHasData, HostCapability, HostCapabilityFactory};
 pub use config::types::{
@@ -10,18 +11,19 @@ pub use config::types::{
     Operator, PropertyMap, Selector,
 };
 pub use context::{PROPAGATION_CONTEXT, PropagationContext};
+pub use host::{ComponentHost, ComponentInvoker};
 pub use mapping::{
     Invocation, MappingConfig, MessageMapper, ParamEncoding, ParamMapping, ResultDecoding,
 };
 pub use message::{
     Message, MessageBuilder, MessageHeaders, MessagePublisher, PropagatedHeader, ReturnAddress,
 };
-pub use runtime::{ComponentInstance, Runtime, RuntimeBuilder};
+pub use runtime::{Runtime, RuntimeBuilder};
 pub use service::Service;
 pub use types::{
-    CapabilityDefinition, Component, ComponentDefinition, ComponentError, ComponentHost,
-    ComponentInvoker, ComponentMetadata, ComponentResource, ComponentState, Export, Function,
-    FunctionParam, Import, Interface, InterfaceName, PROPAGATED_HEADERS, Val,
+    CapabilityDefinition, Component, ComponentDefinition, ComponentError, ComponentMetadata,
+    ComponentResource, ComponentState, Export, Function, FunctionParam, Import, Interface,
+    InterfaceName, PROPAGATED_HEADERS, Val,
 };
 
 // exposed for testing, hidden from docs
@@ -30,8 +32,11 @@ pub mod composition;
 #[doc(hidden)]
 pub mod types;
 
+pub(crate) mod component;
 pub(crate) mod config;
 pub(crate) mod context;
+pub(crate) mod conversion;
+pub(crate) mod host;
 pub mod mapping;
 pub(crate) mod message;
 #[cfg(feature = "messaging")]

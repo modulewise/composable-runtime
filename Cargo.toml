@@ -86,6 +86,7 @@ wit-parser.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
+tokio-util = "0.7"
 wat.workspace = true
 
 [features]
