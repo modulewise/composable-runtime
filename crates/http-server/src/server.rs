@@ -966,14 +966,20 @@ impl HttpServer {
         })
     }
 
-    pub async fn run(self, mut shutdown: watch::Receiver<bool>) -> Result<()> {
+    /// Serve on `listener`, bound to this server's port by the caller before
+    /// spawning, so a port that is taken fails startup.
+    pub async fn run(
+        self,
+        listener: std::net::TcpListener,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> Result<()> {
         let HttpServer {
             port,
             router,
             tracer_provider,
         } = self;
 
-        let listener = TcpListener::bind(("0.0.0.0", port)).await?;
+        let listener = TcpListener::from_std(listener)?;
         tracing::info!(port, "HTTP server listening");
 
         let graceful = GracefulShutdown::new();

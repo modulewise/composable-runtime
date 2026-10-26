@@ -72,7 +72,9 @@ impl Service for HttpService {
             return Ok(());
         }
 
-        let mut tasks = self.tasks.lock().unwrap();
+        // Bind every port before spawning any server, so a port that is taken
+        // fails startup with nothing left running.
+        let mut bound = Vec::with_capacity(servers.len());
         for config in servers {
             let name = config.name.clone();
             let port = config.port;
@@ -81,12 +83,20 @@ impl Service for HttpService {
                 Arc::clone(&component_host),
                 message_publisher.clone(),
             )?;
+            let listener = std::net::TcpListener::bind(("0.0.0.0", port)).map_err(|e| {
+                anyhow::anyhow!("HTTP server '{name}' cannot bind port {port}: {e}")
+            })?;
+            listener.set_nonblocking(true)?;
+            bound.push((name, port, server, listener));
+        }
 
+        let mut tasks = self.tasks.lock().unwrap();
+        for (name, port, server, listener) in bound {
             tracing::info!(server = %name, port, "starting HTTP server");
 
             let shutdown = self.shutdown_rx.clone();
             tasks.push(tokio::spawn(async move {
-                if let Err(e) = server.run(shutdown).await {
+                if let Err(e) = server.run(listener, shutdown).await {
                     tracing::error!(server = %name, "HTTP server error: {e}");
                 }
             }));
@@ -106,5 +116,97 @@ impl Service for HttpService {
                 let _ = task.await;
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use composable_runtime::{Component, ComponentInstance, ComponentInvoker, Selector, Val};
+
+    use super::*;
+
+    // A host with no components, for servers with no routes.
+    struct EmptyHost;
+
+    impl ComponentInvoker for EmptyHost {
+        fn invoke<'a>(
+            &'a self,
+            _component_name: &'a str,
+            _function_name: &'a str,
+            _args: Vec<Val>,
+            _env: Option<HashMap<String, String>>,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Val>>> + Send + 'a>> {
+            Box::pin(async { anyhow::bail!("no components") })
+        }
+    }
+
+    impl ComponentHost for EmptyHost {
+        fn get_component(&self, _name: &str) -> Option<&Component> {
+            None
+        }
+
+        fn list_components(&self, _selector: Option<&Selector>) -> Vec<&Component> {
+            Vec::new()
+        }
+
+        fn instantiate<'a>(
+            &'a self,
+            _component_name: &'a str,
+            _env: Option<HashMap<String, String>>,
+        ) -> Pin<Box<dyn Future<Output = Result<ComponentInstance>> + Send + 'a>> {
+            Box::pin(async { anyhow::bail!("no components") })
+        }
+    }
+
+    fn server(name: &str, port: u16) -> ServerConfig {
+        ServerConfig {
+            name: name.to_string(),
+            port,
+            routes: Vec::new(),
+            otlp_endpoint: None,
+            otlp_protocol: "grpc".to_string(),
+        }
+    }
+
+    fn service(servers: Vec<ServerConfig>) -> HttpService {
+        let service = HttpService::default();
+        service.set_component_host(Arc::new(EmptyHost));
+        service.servers.lock().unwrap().extend(servers);
+        service
+    }
+
+    #[tokio::test]
+    async fn a_taken_port_fails_start_and_starts_no_server() {
+        // A free port, released so that both servers ask for it.
+        let port = std::net::TcpListener::bind(("0.0.0.0", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let service = service(vec![server("first", port), server("second", port)]);
+
+        let error = service
+            .start()
+            .expect_err("the second server's port is taken");
+
+        assert!(
+            error.to_string().contains("'second' cannot bind port"),
+            "{error}"
+        );
+        assert!(service.tasks.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_started_server_serves_until_shutdown() {
+        // Port 0 binds any free port.
+        let service = service(vec![server("only", 0)]);
+
+        service.start().expect("start");
+        assert_eq!(service.tasks.lock().unwrap().len(), 1);
+
+        service.shutdown().await;
+        assert!(service.tasks.lock().unwrap().is_empty());
     }
 }
