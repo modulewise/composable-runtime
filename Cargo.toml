@@ -32,7 +32,7 @@ http-body = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server-graceful", "tokio"] }
-jsonschema = { version = "0.59", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
 opentelemetry = "0.33"
 opentelemetry-otlp = { version = "0.33", default-features = false }
 opentelemetry_sdk = "0.33"

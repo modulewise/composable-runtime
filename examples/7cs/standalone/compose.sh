@@ -7,7 +7,7 @@ EXAMPLE_DIR="$(dirname "$SCRIPT_DIR")"
 LIB_DIR="$EXAMPLE_DIR/lib"
 OUT_DIR="$SCRIPT_DIR/out"
 
-for f in configured-greeter.wasm capable-translator.wasm logging-advice.wasm wasi-logging-to-stdout.wasm; do
+for f in configured-greeter.wasm capable-translator.wasm logging-advice.wasm; do
   if [[ ! -f "$LIB_DIR/$f" ]]; then
     echo "Error: $LIB_DIR/$f not found. Run ../build.sh first."
     exit 1
@@ -15,6 +15,13 @@ for f in configured-greeter.wasm capable-translator.wasm logging-advice.wasm was
 done
 
 mkdir -p "$OUT_DIR"
+
+# The runtime pulls the logging adapter from OCI itself, but `wac compose`
+# needs it as a local file.
+if [[ ! -f "$OUT_DIR/wasi-logging-to-stderr.wasm" ]]; then
+  echo "Fetching WASI logging adapter..."
+  wkg oci pull -o "$OUT_DIR/wasi-logging-to-stderr.wasm" ghcr.io/componentized/logging/to-stderr:0.3.1
+fi
 
 # Step 1: Generate static config component (locale=de-DE)
 echo "Generating config component..."
@@ -32,7 +39,7 @@ wac plug --plug "$LIB_DIR/logging-advice.wasm" "$OUT_DIR/translator-interceptor.
 echo "Composing final component..."
 wac compose "$SCRIPT_DIR/compose.wac" \
   --dep "modulewise:capable-translator=$LIB_DIR/capable-translator.wasm" \
-  --dep "modulewise:logging-to-stdout=$LIB_DIR/wasi-logging-to-stdout.wasm" \
+  --dep "modulewise:logging-to-stderr=$OUT_DIR/wasi-logging-to-stderr.wasm" \
   --dep "modulewise:logging-translator=$OUT_DIR/logging-translator.wasm" \
   --dep "modulewise:config=$OUT_DIR/config.wasm" \
   --dep "modulewise:greeter=$LIB_DIR/configured-greeter.wasm" \

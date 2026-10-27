@@ -7,8 +7,7 @@ This example demonstrates an interceptor that wraps a component with cross-cutti
 - `wit/package.wit`: WIT interfaces for the greeter and logger worlds
 - `greeter/`: Wasm component that exports a `greet` function
 - `logger/`: Wasm component that exports `modulewise:interceptor/advice` and implements generic logging before and after each invocation
-- `config.toml`: Component and capability configuration
-- `wasi-logging-to-stdout.wasm`: WASI logging adapter (fetched from an OCI registry on first build)
+- `config.toml`: Component and capability configuration, including the WASI logging adapter that writes to stderr, which the runtime pulls from an OCI registry
 
 ## Building and Running
 
@@ -40,14 +39,18 @@ interceptors = ["logging-advice"]
 
 [component.logging-advice]
 uri = "./lib/logger.wasm"
-imports = ["stdout-logger"]
+imports = ["stderr-logger"]
 
-[component.stdout-logger]
-uri = "./lib/wasi-logging-to-stdout.wasm"
-imports = ["wasip2"]
+[component.stderr-logger]
+uri = "oci://ghcr.io/componentized/logging/to-stderr:0.3.1"
+imports = ["cli", "clocks"]
 
-[capability.wasip2]
-type = "wasi:p2"
+[capability.cli]
+type = "wasi:cli"
+inherit-stderr = true
+
+[capability.clocks]
+type = "wasi:clocks"
 ```
 
 ## How It Works
