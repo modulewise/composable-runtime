@@ -50,6 +50,7 @@ That incrementally introduces each concept along the way:
 
 ## Other Examples
 
+- [function](examples/function): A `[function]` definition exposes a component's function with JSON in and out, generated from the component's WIT
 - [hello-world](examples/hello-world): A simple greeter component invoked by a host application
 - [host-capability](examples/host-capability): A greeter component calls a host-provided function to get its greeting
 - [http-server](examples/http-server): The greeter component invoked by the runtime when HTTP requests arrive, either directly or via a messaging channel depending on the route
