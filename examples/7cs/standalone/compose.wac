@@ -2,7 +2,7 @@ package modulewise:standalone;
 
 let translator = new modulewise:capable-translator { ... };
 
-let logging = new modulewise:logging-to-stdout { ... };
+let logging = new modulewise:logging-to-stderr { ... };
 
 // Interceptor wrapping translator with logging advice
 let logging-translator = new modulewise:logging-translator {

@@ -20,18 +20,18 @@ for project in calculator greeter logger; do
     -o "lib/${project}.wasm"
 done
 
-if [[ ! -f lib/wasi-logging-to-stdout.wasm ]]; then
+if [[ ! -f lib/wasi-logging-to-stderr.wasm ]]; then
   echo "Fetching WASI logging adapter..."
-  wkg oci pull -o lib/wasi-logging-to-stdout.wasm ghcr.io/componentized/logging/to-stdout:v0.2.1
+  wkg oci pull -o lib/wasi-logging-to-stderr.wasm ghcr.io/componentized/logging/to-stderr:0.3.1
 fi
 
 echo "Composing..."
-wac plug -o lib/stdout-logger.wasm \
-  --plug lib/wasi-logging-to-stdout.wasm \
+wac plug -o lib/stderr-logger.wasm \
+  --plug lib/wasi-logging-to-stderr.wasm \
   lib/logger.wasm
 
 wac plug -o lib/composed.wasm \
   --plug lib/calculator.wasm \
   --plug lib/greeter.wasm \
-  --plug lib/stdout-logger.wasm \
+  --plug lib/stderr-logger.wasm \
   lib/interceptor.wasm

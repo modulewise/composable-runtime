@@ -18,8 +18,3 @@ TARGET=wasm32-unknown-unknown
     echo "  -> lib/${project}.wasm"
   done
 )
-
-if [[ ! -f "$SCRIPT_DIR/lib/wasi-logging-to-stdout.wasm" ]]; then
-  echo "Fetching WASI logging adapter..."
-  wkg oci pull -o "$SCRIPT_DIR/lib/wasi-logging-to-stdout.wasm" ghcr.io/componentized/logging/to-stdout:v0.2.1
-fi

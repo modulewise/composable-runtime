@@ -23,7 +23,7 @@ interceptors = ["logger"]
 
 [component.logger]
 uri = "./lib/logging-advice.wasm"
-imports = ["logging-stdout"]
+imports = ["logging-stderr"]
 
 [capability.http-client]
 type = "wasi:http"

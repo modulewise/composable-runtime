@@ -163,7 +163,7 @@ $ ./run.sh 4
 </td>
 <td>
 
-The `interceptors` list accepts components that export *and* import the same exports as the target component (so they can wrap each function call), but it also accepts generic advice that has no awareness of any specific target exports. In the latter case, the runtime generates the interceptor component and composes it with the generic advice and the specific target. This is essentially [Aspect-Oriented Programming for Wasm Components](../../crates/interceptor/). The "logging-stdout" component is defined in the shared `infra.toml` file.
+The `interceptors` list accepts components that export *and* import the same exports as the target component (so they can wrap each function call), but it also accepts generic advice that has no awareness of any specific target exports. In the latter case, the runtime generates the interceptor component and composes it with the generic advice and the specific target. This is essentially [Aspect-Oriented Programming for Wasm Components](../../crates/interceptor/). The "logging-stderr" component is defined in the shared `infra.toml` file.
 
 The interceptor generated from logging-advice now wraps the translator and logs before (with args) and after (with the return value) each invocation of the translate function.
 
@@ -183,7 +183,7 @@ interceptors = ["logger"]
 
 [component.logger]
 uri = "./lib/logging-advice.wasm"
-imports = ["logging-stdout"]
+imports = ["logging-stderr"]
 
 [capability.http-client]
 type = "wasi:http"
@@ -242,7 +242,7 @@ interceptors = ["logger"]
 
 [component.logger]
 uri = "./lib/logging-advice.wasm"
-imports = ["logging-stdout"]
+imports = ["logging-stderr"]
 
 [capability.http-client]
 type = "wasi:http"
@@ -320,18 +320,22 @@ type = "wasi:http"
 ```toml
 [component.logger]
 uri = "./lib/logging-advice.wasm"
-imports = ["logging-stdout"]
+imports = ["logging-stderr"]
 ```
 
 And finally, the shared `infra.toml` used for examples 4-7:
 
 ```toml
-[component.logging-stdout]
-uri = "./lib/wasi-logging-to-stdout.wasm"
-imports = ["wasip2"]
+[component.logging-stderr]
+uri = "oci://ghcr.io/componentized/logging/to-stderr:0.3.1"
+imports = ["cli", "clocks"]
 
-[capability.wasip2]
-type = "wasi:p2"
+[capability.cli]
+type = "wasi:cli"
+inherit-stderr = true
+
+[capability.clocks]
+type = "wasi:clocks"
 ```
 
 ```

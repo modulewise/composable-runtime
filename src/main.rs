@@ -110,7 +110,10 @@ async fn main() -> Result<()> {
     if matches!(cli.command, Command::Publish { .. }) {
         filter = filter.add_directive("composable_runtime::messaging=info".parse().unwrap());
     }
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 
     match cli.command {
         Command::Graph { definitions, dot } => {

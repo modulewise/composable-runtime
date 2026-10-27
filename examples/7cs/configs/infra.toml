@@ -1,8 +1,10 @@
-[component.logging-stdout]
-uri = "./lib/wasi-logging-to-stdout.wasm"
-# could provide this here instead of the wkg pull in build.sh:
-# uri = "oci://ghcr.io/componentized/logging/to-stdout:v0.2.1"
-imports = ["wasip2"]
+[component.logging-stderr]
+uri = "oci://ghcr.io/componentized/logging/to-stderr:0.3.1"
+imports = ["cli", "clocks"]
 
-[capability.wasip2]
-type = "wasi:p2"
+[capability.cli]
+type = "wasi:cli"
+inherit-stderr = true
+
+[capability.clocks]
+type = "wasi:clocks"

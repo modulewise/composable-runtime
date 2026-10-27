@@ -4,13 +4,15 @@ interceptors = ["logging-advice"]
 
 [component.logging-advice]
 uri = "./lib/logger.wasm"
-imports = ["stdout-logger"]
+imports = ["stderr-logger"]
 
-[component.stdout-logger]
-uri = "./lib/wasi-logging-to-stdout.wasm"
-# could use this instead of pulling in the build script:
-# uri = "oci://ghcr.io/componentized/logging/to-stdout:v0.2.1"
-imports = ["wasip2"]
+[component.stderr-logger]
+uri = "oci://ghcr.io/componentized/logging/to-stderr:0.3.1"
+imports = ["cli", "clocks"]
 
-[capability.wasip2]
-type = "wasi:p2"
+[capability.cli]
+type = "wasi:cli"
+inherit-stderr = true
+
+[capability.clocks]
+type = "wasi:clocks"
