@@ -48,8 +48,21 @@ implementation is in the `composable-factory` repository.
 
 ## Use within Composable Runtime
 
-Reference a `function-factory` component with a `factory:` URI so it provides
-bytes for a component definition:
+A `[function]` definition generates a function over a target component:
+
+```toml
+[function.greet]
+target = "greeter"
+function = "greeter.greet"
+
+[component.greeter]
+uri = "./lib/greeter.wasm"
+```
+
+The handler emits the function-factory and the JSON mapper definitions,
+equivalent to wiring them by hand. To wire them by hand instead, reference a
+`function-factory` component with a `factory:` URI so it provides bytes for a
+component definition:
 
 ```toml
 [component.greeter-function]
@@ -57,7 +70,7 @@ uri = "factory:greeter-factory"
 imports = ["target", "mapper"]
 
 [component.greeter-factory]
-uri = "oci://ghcr.io/modulewise/component/function-factory:0.4.0"
+uri = "oci://ghcr.io/modulewise/component/function-factory:0.5.1"
 config.wit = "${wit(target)}"
 config.function = "greeter.greet"
 

@@ -1,0 +1,7 @@
+[function.greet]
+target = "greeter"
+function = "greeter.greet"
+description = "Greet someone by name"
+
+[component.greeter]
+uri = "oci://ghcr.io/modulewise/demo/hello:0.2.0"

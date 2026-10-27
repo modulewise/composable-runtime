@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
-use super::handlers::{CapabilityConfigHandler, ComponentConfigHandler};
+use super::handlers::{CapabilityConfigHandler, ComponentConfigHandler, FunctionConfigHandler};
 use super::types::{ConfigHandler, Definition, DefinitionLoader, GenericDefinition, PropertyMap};
 use crate::types::{CapabilityDefinition, ComponentDefinition};
 
@@ -73,6 +73,7 @@ impl ConfigProcessor {
         let mut all_handlers: Vec<Box<dyn ConfigHandler>> = Vec::new();
         all_handlers.push(Box::new(ComponentConfigHandler));
         all_handlers.push(Box::new(CapabilityConfigHandler));
+        all_handlers.push(Box::new(FunctionConfigHandler::default()));
         all_handlers.extend(self.handlers);
 
         let (mut component_definitions, mut capability_definitions) =
