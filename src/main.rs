@@ -495,9 +495,12 @@ fn parse_invoke_args(
         let mut json_val = serde_json::from_str(trimmed)
             .unwrap_or_else(|_| serde_json::Value::String(trimmed.to_string()));
 
-        // Convert numbers/objects/arrays to strings if the parameter's schema expects a string.
+        // Convert numbers/objects/arrays to strings if the parameter's schema expects a string,
+        // directly or within options.
         if let Some(param) = params.get(i)
-            && let Some("string") = param.json_schema.get("type").and_then(|v| v.as_str())
+            && let Some("string") = value_schema(&param.json_schema)
+                .get("type")
+                .and_then(|v| v.as_str())
         {
             match &json_val {
                 serde_json::Value::Number(n) => {
@@ -524,6 +527,21 @@ fn parse_invoke_args(
     }
 
     Ok(final_args)
+}
+
+// Unwraps option schemas (`{"oneOf": [<value>, {"type": "null"}]}`) to the
+// schema of the value.
+fn value_schema(schema: &serde_json::Value) -> &serde_json::Value {
+    match schema
+        .get("oneOf")
+        .and_then(|v| v.as_array())
+        .map(Vec::as_slice)
+    {
+        Some([value, null]) if null.get("type").and_then(|v| v.as_str()) == Some("null") => {
+            value_schema(value)
+        }
+        _ => schema,
+    }
 }
 
 fn find_component<'a>(components: &[&'a Component], name: &str) -> Option<&'a Component> {
