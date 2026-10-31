@@ -42,11 +42,11 @@ tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
-wasm-encoder = "0.262"
-wasmparser = "0.262"
+wasm-encoder = "0.263"
+wasmparser = "0.263"
 wasmtime = { version = "50", features = ["component-model-async"] }
-wat = "1.262"
-wit-parser = "0.262"
+wat = "1.263"
+wit-parser = "0.263"
 
 [dependencies]
 anyhow.workspace = true
@@ -81,7 +81,7 @@ wasmtime-wasi = { version = "50", features = ["p3"] }
 wasmtime-wasi-config = "50"
 wasmtime-wasi-http = { version = "50", features = ["p3"] }
 wasmtime-wasi-io = "50"
-wit-component = "0.262"
+wit-component = "0.263"
 wit-parser.workspace = true
 
 [dev-dependencies]
