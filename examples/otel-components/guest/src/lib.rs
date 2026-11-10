@@ -4,27 +4,29 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+use serde_json::json;
 use wasi::otel::logs;
 
 struct Logger;
 
 impl exports::modulewise::otel_example::test::Guest for Logger {
     fn log(message: String) -> Result<(), String> {
+        // Values are JSON.
         logs::on_emit(&logs::LogRecord {
             timestamp: None,
             observed_timestamp: None,
             severity_text: Some("INFO".to_string()),
             severity_number: Some(9),
-            body: Some(message),
+            body: Some(json!(message).to_string()),
             attributes: Some(vec![logs::KeyValue {
                 key: "component".to_string(),
-                value: "guest".to_string(),
+                value: json!("guest").to_string(),
             }]),
             event_name: None,
             resource: Some(logs::Resource {
                 attributes: vec![logs::KeyValue {
                     key: "service.name".to_string(),
-                    value: "otel-example".to_string(),
+                    value: json!("otel-example").to_string(),
                 }],
                 schema_url: None,
             }),

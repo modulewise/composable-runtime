@@ -1222,6 +1222,7 @@ dependencies = [
 name = "guest"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "wit-bindgen",
 ]
 
@@ -2096,6 +2097,7 @@ dependencies = [
  "hex",
  "opentelemetry-proto",
  "prost",
+ "serde_json",
  "wit-bindgen",
 ]
 
