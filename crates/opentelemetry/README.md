@@ -52,6 +52,17 @@ Log records may optionally carry an inline `resource` field:
 
 ---
 
+## Values
+
+Attribute values and log bodies are JSON text and are exported as the typed values they encode:
+
+- Span, event, link, resource, and instrumentation scope attributes: a string, bool, integer, double, or an array of one of those.
+- Log bodies and log record attributes: also lists of mixed values and maps.
+
+A string is quoted: `"chat"`, not `chat`. A value that is not valid JSON, or not one of the above (such as `null`), is dropped with a warning naming its key. A dropped span, event, or link attribute is counted in that span's, event's, or link's dropped attributes.
+
+---
+
 ## Library usage
 
 Register the service with a `RuntimeBuilder`:

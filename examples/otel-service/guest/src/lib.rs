@@ -4,6 +4,7 @@ wit_bindgen::generate!({
     generate_all,
 });
 
+use serde_json::json;
 use wasi::otel::{logs, tracing};
 
 struct Component;
@@ -29,15 +30,16 @@ impl Guest for Component {
         tracing::on_start(&span_context);
 
         // Emit a log record with no resource (routes through the default batch processor).
+        // Values are JSON.
         logs::on_emit(&logs::LogRecord {
             timestamp: Some(now),
             observed_timestamp: None,
             severity_text: Some("INFO".to_string()),
             severity_number: Some(9),
-            body: Some("otel-service example ran".to_string()),
+            body: Some(json!("otel-service example ran").to_string()),
             attributes: Some(vec![logs::KeyValue {
                 key: "component".to_string(),
-                value: "otel-service-guest".to_string(),
+                value: json!("otel-service-guest").to_string(),
             }]),
             event_name: None,
             resource: None,
@@ -63,7 +65,7 @@ impl Guest for Component {
             end_time,
             attributes: vec![tracing::KeyValue {
                 key: "example".to_string(),
-                value: "otel-service".to_string(),
+                value: json!("otel-service").to_string(),
             }],
             events: vec![],
             links: vec![],

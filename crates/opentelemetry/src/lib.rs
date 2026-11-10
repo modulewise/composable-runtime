@@ -31,6 +31,8 @@ mod bindings {
 
 use bindings::wasi::otel;
 
+mod value;
+
 // Initialized per OtelCapability instance in OtelService::start().
 struct CapabilityProcessors {
     span_processor: Arc<BatchSpanProcessor<Tokio>>,
@@ -359,11 +361,7 @@ fn build_resource(attrs: &HashMap<String, String>) -> Resource {
 }
 
 fn wasi_resource_to_sdk(r: &otel::logs::Resource) -> Resource {
-    let kvs: Vec<opentelemetry::KeyValue> = r
-        .attributes
-        .iter()
-        .map(|kv| opentelemetry::KeyValue::new(kv.key.clone(), kv.value.clone()))
-        .collect();
+    let (kvs, _) = convert_attributes(&r.attributes);
     Resource::builder().with_attributes(kvs).build()
 }
 
@@ -384,7 +382,19 @@ fn populate_log_record(
     use opentelemetry::logs::LogRecord as _;
 
     if let Some(body) = &data.body {
-        record.set_body(opentelemetry::logs::AnyValue::String(body.clone().into()));
+        match value::log_value(body) {
+            Some(body) => record.set_body(body),
+            None => tracing::warn!("dropped a log record's body: it is not a JSON-encoded value"),
+        }
+    }
+    for kv in data.attributes.iter().flatten() {
+        match value::log_value(&kv.value) {
+            Some(value) => record.add_attribute(kv.key.clone(), value),
+            None => tracing::warn!(
+                "dropped log attribute '{}': its value is not a JSON-encoded value",
+                kv.key
+            ),
+        }
     }
     if let Some(ts) = data.timestamp {
         record.set_timestamp(convert_datetime(ts));
@@ -435,7 +445,8 @@ fn extract_instrumentation_scope(
     if let Some(url) = &s.schema_url {
         builder = builder.with_schema_url(std::borrow::Cow::Owned(url.clone()));
     }
-    builder.build()
+    let (attributes, _) = convert_attributes(&s.attributes);
+    builder.with_attributes(attributes).build()
 }
 
 fn convert_span_context(sc: otel::tracing::SpanContext) -> opentelemetry::trace::SpanContext {
@@ -495,6 +506,8 @@ fn convert_span_data(
     links.links = span.links.into_iter().map(convert_link).collect();
     links.dropped_count = span.dropped_links;
 
+    let (attributes, invalid) = convert_attributes(&span.attributes);
+
     opentelemetry_sdk::trace::SpanData {
         span_context: convert_span_context(span.span_context),
         parent_span_id: opentelemetry::trace::SpanId::from_hex(&span.parent_span_id)
@@ -504,8 +517,8 @@ fn convert_span_data(
         name: span.name.into(),
         start_time: convert_datetime(span.start_time),
         end_time: convert_datetime(span.end_time),
-        attributes: span.attributes.into_iter().map(convert_key_value).collect(),
-        dropped_attributes_count: span.dropped_attributes,
+        attributes,
+        dropped_attributes_count: span.dropped_attributes.saturating_add(invalid),
         events,
         links,
         status: convert_status(span.status),
@@ -514,20 +527,13 @@ fn convert_span_data(
 }
 
 fn convert_event(e: otel::tracing::Event) -> opentelemetry::trace::Event {
-    opentelemetry::trace::Event::new(
-        e.name,
-        convert_datetime(e.time),
-        e.attributes.into_iter().map(convert_key_value).collect(),
-        0,
-    )
+    let (attributes, invalid) = convert_attributes(&e.attributes);
+    opentelemetry::trace::Event::new(e.name, convert_datetime(e.time), attributes, invalid)
 }
 
 fn convert_link(l: otel::tracing::Link) -> opentelemetry::trace::Link {
-    opentelemetry::trace::Link::new(
-        convert_span_context(l.span_context),
-        l.attributes.into_iter().map(convert_key_value).collect(),
-        0,
-    )
+    let (attributes, invalid) = convert_attributes(&l.attributes);
+    opentelemetry::trace::Link::new(convert_span_context(l.span_context), attributes, invalid)
 }
 
 fn convert_span_kind(kind: otel::tracing::SpanKind) -> opentelemetry::trace::SpanKind {
@@ -550,8 +556,26 @@ fn convert_status(status: otel::tracing::Status) -> opentelemetry::trace::Status
     }
 }
 
-fn convert_key_value(kv: otel::tracing::KeyValue) -> opentelemetry::KeyValue {
-    opentelemetry::KeyValue::new(kv.key, kv.value)
+// The attributes whose values decode, and how many were dropped because their
+// values are invalid (do not decode). Each dropped attribute is logged by its
+// key.
+fn convert_attributes(attributes: &[otel::types::KeyValue]) -> (Vec<opentelemetry::KeyValue>, u32) {
+    let mut invalid = 0;
+    let converted = attributes
+        .iter()
+        .filter_map(|kv| match value::attribute_value(&kv.value) {
+            Some(value) => Some(opentelemetry::KeyValue::new(kv.key.clone(), value)),
+            None => {
+                invalid += 1;
+                tracing::warn!(
+                    "dropped attribute '{}': its value is not a JSON-encoded attribute value",
+                    kv.key
+                );
+                None
+            }
+        })
+        .collect();
+    (converted, invalid)
 }
 
 fn convert_datetime(dt: bindings::wasi::clocks::wall_clock::Datetime) -> std::time::SystemTime {
@@ -569,7 +593,8 @@ fn convert_instrumentation_scope_tracing(
     if let Some(url) = scope.schema_url {
         builder = builder.with_schema_url(std::borrow::Cow::Owned(url));
     }
-    builder.build()
+    let (attributes, _) = convert_attributes(&scope.attributes);
+    builder.with_attributes(attributes).build()
 }
 
 fn severity_from_u8(n: u8) -> opentelemetry::logs::Severity {

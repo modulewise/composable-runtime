@@ -10,4 +10,5 @@ crate-type = ["cdylib"]
 hex = "0.4"
 opentelemetry-proto = { version = "0.33", default-features = false, features = ["logs", "gen-tonic-messages"] }
 prost = "0.14"
+serde_json = "1"
 wit-bindgen = "0.63"
