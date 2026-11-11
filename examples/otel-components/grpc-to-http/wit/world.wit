@@ -1,0 +1,8 @@
+package modulewise:grpc-to-http;
+
+// The only world that uses wasi:http p2 and its p2 deps.
+world grpc-to-http {
+    export modulewise:grpc/endpoint@0.1.0;
+    import wasi:http/outgoing-handler@0.2.12;
+    import wasi:config/store@0.2.0-rc.1;
+}

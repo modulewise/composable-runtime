@@ -6,17 +6,11 @@ interface test {
 
 world guest {
     export test;
-    import wasi:otel/logs@0.2.0-rc.2+patch;
+    import wasi:otel/logs@0.2.0-rc.2+p3;
 }
 
 world otel-to-grpc {
-    export wasi:otel/logs@0.2.0-rc.2+patch;
+    export wasi:otel/logs@0.2.0-rc.2+p3;
     import modulewise:grpc/endpoint@0.1.0;
-    import wasi:clocks/wall-clock@0.2.12;
-}
-
-world grpc-to-http {
-    export modulewise:grpc/endpoint@0.1.0;
-    import wasi:http/outgoing-handler@0.2.12;
-    import wasi:config/store@0.2.0-rc.1;
+    import wasi:clocks/system-clock@0.3.0;
 }

@@ -15,11 +15,8 @@ impl Guest for Component {
         let outer = tracing::outer_span_context();
 
         // Start a guest span as a child of the host's span.
-        let now = wasi::clocks::wall_clock::now();
-        let span_id = wasi::random::random::get_random_bytes(8)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
+        let now = wasi::clocks::system_clock::now();
+        let span_id = format!("{:016x}", wasi::random::random::get_random_u64());
         let span_context = tracing::SpanContext {
             trace_id: outer.trace_id.clone(),
             span_id,
@@ -55,7 +52,7 @@ impl Guest for Component {
         });
 
         // End the guest span.
-        let end_time = wasi::clocks::wall_clock::now();
+        let end_time = wasi::clocks::system_clock::now();
         tracing::on_end(&tracing::SpanData {
             span_context: span_context.clone(),
             parent_span_id: outer.span_id.clone(),
