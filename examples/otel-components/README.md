@@ -64,7 +64,7 @@ imports = ["otel"]
 
 [component.otel]
 uri = "./lib/otel-to-grpc.wasm"
-imports = ["grpc", "wasip2"]
+imports = ["grpc", "clocks", "cli"]
 
 [capability.grpc]
 type = "grpc"
@@ -72,8 +72,11 @@ url = "http://localhost:4317"
 paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
-[capability.wasip2]
-type = "wasi:p2"
+[capability.clocks]
+type = "wasi:clocks"
+
+[capability.cli]
+type = "wasi:cli"
 ```
 
 The "grpc" definition creates an instance of the host capability, which the host binary has registered when building the runtime:
@@ -101,7 +104,7 @@ imports = ["otel"]
 
 [component.otel]
 uri = "./lib/otel-to-grpc.wasm"
-imports = ["grpc", "wasip2"]
+imports = ["grpc", "clocks", "cli"]
 
 [component.grpc]
 uri = "./lib/grpc-to-http.wasm"
@@ -111,11 +114,14 @@ config.paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 config.paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
 [capability.http]
-type = "wasi:http"
+type = "wasi:http-p2"
 h2c-for-grpc = true
 
-[capability.wasip2]
-type = "wasi:p2"
+[capability.clocks]
+type = "wasi:clocks"
+
+[capability.cli]
+type = "wasi:cli"
 ```
 
 The `grpc-to-http` component constructs a gRPC-framed request and sends it via `wasi:http/outgoing-handler`.
@@ -126,20 +132,20 @@ The `grpc-to-http` component constructs a gRPC-framed request and sends it via `
 
 ## WIT Worlds
 
-Each component has a WIT world defining its imports and exports:
+Each component has a WIT world defining its imports and exports. The `grpc-to-http` world is in [grpc-to-http/wit](grpc-to-http/wit), apart from the others in [wit](wit), because it is the only one that uses `wasi:http` 0.2, so only its WIT depends on WASI p2:
 
 ```wit
 // Guest: uses wasi:otel to emit logs
 world guest {
-    import wasi:otel/logs@0.2.0-rc.2+patch;
+    import wasi:otel/logs@0.2.0-rc.2+p3;
     export test;
 }
 
 // Adapter: converts wasi:otel to OTLP protobuf, sends via grpc endpoint
 world otel-to-grpc {
-    export wasi:otel/logs@0.2.0-rc.2+patch;
+    export wasi:otel/logs@0.2.0-rc.2+p3;
     import modulewise:grpc/endpoint@0.1.0;
-    import wasi:clocks/wall-clock@0.2.12;
+    import wasi:clocks/system-clock@0.3.0;
 }
 
 // Component Endpoint: translates grpc to wasi:http
@@ -154,7 +160,9 @@ The composable-runtime composes these together based on the config graph: the gu
 
 ## Building and Running
 
-Prerequisite: an OTLP collector at localhost:4317
+Prerequisites:
+- an OTLP collector at localhost:4317
+- a nightly Rust toolchain with the `wasm32-wasip3` target (`rustup +nightly target add wasm32-wasip3`)
 
 ```bash
 ./build.sh   # builds all wasm components + host binary

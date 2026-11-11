@@ -23,7 +23,7 @@ uri = "./lib/guest.wasm"
 imports = ["otel", "clocks", "random"]
 
 [capability.clocks]
-type = "wasi:clocks-p2"
+type = "wasi:clocks"
 
 [capability.random]
-type = "wasi:random-p2"
+type = "wasi:random"

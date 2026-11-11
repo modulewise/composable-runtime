@@ -17,7 +17,7 @@ use opentelemetry_proto::tonic::common::v1::{
 use opentelemetry_proto::tonic::logs::v1::{LogRecord as OtlpLogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource as OtlpResource;
 use prost::Message;
-use wasi::clocks::wall_clock;
+use wasi::clocks::system_clock::{self, Instant};
 
 impl LogsGuest for OtelAdapter {
     fn on_emit(record: LogRecord) {
@@ -85,13 +85,8 @@ fn send_log(data: &LogRecord) -> Result<(), String> {
 }
 
 fn convert_log_record(data: &LogRecord) -> OtlpLogRecord {
-    let ts = data.timestamp.unwrap_or_else(wall_clock::now);
-    let time_unix_nano = ts.seconds * 1_000_000_000 + ts.nanoseconds as u64;
-
-    let observed_time_unix_nano = data
-        .observed_timestamp
-        .map(|dt| dt.seconds * 1_000_000_000 + dt.nanoseconds as u64)
-        .unwrap_or(0);
+    let time_unix_nano = unix_nanos(data.timestamp.unwrap_or_else(system_clock::now));
+    let observed_time_unix_nano = data.observed_timestamp.map(unix_nanos).unwrap_or(0);
 
     let severity_number = data.severity_number.unwrap_or(0) as i32;
 
@@ -129,6 +124,16 @@ fn convert_log_record(data: &LogRecord) -> OtlpLogRecord {
         span_id,
         event_name: data.event_name.clone().unwrap_or_default(),
     }
+}
+
+// OTLP times are unsigned nanoseconds since the epoch, where 0 means unknown,
+// so a time before the epoch, or too late to count in a u64, becomes 0.
+fn unix_nanos(instant: Instant) -> u64 {
+    u64::try_from(instant.seconds)
+        .ok()
+        .and_then(|seconds| seconds.checked_mul(1_000_000_000))
+        .and_then(|nanos| nanos.checked_add(u64::from(instant.nanoseconds)))
+        .unwrap_or(0)
 }
 
 // The key-values whose values decode and how many were dropped because their

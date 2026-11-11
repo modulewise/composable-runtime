@@ -73,10 +73,10 @@ uri = "./lib/guest.wasm"
 imports = ["otel", "clocks", "random"]
 
 [capability.clocks]
-type = "wasi:clocks-p2"
+type = "wasi:clocks"
 
 [capability.random]
-type = "wasi:random-p2"
+type = "wasi:random"
 ```
 
 - `[capability.otel]`: configures the OTLP exporter (endpoint, protocol, resource attributes), and exports `wasi:otel/logs` and `wasi:otel/tracing` for guest components.

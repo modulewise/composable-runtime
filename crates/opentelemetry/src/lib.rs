@@ -148,8 +148,8 @@ impl OtelCapability {
 impl HostCapability for OtelCapability {
     fn interfaces(&self) -> Vec<String> {
         vec![
-            "wasi:otel/logs@0.2.0-rc.2+patch".to_string(),
-            "wasi:otel/tracing@0.2.0-rc.2+patch".to_string(),
+            "wasi:otel/logs@0.2.0-rc.2+p3".to_string(),
+            "wasi:otel/tracing@0.2.0-rc.2+p3".to_string(),
         ]
     }
 
@@ -397,10 +397,10 @@ fn populate_log_record(
         }
     }
     if let Some(ts) = data.timestamp {
-        record.set_timestamp(convert_datetime(ts));
+        record.set_timestamp(convert_system_time(ts));
     }
     if let Some(ts) = data.observed_timestamp {
-        record.set_observed_timestamp(convert_datetime(ts));
+        record.set_observed_timestamp(convert_system_time(ts));
     }
     if let Some(n) = data.severity_number {
         record.set_severity_number(severity_from_u8(n));
@@ -515,8 +515,8 @@ fn convert_span_data(
         parent_span_is_remote: parent_is_remote,
         span_kind: convert_span_kind(span.span_kind),
         name: span.name.into(),
-        start_time: convert_datetime(span.start_time),
-        end_time: convert_datetime(span.end_time),
+        start_time: convert_system_time(span.start_time),
+        end_time: convert_system_time(span.end_time),
         attributes,
         dropped_attributes_count: span.dropped_attributes.saturating_add(invalid),
         events,
@@ -528,7 +528,7 @@ fn convert_span_data(
 
 fn convert_event(e: otel::tracing::Event) -> opentelemetry::trace::Event {
     let (attributes, invalid) = convert_attributes(&e.attributes);
-    opentelemetry::trace::Event::new(e.name, convert_datetime(e.time), attributes, invalid)
+    opentelemetry::trace::Event::new(e.name, convert_system_time(e.time), attributes, invalid)
 }
 
 fn convert_link(l: otel::tracing::Link) -> opentelemetry::trace::Link {
@@ -578,8 +578,21 @@ fn convert_attributes(attributes: &[otel::types::KeyValue]) -> (Vec<opentelemetr
     (converted, invalid)
 }
 
-fn convert_datetime(dt: bindings::wasi::clocks::wall_clock::Datetime) -> std::time::SystemTime {
-    std::time::UNIX_EPOCH + std::time::Duration::new(dt.seconds, dt.nanoseconds)
+// The seconds can be negative, for a time before the epoch, but the
+// nanoseconds always count forward from them. So a time the system cannot
+// represent becomes the epoch.
+fn convert_system_time(
+    instant: bindings::wasi::clocks::system_clock::Instant,
+) -> std::time::SystemTime {
+    let seconds = std::time::Duration::from_secs(instant.seconds.unsigned_abs());
+    let nanoseconds = std::time::Duration::from_nanos(instant.nanoseconds.into());
+    let time = if instant.seconds < 0 {
+        std::time::UNIX_EPOCH.checked_sub(seconds)
+    } else {
+        std::time::UNIX_EPOCH.checked_add(seconds)
+    };
+    time.and_then(|time| time.checked_add(nanoseconds))
+        .unwrap_or(std::time::UNIX_EPOCH)
 }
 
 fn convert_instrumentation_scope_tracing(
@@ -625,5 +638,40 @@ fn severity_from_u8(n: u8) -> opentelemetry::logs::Severity {
         23 => Fatal3,
         24 => Fatal4,
         _ => Info,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use super::*;
+    use bindings::wasi::clocks::system_clock::Instant;
+
+    #[test]
+    fn a_time_after_the_epoch_adds_its_nanoseconds() {
+        let time = convert_system_time(Instant {
+            seconds: 1,
+            nanoseconds: 500_000_000,
+        });
+        assert_eq!(time, UNIX_EPOCH + Duration::from_millis(1500));
+    }
+
+    #[test]
+    fn a_time_before_the_epoch_counts_its_nanoseconds_forward() {
+        let time = convert_system_time(Instant {
+            seconds: -1,
+            nanoseconds: 999_999_999,
+        });
+        assert_eq!(time, UNIX_EPOCH - Duration::from_nanos(1));
+    }
+
+    #[test]
+    fn a_time_the_system_cannot_represent_becomes_the_epoch() {
+        let time = convert_system_time(Instant {
+            seconds: i64::MAX,
+            nanoseconds: u32::MAX,
+        });
+        assert_eq!(time, UNIX_EPOCH);
     }
 }

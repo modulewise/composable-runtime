@@ -4,7 +4,7 @@ imports = ["otel"]
 
 [component.otel]
 uri = "./lib/otel-to-grpc.wasm"
-imports = ["grpc", "wasip2"]
+imports = ["grpc", "clocks", "cli"]
 
 [capability.grpc]
 type = "grpc"
@@ -12,5 +12,8 @@ url = "http://localhost:4317"
 paths.logs = "/opentelemetry.proto.collector.logs.v1.LogsService/Export"
 paths.traces = "/opentelemetry.proto.collector.trace.v1.TraceService/Export"
 
-[capability.wasip2]
-type = "wasi:p2"
+[capability.clocks]
+type = "wasi:clocks"
+
+[capability.cli]
+type = "wasi:cli"
