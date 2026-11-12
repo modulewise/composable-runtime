@@ -92,9 +92,9 @@ impl Composer {
             ..Default::default()
         };
 
-        let bytes = graph
-            .encode(encode_options)
-            .map_err(|e| anyhow::anyhow!("Failed to encode composition: {e}"))?;
+        let bytes = graph.encode(encode_options).map_err(|e| {
+            anyhow::anyhow!("Failed to encode composition: {:#}", anyhow::Error::from(e))
+        })?;
 
         Ok(Composable {
             name: socket.name.clone(),

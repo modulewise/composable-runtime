@@ -73,8 +73,13 @@ impl Parser {
         for (key, item) in &world.imports {
             match item {
                 wit_parser::WorldItem::Interface { id, .. } => {
-                    // Skip type-only interfaces (no functions to satisfy at runtime)
-                    if resolve.interfaces[*id].functions.is_empty() {
+                    // Skip interfaces with no resources or functions.
+                    let interface = &resolve.interfaces[*id];
+                    let has_resource = interface
+                        .types
+                        .values()
+                        .any(|ty| Self::is_resource(&resolve, *ty));
+                    if interface.functions.is_empty() && !has_resource {
                         continue;
                     }
                     imports.push(Import {
@@ -147,6 +152,18 @@ impl Parser {
             }
         } else {
             Err(anyhow::anyhow!("Interface missing name"))
+        }
+    }
+
+    // Whether a type is a resource, directly or through aliases, e.g. a
+    // resource `use`d from another interface.
+    fn is_resource(resolve: &wit_parser::Resolve, id: wit_parser::TypeId) -> bool {
+        match &resolve.types[id].kind {
+            wit_parser::TypeDefKind::Resource => true,
+            wit_parser::TypeDefKind::Type(Type::Id(aliased)) => {
+                Self::is_resource(resolve, *aliased)
+            }
+            _ => false,
         }
     }
 
@@ -534,6 +551,40 @@ mod tests {
             .expect("expected type alias `t` in interface");
         let ty = Type::Id(type_id);
         (resolve, ty)
+    }
+
+    #[test]
+    fn an_import_holding_only_a_resource_is_kept_but_a_type_only_import_is_skipped() {
+        let bytes = wat::parse_str(
+            r#"(component
+                (import "test:pkg/handles@0.1.0" (instance
+                    (export "handle" (type (sub resource)))))
+                (import "test:pkg/types@0.1.0" (instance
+                    (type $point (record (field "x" u32)))
+                    (export "point" (type (eq $point)))))
+            )"#,
+        )
+        .unwrap();
+        let (_, imports, _, _) = Parser::parse(&bytes).unwrap();
+        let names: Vec<&str> = imports.iter().map(|import| import.name.as_str()).collect();
+        assert_eq!(names, ["test:pkg/handles@0.1.0"]);
+    }
+
+    #[test]
+    fn an_import_using_a_resource_from_another_is_kept() {
+        let bytes = wat::parse_str(
+            r#"(component
+                (import "test:pkg/handles@0.1.0" (instance $handles
+                    (export "handle" (type (sub resource)))))
+                (alias export $handles "handle" (type $handle))
+                (import "test:pkg/uses@0.1.0" (instance
+                    (export "handle" (type (eq $handle)))))
+            )"#,
+        )
+        .unwrap();
+        let (_, imports, _, _) = Parser::parse(&bytes).unwrap();
+        let names: Vec<&str> = imports.iter().map(|import| import.name.as_str()).collect();
+        assert_eq!(names, ["test:pkg/handles@0.1.0", "test:pkg/uses@0.1.0"]);
     }
 
     // Parse WIT, emit the schema for the named alias `t`, meta-validate, return it.
