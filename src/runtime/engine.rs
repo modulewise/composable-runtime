@@ -230,6 +230,8 @@ impl ComponentEngine {
                         wasi_builder.inherit_stdio();
                         wasi_builder.inherit_network();
                         wasi_builder.allow_ip_name_lookup(true);
+                        wasi_builder.allow_tcp(true);
+                        wasi_builder.allow_udp(true);
                         add_preopens(&mut wasi_builder, props, capability_name)?;
                     }
                     "wasi:cli" => {
@@ -257,6 +259,14 @@ impl ComponentEngine {
                         if props.get("allow-ip-name-lookup").and_then(|v| v.as_bool()) == Some(true)
                         {
                             wasi_builder.allow_ip_name_lookup(true);
+                        }
+                        // Each protocol is granted on its own, not implied by
+                        // inherit-network.
+                        if props.get("allow-tcp").and_then(|v| v.as_bool()) == Some(true) {
+                            wasi_builder.allow_tcp(true);
+                        }
+                        if props.get("allow-udp").and_then(|v| v.as_bool()) == Some(true) {
+                            wasi_builder.allow_udp(true);
                         }
                     }
                     _ => {}
