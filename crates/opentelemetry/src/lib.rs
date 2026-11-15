@@ -33,13 +33,16 @@ use bindings::wasi::otel;
 
 mod value;
 
+// A resource's attribute pairs, sorted.
+type ResourceKey = Vec<(String, String)>;
+
 // Initialized per OtelCapability instance in OtelService::start().
 struct CapabilityProcessors {
     span_processor: Arc<BatchSpanProcessor<Tokio>>,
     // Used when log-record carries no resource. All no-resource records share this processor.
     default_log_provider: Arc<SdkLoggerProvider>,
     // Created on demand when a log-record carries a resource. Keyed by sorted attribute pairs.
-    keyed_log_providers: Mutex<HashMap<Vec<(String, String)>, Arc<SdkLoggerProvider>>>,
+    keyed_log_providers: Mutex<HashMap<ResourceKey, Arc<SdkLoggerProvider>>>,
 }
 
 // Per-component-invocation state placed into ComponentState extensions.
@@ -202,7 +205,18 @@ impl otel::tracing::Host for ComponentState {
         Ok(())
     }
 
-    async fn outer_span_context(&mut self) -> wasmtime::Result<otel::tracing::SpanContext> {
+    // The innermost open guest span, else the propagated span context, else an
+    // empty span context.
+    async fn current_span_context(&mut self) -> wasmtime::Result<otel::tracing::SpanContext> {
+        let innermost = self
+            .get_extension_mut::<OtelInstanceState>()
+            .expect("OtelInstanceState not initialized")
+            .guest_spans
+            .last()
+            .map(|(_, span_context)| span_context.clone());
+        if let Some(span_context) = innermost {
+            return Ok(otel_span_context_to_wasi(span_context));
+        }
         let sc = PROPAGATION_CONTEXT
             .try_with(|ctx| {
                 ctx.as_ref().and_then(|c| {
@@ -365,8 +379,8 @@ fn wasi_resource_to_sdk(r: &otel::logs::Resource) -> Resource {
     Resource::builder().with_attributes(kvs).build()
 }
 
-fn resource_key(r: &otel::logs::Resource) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> = r
+fn resource_key(r: &otel::logs::Resource) -> ResourceKey {
+    let mut pairs: ResourceKey = r
         .attributes
         .iter()
         .map(|kv| (kv.key.clone(), kv.value.clone()))
