@@ -113,7 +113,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 [[package]]
 name = "composable-factory"
 version = "0.7.0"
-source = "git+https://github.com/modulewise/composable-factory?branch=main#8fbe03b7ec273f6d4019cbe5dd5fd86f47e00e42"
+source = "git+https://github.com/modulewise/composable-factory?branch=main#f47056eb7e4553d0715d3eb3b1fa880506563d6b"
 dependencies = [
  "anyhow",
  "indexmap",
