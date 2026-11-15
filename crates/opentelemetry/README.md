@@ -37,9 +37,9 @@ Multiple `[capability.*]` blocks with `type = "otel"` create independent instanc
 
 ## Trace Context Propagation
 
-The capability exposes `outer-span-context` on `wasi:otel/tracing`, returning the `SpanContext` the host opened for the current invocation. This is parsed from a `traceparent` (and optional `tracestate`) entry on the runtime's `PROPAGATION_CONTEXT` task-local, populated by whichever entry point accepted the inbound request. For example, `composable-http-server` writes the traceparent before invoking a component.
+The capability exposes `current-span-context` on `wasi:otel/tracing`, returning the span context of the most recently started guest span that hasn't ended. Every component composed into one invocation shares those spans, so a span one component starts is the parent of the spans that components it calls start while it's open.
 
-When no traceparent is in scope, `outer-span-context` returns an empty span context.
+When no guest span is open, `current-span-context` returns the `SpanContext` the host opened for the current invocation. This is parsed from a `traceparent` (and optional `tracestate`) entry on the runtime's `PROPAGATION_CONTEXT` task-local, populated by whichever entry point accepted the inbound request. For example, `composable-http-server` writes the traceparent before invoking a component. When no traceparent is in scope either, it returns an empty span context.
 
 ---
 

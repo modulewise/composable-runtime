@@ -11,14 +11,15 @@ struct Component;
 
 impl Guest for Component {
     fn run() -> Result<(), String> {
-        // Get the host's current span context (propagated from incoming request headers).
-        let outer = tracing::outer_span_context();
+        // The current span context. No guest span is open yet, so it's the
+        // host's span (propagated from incoming request headers).
+        let parent = tracing::current_span_context();
 
         // Start a guest span as a child of the host's span.
         let now = wasi::clocks::system_clock::now();
         let span_id = format!("{:016x}", wasi::random::random::get_random_u64());
         let span_context = tracing::SpanContext {
-            trace_id: outer.trace_id.clone(),
+            trace_id: parent.trace_id.clone(),
             span_id,
             trace_flags: tracing::TraceFlags::SAMPLED,
             is_remote: false,
@@ -46,8 +47,8 @@ impl Guest for Component {
                 schema_url: None,
                 attributes: vec![],
             }),
-            trace_id: Some(outer.trace_id.clone()),
-            span_id: Some(outer.span_id.clone()),
+            trace_id: Some(parent.trace_id.clone()),
+            span_id: Some(parent.span_id.clone()),
             trace_flags: None,
         });
 
@@ -55,7 +56,7 @@ impl Guest for Component {
         let end_time = wasi::clocks::system_clock::now();
         tracing::on_end(&tracing::SpanData {
             span_context: span_context.clone(),
-            parent_span_id: outer.span_id.clone(),
+            parent_span_id: parent.span_id.clone(),
             span_kind: tracing::SpanKind::Internal,
             name: "otel-service-example".to_string(),
             start_time: now,
