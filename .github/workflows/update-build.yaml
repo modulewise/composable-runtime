@@ -1,0 +1,108 @@
+# Managed by componentized/build and synced into each repository by `make update-build`. Change it
+# in https://github.com/componentized/build, `make check-build` fails when a copy is changed.
+
+name: Update build
+
+on:
+  schedule:
+    # weekly, Monday morning
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release of componentized/build to update to, e.g. v0.2.0, or a branch, tag, commit or ref, e.g. main. Empty updates to the latest release, unless the build is of a newer commit.
+        required: false
+        type: string
+
+jobs:
+  # opens a pull request updating the build synced from componentized/build to its latest release, like
+  # dependabot. The pull request is left for the repository to merge when it's ready.
+  update:
+    # componentized/build is the source of the build, it has no synced copy to update
+    if: github.repository != 'componentized/build'
+    runs-on: ubuntu-latest
+    # the branch and pull request are created with a token for the custodian GitHub App rather than the
+    # GITHUB_TOKEN, which can't change workflow files and doesn't trigger the CI workflow
+    permissions:
+      contents: read
+    steps:
+      - name: Check custodian app credentials
+        run: |
+          if [ -z "${CLIENT_ID}" ] || [ -z "${PRIVATE_KEY}" ] ; then
+            echo "::error::the CUSTODIAN_CLIENT_ID and CUSTODIAN_PRIVATE_KEY secrets must be available to this repository, the private key of the custodian GitHub App is needed to create a token"
+            exit 1
+          fi
+        env:
+          CLIENT_ID: ${{ secrets.CUSTODIAN_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.CUSTODIAN_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Update build
+        # the script finds the version, the latest release unless the build is of a newer commit, and
+        # records it in build/VERSION, a commit for a branch or ref
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          current=$( cat build/VERSION )
+          build/scripts/update-build.sh "${VERSION}"
+          version=$( cat build/VERSION )
+          echo "current=${current}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          if [ "${version}" = "${current}" ] ; then
+            echo "the build is already componentized/build ${current}"
+          fi
+      - name: Create custodian app token
+        if: steps.release.outputs.version != steps.release.outputs.current
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.CUSTODIAN_CLIENT_ID }}
+          private-key: ${{ secrets.CUSTODIAN_PRIVATE_KEY }}
+          # only this repository, with only the permissions the update needs
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          # the build includes workflow files
+          permission-workflows: write
+          permission-pull-requests: write
+      - name: Open pull request
+        if: steps.release.outputs.version != steps.release.outputs.current
+        # the commit is created with the REST API, as the app's token can't push
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          CURRENT_VERSION: ${{ steps.release.outputs.current }}
+          VERSION: ${{ steps.release.outputs.version }}
+          # a scheduled run has no one to credit as a co-author
+          GITHUB_ACTOR: ${{ github.event_name == 'workflow_dispatch' && github.actor || '' }}
+        run: |
+          api="repos/${GITHUB_REPOSITORY}"
+          branch="update-build/${VERSION}"
+          # a pull request for the release was already opened, maybe closed, it isn't opened again
+          if gh api "${api}/git/ref/heads/${branch}" --silent 2> /dev/null ; then
+            echo "the branch ${branch} already exists"
+            exit 0
+          fi
+
+          base=$( git rev-parse HEAD )
+          git add --all
+          commit=$( build/scripts/create-commit.sh "${base}" "Update build from ${CURRENT_VERSION} to ${VERSION}" )
+          gh api --method POST "${api}/git/refs" -f ref="refs/heads/${branch}" -f sha="${commit}" --silent
+          echo "pushed ${commit} to ${branch}"
+
+          {
+            if [[ "${VERSION}" =~ ^v[0-9] ]] ; then
+              notes="see the [release notes](https://github.com/componentized/build/releases/tag/${VERSION})"
+            else
+              notes="a commit rather than a release, see the [changes](https://github.com/componentized/build/compare/${CURRENT_VERSION}...${VERSION})"
+            fi
+            echo "Updates the build synced from [componentized/build](https://github.com/componentized/build) from ${CURRENT_VERSION} to ${VERSION}, ${notes}."
+            echo
+            echo '```'
+            git diff --cached --stat "${base}"
+            echo '```'
+          } > "${RUNNER_TEMP}/body.md"
+          gh pr create --repo "${GITHUB_REPOSITORY}" --base "${GITHUB_REF_NAME}" --head "${branch}" \
+            --title "Update build to ${VERSION}" --body-file "${RUNNER_TEMP}/body.md"

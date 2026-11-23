@@ -1,0 +1,7 @@
+[namespace_registries]
+wasi = "wasi.dev"
+componentized = "componentized.dev"
+# modulewise.dev does not yet serve /.well-known/wasm-pkg/registry.json, so
+# provide the registry metadata inline. WIT packages are published to
+# ghcr.io/modulewise/wit/<namespace>/<name> (see publish-wit.yml).
+modulewise = { registry = "modulewise.dev", metadata = { preferredProtocol = "oci", oci = { registry = "ghcr.io", namespacePrefix = "modulewise/wit/" } } }

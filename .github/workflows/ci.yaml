@@ -1,0 +1,438 @@
+# Managed by componentized/build and synced into each repository by `make update-build`. Change it
+# in https://github.com/componentized/build, `make check-build` fails when a copy is changed.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+      - "!dependabot/**"
+      - "!update-build/**"
+    tags:
+      - 'v[0-9]+\.[0-9]+\.[0-9]+-?**'
+  pull_request: {}
+
+# read only unless a job asks for more, e.g. publish, the GITHUB_TOKEN is otherwise the repository's
+# default, which may be able to write
+permissions:
+  contents: read
+
+jobs:
+  # the settings of the repository's Makefile the other jobs need, e.g. whether it builds a cli
+  settings:
+    runs-on: ubuntu-latest
+    outputs:
+      cli: ${{ steps.settings.outputs.cli }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check build
+        # the files synced from componentized/build are unchanged, see build/README.md
+        run: build/scripts/check-build.sh
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Read settings
+        id: settings
+        run: echo "cli=$( make -s print-CLI_BIN )" >> "${GITHUB_OUTPUT}"
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Cache tools
+        # the tools installed here, with a read only GITHUB_TOKEN, are restored by the publish job,
+        # which doesn't install them with its token that can write. Saved once the job succeeds.
+        uses: actions/cache@v6
+        with:
+          path: target/tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('build/tools/Cargo.toml', 'tools/Cargo.toml', 'rust-toolchain.toml', 'build/tools.mk') }}
+      - name: Install tools
+        # the versions pinned in build/tools/Cargo.toml and tools/Cargo.toml, on the path for later
+        # steps. Nothing to install when the cache is restored. The token raises cargo binstall's
+        # GitHub API rate limit.
+        run: |
+          make tools
+          make -s tools-path >> "${GITHUB_PATH}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate
+        # the wit dependencies, and anything else the repository generates, see `make generate`
+        run: make generate
+      - name: Check for drift in generated files
+        run: git diff --exit-code .
+      - name: Check crate version matches the interface version
+        # the crates inherit the workspace version, bumped with the interface by
+        # build/scripts/bump-version.sh. A repository without a workspace version has nothing to check.
+        run: |
+          interface_version=$( sed -n "s/^package ${GITHUB_REPOSITORY/\//:}@\(.*\);$/\1/p" wit/worlds.wit )
+          workspace_version=$( sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml )
+          if [ -n "${workspace_version}" ] && [ "${workspace_version}" != "${interface_version}" ] ; then
+            echo "::error::the workspace version ${workspace_version} in Cargo.toml does not match the interface version ${interface_version}, see build/scripts/bump-version.sh"
+            exit 1
+          fi
+      - name: Check crates can be published
+        # the release workflow publishes the crates when a release is published, too late to find a
+        # crate can't be published. A cli is verified against the library being published with it.
+        run: |
+          read -ra crates <<< "$( make -s print-PUBLISH_CRATES )"
+          if [ "${#crates[@]}" -eq 0 ] ; then
+            echo "no crates to publish, see PUBLISH_CRATES"
+            exit 0
+          fi
+          cargo publish --dry-run --locked "${crates[@]/#/--package=}"
+      - name: Build components
+        run: make components
+      - name: Collect components.tar
+        run: tar -cvf ../../components.tar .
+        working-directory: ./target/components
+      - name: Upload components.tar
+        uses: actions/upload-artifact@v7
+        with:
+          name: components.tar
+          path: components.tar
+          retention-days: 7
+      - name: Test
+        run: make test
+      - name: Integration test
+        # the tests that need more than cargo, e.g. a server in a container, see `make test-integration`
+        run: make test-integration
+      - name: Capture WIT
+        working-directory: ./target/components
+        run: |
+          dump_wit() {
+            echo "::group::$(basename "$1") ($(du -h "$1" | awk '{print $1}' ))"
+              wasm-tools component wit "$1"
+            echo "::endgroup::"
+          }
+
+          # print interface.wasm first
+          if [ -f interface.wasm ] ; then
+            dump_wit interface.wasm
+          fi
+          for component in $(find . -name '*.wasm' -not -name '*.debug.wasm' -not -name 'interface.wasm' | sort) ; do
+            dump_wit "${component}"
+          done
+
+  # the cli built from the repository, see CLI_BIN, packaged for each platform as cargo binstall
+  # expects, e.g. constants-aarch64-apple-darwin.tar.gz
+  cli:
+    needs:
+      - settings
+    if: needs.settings.outputs.cli != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-26.04
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-26.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-26
+            target: aarch64-apple-darwin
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    # each runner builds for its own platform, linux builds are static with musl
+    runs-on: ${{ matrix.os }}
+    # bash on windows too, where pwsh is the default, the steps read CLI_BIN from the environment. The
+    # windows packaging steps are pwsh, reading it as `${env:CLI_BIN}`.
+    defaults:
+      run:
+        shell: bash
+    env:
+      CLI_BIN: ${{ needs.settings.outputs.cli }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          target: ${{ matrix.target }}
+      - name: Install musl
+        # the static linux builds compile the C of a crate the cli depends on, e.g. aws-lc-sys of rustls,
+        # with musl-gcc, cc looks for a cross compiler, e.g. x86_64-linux-musl-gcc, the runners have none
+        if: endsWith(matrix.target, '-linux-musl')
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          echo "CC_${TARGET//-/_}=musl-gcc" >> "${GITHUB_ENV}"
+      - name: Build cli
+        run: cargo build --release --locked --bin "${CLI_BIN}" --target ${{ matrix.target }}
+      - name: Package cli
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          tar -czvf "dist/${CLI_BIN}-${{ matrix.target }}.tar.gz" -C target/${{ matrix.target }}/release "${CLI_BIN}" -C "${PWD}" LICENSE NOTICE README.md
+      - name: Package cli
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist
+          Compress-Archive -Path "target/${{ matrix.target }}/release/${env:CLI_BIN}.exe", LICENSE, NOTICE, README.md -DestinationPath "dist/${env:CLI_BIN}-${{ matrix.target }}.zip"
+      # the smoke test runs the cli from the package, as a user would
+      - name: Unpack cli
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p smoke
+          tar -xzvf "dist/${CLI_BIN}-${{ matrix.target }}.tar.gz" -C smoke
+      - name: Unpack cli
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Expand-Archive -Path "dist/${env:CLI_BIN}-${{ matrix.target }}.zip" -DestinationPath smoke
+      - name: Install wasmtime
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+      - name: Smoke test cli
+        # the repository's scripts/smoke-test-cli.sh runs the unpacked cli, given its path and a
+        # directory for its files
+        run: |
+          if [ ! -f scripts/smoke-test-cli.sh ] ; then
+            echo "::warning::no scripts/smoke-test-cli.sh to smoke test ${CLI_BIN}"
+            exit 0
+          fi
+          bash scripts/smoke-test-cli.sh "./smoke/${CLI_BIN}" smoke
+      - name: Upload cli
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # a single check for branch protection to require, rather than each job and matrix entry. It always
+  # runs, a skipped required check counts as passing, and fails when any job it needs did not succeed.
+  # The cli is skipped for a repository without one.
+  ci:
+    if: always()
+    needs:
+      - settings
+      - build
+      - cli
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check jobs succeeded
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+          CLI: ${{ needs.settings.outputs.cli }}
+          CLI_RESULT: ${{ needs.cli.result }}
+        run: |
+          echo "results: ${RESULTS}"
+          if [ -z "${CLI}" ] && [ "${CLI_RESULT}" = "skipped" ] ; then
+            RESULTS=$( jq -c 'map(select(. != "skipped"))' <<< "${RESULTS}" )
+          fi
+          if jq -e 'any(. != "success")' <<< "${RESULTS}" > /dev/null ; then
+            echo "::error::a required job did not succeed"
+            exit 1
+          fi
+
+  publish:
+    # the ci job's result rather than the default success(), which is false when the cli is skipped,
+    # even though the ci job succeeded without it
+    if: ${{ !cancelled() && needs.ci.result == 'success' && github.event_name == 'push' && ( startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' ) }}
+    needs:
+      - settings
+      - ci
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    runs-on: ubuntu-latest
+    env:
+      # the repository variable DRY_RUN=true goes through publishing without publishing anything:
+      # nothing is pushed or signed, and no release is drafted
+      DRY_RUN: ${{ vars.DRY_RUN == 'true' }}
+    outputs:
+      # the version published, and whether anything was, for the directory-scan job
+      version: ${{ steps.version.outputs.VERSION }}
+      published: ${{ steps.publish.outputs.published == 'true' }}
+    steps:
+      - name: Dry run
+        if: env.DRY_RUN == 'true'
+        run: echo "::notice::a dry run, the repository variable DRY_RUN is true, nothing is published"
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Restore tools
+        # installed by the build job, so the tools aren't downloaded, or built, where the GITHUB_TOKEN
+        # can write and OIDC tokens can be requested. The key must match the build job's.
+        uses: actions/cache/restore@v6
+        with:
+          path: target/tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('build/tools/Cargo.toml', 'tools/Cargo.toml', 'rust-toolchain.toml', 'build/tools.mk') }}
+          fail-on-cache-miss: true
+      - name: Add tools to the path
+        # the restored tools, nothing is installed. Publishing only needs the pinned tools, wkg and
+        # cosign, a local tool isn't built here.
+        run: make -s tools-path >> "${GITHUB_PATH}"
+      - name: Download components.tar
+        uses: actions/download-artifact@v8
+        with:
+          name: components.tar
+      - name: Download cli
+        if: needs.settings.outputs.cli != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: cli-*
+          path: dist
+          merge-multiple: true
+      - name: Extract components
+        run: mkdir -p target/components && tar -xvf components.tar -C target/components
+      - name: Get interface version
+        id: interface_version
+        run: echo "VERSION=$( wasm-tools component wit target/components/interface.wasm --json | jq -r "[.packages[] | select(.name | contains(\"${GITHUB_REPOSITORY/\//:}@\"))][0].name" | cut -d'@' -f2 )" >> $GITHUB_OUTPUT
+      - name: Get tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        id: tag_version
+        run: echo "VERSION=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+      - name: Get publish version
+        # the interface version on main, the tag on a tag, without a leading `v`, e.g. 0.1.0 for v0.1.0
+        id: version
+        env:
+          VERSION: ${{ case(github.ref == 'refs/heads/main', steps.interface_version.outputs.VERSION, steps.tag_version.outputs.VERSION) }}
+        run: echo "VERSION=${VERSION#v}" >> $GITHUB_OUTPUT
+      - name: Check tag matches the workspace version
+        # cargo binstall finds the cli archives at the release tagged with the cli crate's version,
+        # and publishing the release publishes the crates to crates.io at that version. A repository
+        # without a workspace version has nothing to check.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          workspace_version=$( sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml )
+          if [ -n "${workspace_version}" ] && [ "v${workspace_version}" != "${{ steps.tag_version.outputs.VERSION }}" ] ; then
+            echo "::error::tag ${{ steps.tag_version.outputs.VERSION }} does not match the workspace version ${workspace_version} in Cargo.toml"
+            exit 1
+          fi
+      - name: Login to GitHub Container Registry
+        if: env.DRY_RUN != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish components to gchr.io
+        # only publish tags and pre-releases from main
+        if: startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && contains(steps.interface_version.outputs.VERSION, '-'))
+        id: publish
+        run: |
+          make publish
+          # nothing may be published, e.g. a repository of tests, see PUBLISH_INTERFACE
+          if [ "${DRY_RUN}" != "true" ] && [ -s "${PUBLISH_LOG}" ] ; then
+            echo "published=true" >> "${GITHUB_OUTPUT}"
+          fi
+        env:
+          PUBLISH_LOG: "${{ runner.temp }}/published.txt"
+          REPOSITORY: "ghcr.io/${{ github.repository }}"
+          VERSION: "${{ steps.version.outputs.VERSION }}"
+      - name: Draft release notes
+        if: startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && contains(steps.interface_version.outputs.VERSION, '-'))
+        # with COMPONENTIZED_DIRECTORY_SCAN=true, each file leads with its id and icon linking to the
+        # page componentized.dev serves its version at once the directory-scan job's scan has indexed
+        # it, the debug build to the page of its version. The directory's id of a package is its repository
+        # path, e.g. ghcr.io/componentized/logging is componentized:logging, the interface, and
+        # ghcr.io/componentized/logging/levels is componentized:logging-levels, a component. The icon
+        # is the directory's for the kind of package, https://componentized.dev/_icons/, in the colors
+        # of GitHub's light or dark theme, neutral where the theme isn't known.
+        env:
+          DIRECTORY: ${{ vars.COMPONENTIZED_DIRECTORY_SCAN == 'true' }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          icons="https://componentized.dev/_icons"
+          published="${RUNNER_TEMP}/published.txt"
+          if [ ! -s "${published}" ] ; then
+            # nothing published, e.g. a repository of tests, see PUBLISH_INTERFACE, or a dry run
+            echo "No components are published with this release." > "${RUNNER_TEMP}/release-notes.md"
+            cat "${RUNNER_TEMP}/release-notes.md"
+            exit 0
+          fi
+          {
+            echo "## Published components"
+            echo
+            if [ "${DIRECTORY}" = "true" ] ; then
+              echo "| Directory | File | Size | Image |"
+              echo "| --- | --- | --: | --- |"
+            else
+              echo "| File | Size | Image |"
+              echo "| --- | --: | --- |"
+            fi
+            while read -r file bytes image ; do
+              size=$( numfmt --to=iec-i --suffix=B --format=%.1f "${bytes}" )
+              row="| \`${file}\` | ${size} | \`${image}\` |"
+              if [ "${DIRECTORY}" = "true" ] ; then
+                # e.g. ghcr.io/componentized/logging/levels:0.3.1@sha256:... -> componentized/logging/levels
+                path="${image#*/}"
+                path="${path%%[:@]*}"
+                namespace="${path%%/*}"
+                name="${path#*/}"
+                name="${name//\//-}"
+                # the directory's kind: the interface is a package, a component composed with wac
+                # is a composition, e.g. levels.debug.wasm from components/levels/levels.wac. A
+                # component's files are named for its directory, found by the build, e.g.
+                # examples/hello/hello.wac for example-hello
+                component="${file%.wasm}"
+                component="${component%.debug}"
+                dir=$( make -s "print-COMPONENT_DIR_${component}" )
+                base="${dir##*/}"
+                if [ "${file}" = "interface.wasm" ] ; then
+                  kind=package
+                elif [ -n "${dir}" ] && { [ -f "${dir}/${base}.wac" ] || [ -f "${dir}/${base}.plug" ] ; } ; then
+                  kind=composition
+                else
+                  kind=component
+                fi
+                id="${namespace}:${name}@${VERSION}"
+                # each icon is 26 by 26, a 16 by 16 icon with a margin for its badges, centered on the
+                # text. GitHub drops the styles that would keep the id on one line, so a word joiner
+                # holds the id to its icon and its hyphens are non-breaking hyphens, the link and its
+                # title have the id as it is. The link has GitHub's color, GitHub drops the styles
+                # that would give it the directory's.
+                picture="<picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"${icons}/dark/${kind}.svg\"><source media=\"(prefers-color-scheme: light)\" srcset=\"${icons}/light/${kind}.svg\"><img src=\"${icons}/neutral/${kind}.svg\" width=\"26\" height=\"26\" align=\"absmiddle\" alt=\"${kind}\"></picture>"
+                label="${id//-/$'\xe2\x80\x91'}"
+                row="| <a href=\"https://componentized.dev/${namespace}/${name}/${VERSION}/\" title=\"${id}\">${picture}"$'\xe2\x81\xa0'"${label}</a> ${row}"
+              fi
+              echo "${row}"
+            done < "${published}"
+          } > "${RUNNER_TEMP}/release-notes.md"
+          cat "${RUNNER_TEMP}/release-notes.md"
+      - name: Pack components.tar with the published SBOMs
+        # each component released with an SBOM, the one it's published with, see PUBLISHED_SBOM_DIR in
+        # build/sbom.mk, in place of the build's, which doesn't name its version or image. A file that
+        # isn't published, e.g. a dep- component, keeps the build's, see build/scripts/pack-components.sh
+        if: startsWith(github.ref, 'refs/tags/') && env.DRY_RUN != 'true'
+        run: build/scripts/pack-components.sh target/components target/sbom/published components.tar
+      - name: Draft GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') && env.DRY_RUN != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          body_path: ${{ runner.temp }}/release-notes.md
+          # the components with their SBOMs, and the cli archives of a repository with a cli
+          files: |
+            components.tar
+            ${{ needs.settings.outputs.cli != '' && 'dist/*' || '' }}
+          fail_on_unmatched_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # asks componentized/directory to scan the components just published. The organization variable
+  # COMPONENTIZED_DIRECTORY_SCAN=true limits it to componentized repositories, a repository outside
+  # it uses the build without the custodian's access to the directory.
+  directory-scan:
+    # !cancelled() rather than the default success(), which is false when the cli is skipped
+    if: ${{ !cancelled() && vars.COMPONENTIZED_DIRECTORY_SCAN == 'true' && needs.publish.result == 'success' && needs.publish.outputs.published == 'true' }}
+    needs: publish
+    # the app token is used, not the GITHUB_TOKEN
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create directory token
+        id: directory-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.CUSTODIAN_CLIENT_ID }}
+          private-key: ${{ secrets.CUSTODIAN_PRIVATE_KEY }}
+          repositories: directory
+          permission-contents: write
+      - name: Request a directory scan
+        env:
+          GH_TOKEN: ${{ steps.directory-token.outputs.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: gh api repos/componentized/directory/dispatches -f event_type=release -f "client_payload[only]=${GITHUB_REPOSITORY}" -f "client_payload[version]=${VERSION}"

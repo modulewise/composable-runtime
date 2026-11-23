@@ -1,0 +1,59 @@
+# Managed by componentized/build and synced into each repository by `make update-build`. Change it
+# in https://github.com/componentized/build, `make check-build` fails when a copy is changed.
+
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  # the crates of a repository that publishes crates, see PUBLISH_CRATES
+  crates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # crates.io trusted publishing exchanges a GitHub OIDC token for a short lived crates.io token
+      id-token: write
+    env:
+      # the repository variable DRY_RUN=true checks the crates with `cargo publish --dry-run` rather
+      # than publishing them
+      DRY_RUN: ${{ vars.DRY_RUN == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Read settings
+        id: settings
+        run: |
+          crates=$( make -s print-PUBLISH_CRATES )
+          [ -z "${crates}" ] && echo "no crates to publish, see PUBLISH_CRATES"
+          echo "crates=${crates}" >> "${GITHUB_OUTPUT}"
+      - name: Check crate version matches the release
+        # the crates inherit the workspace version
+        if: steps.settings.outputs.crates != ''
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          workspace_version=$( sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml )
+          if [ "v${workspace_version}" != "${tag}" ] ; then
+            echo "::error::release ${tag} does not match the workspace version ${workspace_version} in Cargo.toml"
+            exit 1
+          fi
+      - name: Authenticate with crates.io
+        if: steps.settings.outputs.crates != '' && env.DRY_RUN != 'true'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish crates
+        # cargo publishes a library before the cli that depends on it. The crates already published
+        # are skipped and a failure is retried, rerunning the workflow publishes the rest, see
+        # build/scripts/publish-crates.sh
+        if: steps.settings.outputs.crates != ''
+        run: |
+          read -ra crates <<< "${CRATES}"
+          if [ "${DRY_RUN}" = "true" ] ; then
+            echo "::notice::a dry run, the repository variable DRY_RUN is true, the crates are not published"
+          fi
+          build/scripts/publish-crates.sh "${crates[@]}"
+        env:
+          CRATES: ${{ steps.settings.outputs.crates }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

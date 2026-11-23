@@ -8,7 +8,7 @@ wasm-tools component new \
   -o lib/guest.wasm
 
 # opentelemetry depends on js-sys for any wasm32 target other than WASI.
-cargo +nightly build -p otel-to-grpc --target wasm32-wasip3 --release
+cargo build -p otel-to-grpc --target wasm32-wasip3 --release
 cp target/wasm32-wasip3/release/otel_to_grpc.wasm lib/otel-to-grpc.wasm
 
 cargo build -p grpc-to-http --target wasm32-unknown-unknown --release
