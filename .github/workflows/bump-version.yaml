@@ -1,0 +1,171 @@
+# Managed by componentized/build and synced into each repository by `make update-build`. Change it
+# in https://github.com/componentized/build, `make check-build` fails when a copy is changed.
+
+name: Bump version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The new version of the interface package and crates, e.g. 0.1.0 or 0.2.0-dev
+        required: true
+        type: string
+        # the repository's own version, carried forward by build/scripts/update-build.sh, and ignored
+        # by build/scripts/check-build.sh
+        default: "0.1.6" # the current version, kept current by build/scripts/bump-version.sh
+
+jobs:
+  # bumps the version with read only access, the changes are handed to the push job as a patch so
+  # the third party actions used to build never run with write access
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      current: ${{ steps.version.outputs.current }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check version
+        id: version
+        # a semver version without a leading `v`, the tag adds it. Build metadata is used to tag the
+        # debug builds of components, e.g. 0.1.0+debug, and isn't allowed in the version itself.
+        run: |
+          # the checkout is before the bump, the wit package's version is the current version
+          current=$( sed -n "s/^package ${GITHUB_REPOSITORY/\//:}@\(.*\);$/\1/p" wit/worlds.wit )
+          identifier='(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)'
+          semver="^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-${identifier}(\.${identifier})*)?$"
+          if ! [[ "${VERSION}" =~ ${semver} ]] ; then
+            echo "::error::the version '${VERSION}' is not a valid semver version, e.g. 0.1.0 or 0.2.0-dev"
+            exit 1
+          fi
+          if [[ "${VERSION}" == *+* ]] ; then
+            echo "::error::the version '${VERSION}' must not contain build metadata"
+            exit 1
+          fi
+          echo "bumping ${current} to ${VERSION}"
+          echo "current=${current}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+        env:
+          VERSION: ${{ inputs.version }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Install tools
+        run: |
+          make tools
+          make -s tools-path >> "${GITHUB_PATH}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Bump version
+        # also fetches the wit dependencies for the new version, and builds and tests the components
+        run: build/scripts/bump-version.sh "${VERSION}"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+      - name: Collect changes
+        run: |
+          git add --all
+          git diff --cached --binary > bump-version.patch
+      - name: Upload changes
+        uses: actions/upload-artifact@v7
+        with:
+          name: bump-version.patch
+          path: bump-version.patch
+          if-no-files-found: error
+          retention-days: 1
+
+  # pushes the bump to the branch the workflow was run on, using only first party actions and the gh
+  # cli
+  push:
+    needs:
+      - bump
+    # the bump is a new commit on the branch, a tag can't be moved forward
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    # the commit is pushed with a token for the custodian GitHub App rather than the GITHUB_TOKEN,
+    # which can't change workflow files and doesn't trigger the CI workflow. The app must be allowed
+    # to bypass the branch's ruleset, the commit is pushed without the status checks it requires,
+    # the bump job built and tested the changes instead.
+    permissions:
+      contents: read
+    env:
+      CURRENT_VERSION: ${{ needs.bump.outputs.current }}
+      VERSION: ${{ needs.bump.outputs.version }}
+    steps:
+      - name: Check custodian app credentials
+        run: |
+          if [ -z "${CLIENT_ID}" ] || [ -z "${PRIVATE_KEY}" ] ; then
+            echo "::error::the CUSTODIAN_CLIENT_ID and CUSTODIAN_PRIVATE_KEY secrets must be available to this repository, the private key of the custodian GitHub App is needed to create a token"
+            exit 1
+          fi
+        env:
+          CLIENT_ID: ${{ secrets.CUSTODIAN_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.CUSTODIAN_PRIVATE_KEY }}
+      - name: Create custodian app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.CUSTODIAN_CLIENT_ID }}
+          private-key: ${{ secrets.CUSTODIAN_PRIVATE_KEY }}
+          # only this repository, with only the permissions the bump needs
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          # the bump may change a workflow file, e.g. a reference to the package
+          permission-workflows: write
+          # a release runs this workflow again, to bump to the next dev version
+          permission-actions: write
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download changes
+        uses: actions/download-artifact@v8
+        with:
+          name: bump-version.patch
+          path: ${{ runner.temp }}
+      - name: Commit changes
+        # the commit is created with the REST API, as the app's token can't push
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          api="repos/${GITHUB_REPOSITORY}"
+          base=$( git rev-parse HEAD )
+          git apply --index "${RUNNER_TEMP}/bump-version.patch"
+          commit=$( build/scripts/create-commit.sh "${base}" "Bump version from ${CURRENT_VERSION} to ${VERSION}" )
+
+          # a release, rather than a pre-release, is tagged, e.g. v0.1.0. Tags are immutable, check the
+          # tag is free before pushing the branch, so a release isn't left without its tag
+          tag=""
+          if [[ "${VERSION}" != *-* ]] ; then
+            tag="v${VERSION}"
+            if gh api "${api}/git/ref/tags/${tag}" --silent 2> /dev/null ; then
+              echo "::error::the tag ${tag} already exists"
+              exit 1
+            fi
+          fi
+
+          # fast forwards the branch to the commit, failing rather than losing commits pushed to the
+          # branch since the workflow started
+          if ! gh api --method PATCH "${api}/git/refs/heads/${GITHUB_REF_NAME}" -f sha="${commit}" -F force=false --silent ; then
+            echo "::error::failed to push ${commit} to ${GITHUB_REF_NAME}, either the branch moved since ${base} and the workflow should be run again, or the custodian app is not allowed to bypass the branch's ruleset"
+            exit 1
+          fi
+          echo "pushed ${commit} to ${GITHUB_REF_NAME}"
+
+          # a lightweight tag, pushed with the app's token so the CI workflow runs for it and drafts
+          # the release
+          if [ -n "${tag}" ] ; then
+            gh api --method POST "${api}/git/refs" -f ref="refs/tags/${tag}" -f sha="${commit}" --silent
+            echo "tagged ${commit} as ${tag}"
+          fi
+      - name: Bump to the next dev version
+        # after a release, the branch moves on to a pre-release of the next patch version, e.g. 0.3.0
+        # is followed by 0.3.1-dev. Run with the app's token, the GITHUB_TOKEN can't start workflows.
+        if: ${{ !contains(needs.bump.outputs.version, '-') }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          IFS=. read -r major minor patch <<< "${VERSION}"
+          next="${major}.${minor}.$(( patch + 1 ))-dev"
+          gh workflow run bump-version.yaml --repo "${GITHUB_REPOSITORY}" --ref "${GITHUB_REF_NAME}" -f version="${next}"
+          echo "started the ${GITHUB_WORKFLOW} workflow for ${next} on ${GITHUB_REF_NAME}"

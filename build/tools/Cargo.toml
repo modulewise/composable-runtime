@@ -1,0 +1,55 @@
+# Managed by componentized/build and synced into each repository by `make update-build`. Change it
+# in https://github.com/componentized/build, `make check-build` fails when a copy is changed.
+
+# The versions of the cli tools the build provides, installed by `make tools` with cargo binstall.
+#
+# This package is never built, it lists the tools as dependencies so dependabot bumps them in
+# componentized/build. Each tool is pinned to an exact version with `=`, the Makefile installs that
+# version. A repository overrides a tool in its own tools/Cargo.toml, with a newer version, or builds
+# it from its workspace with LOCAL_TOOLS, and adds the tools only it uses there, see build/tools.mk.
+[package]
+name = "build-tools"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "lib.rs"
+
+# the binaries each tool installs, the Makefile runs each by path from a variable named after it,
+# e.g. `$(WASM_TOOLS)` for `wasm-tools`
+[package.metadata.bins]
+cargo-binstall = ["cargo-binstall"]
+cargo-cyclonedx = ["cargo-cyclonedx"]
+componentized-build-cli = ["componentized-build"]
+componentized-constants-cli = ["constants"]
+componentized-static-config-cli = ["static-config"]
+wac-cli = ["wac"]
+wasm-opt = ["wasm-opt"]
+wasm-tools = ["wasm-tools"]
+wkg = ["wkg"]
+
+# the arguments of the binaries that print their shell completions, the shell's name is appended,
+# e.g. `wasm-tools completion bash`, registered by build/scripts/completions.sh. A binary installed
+# other than with cargo is listed too, e.g. cosign, see build/tools.mk. A repository adds its own
+# in its tools/Cargo.toml, or overrides one with `[]`, e.g. for a tool it builds without them.
+[package.metadata.completions]
+cargo-binstall = ["--completions"]
+componentized-build = ["completions"]
+cosign = ["completion"]
+wasm-tools = ["completion"]
+
+[dependencies]
+cargo-binstall = "=1.27.0"
+cargo-cyclonedx = "=0.5.10"
+componentized-build-cli = "=0.1.6"
+componentized-constants-cli = "=0.2.0"
+componentized-static-config-cli = "=0.3.0"
+wac-cli = "=0.12.0"
+wasm-opt = "=0.116.1"
+wasm-tools = "=1.263.0"
+wkg = "=0.16.2"
+
+# not a member of the repository's workspace
+[workspace]

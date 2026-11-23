@@ -1,0 +1,46 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/rust
+{
+    "name": "modulewise-composable-runtime",
+    "image": "mcr.microsoft.com/devcontainers/rust",
+    "runArgs": [
+        "--name=modulewise-composable-runtime"
+    ],
+    // Use 'mounts' to make the cargo cache persistent in a Docker Volume.
+    "mounts": [
+        {
+            "source": "devcontainer-cargo-cache",
+            "target": "/usr/local/cargo",
+            "type": "volume"
+        },
+        {
+            "source": "devcontainer-rustup-cache",
+            "target": "/usr/local/rustup",
+            "type": "volume"
+        }
+    ],
+    // Features to add to the dev container. More info: https://containers.dev/features.
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {},
+        "ghcr.io/devcontainers/features/docker-in-docker:4": {
+            "moby": false
+        },
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
+    // Use 'postCreateCommand' to run commands after the container is created.
+    "postCreateCommand": "./.devcontainer/init.sh",
+    // Configure tool-specific properties.
+    "customizations": {
+        // Configure properties specific to VS Code.
+        "vscode": {
+            // Set *default* container specific settings.json values on container create.
+            "settings": {
+                "dev.containers.githubCLILoginWithToken": true
+            },
+            "extensions": [
+                "bytecodealliance.wit-idl",
+                "tamasfe.even-better-toml"
+            ]
+        }
+    }
+}

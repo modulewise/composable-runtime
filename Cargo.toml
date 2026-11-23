@@ -12,6 +12,7 @@ keywords = ["wasm"]
 [workspace]
 members = [
     ".",
+    "components/function-factory",
     "crates/function-adapter",
     "crates/function-invoker",
     "crates/http-server",
@@ -39,7 +40,13 @@ opentelemetry_sdk = "0.33"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 wasm-encoder = "0.263"
@@ -47,6 +54,7 @@ wasmparser = "0.263"
 wasmtime = { version = "50", features = ["component-model-async"] }
 wat = "1.263"
 wit-parser = "0.263"
+wit-bindgen = "0.63"
 
 [dependencies]
 anyhow.workspace = true
@@ -61,7 +69,9 @@ http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 oci-client = "0.17"
 petgraph = "0.8"
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+rustls = { version = "0.23", default-features = false, features = [
+    "aws_lc_rs",
+] }
 rustyline = "19"
 serde.workspace = true
 serde_json.workspace = true
