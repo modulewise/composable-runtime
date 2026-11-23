@@ -32,7 +32,7 @@ http-body = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server-graceful", "tokio"] }
-jsonschema = { version = "0.60", default-features = false }
+jsonschema = { version = "0.63", default-features = false }
 opentelemetry = "0.33"
 opentelemetry-otlp = { version = "0.33", default-features = false }
 opentelemetry_sdk = "0.33"
@@ -44,7 +44,7 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 wasm-encoder = "0.263"
 wasmparser = "0.263"
-wasmtime = { version = "50", features = ["component-model-async"] }
+wasmtime = { version = "51", features = ["component-model-async"] }
 wat = "1.263"
 wit-parser = "0.263"
 
@@ -77,9 +77,9 @@ wac-graph = "0.12"
 wac-types = "0.12"
 wasm-pkg-client = "0.16"
 wasmtime = { workspace = true }
-wasmtime-wasi = { version = "50", features = ["p3"] }
-wasmtime-wasi-http = { version = "50", features = ["p3"] }
-wasmtime-wasi-io = "50"
+wasmtime-wasi = { version = "51", features = ["p3"] }
+wasmtime-wasi-http = { version = "51", features = ["p3"] }
+wasmtime-wasi-io = "51"
 wit-component = "0.263"
 wit-parser.workspace = true
 
